@@ -24,13 +24,14 @@ RUN python3 -m pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --
 WORKDIR /home/appuser/
 RUN git clone https://github.com/IDEA-Research/Grounded-Segment-Anything.git
 WORKDIR /home/appuser/Grounded-Segment-Anything
-RUN python3 -m pip install --no-cache-dir -e segment_anything
+RUN git clone https://github.com/mit-han-lab/efficientvit.git
+RUN python3 -m pip install segment-anything
 
 RUN python3 -m pip install --no-cache-dir wheel
 RUN python3 -m pip install --no-cache-dir --no-build-isolation -e GroundingDINO
 RUN python3 -m pip install git+https://github.com/xinyu1205/recognize-anything.git
 
-RUN wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
+RUN wget https://huggingface.co/han-cai/efficientvit-sam/resolve/main/l0.pt
 RUN wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth
 RUN wget https://huggingface.co/spaces/xinyu1205/Tag2Text/resolve/main/ram_swin_large_14m.pth
 RUN wget https://huggingface.co/spaces/xinyu1205/Tag2Text/resolve/main/tag2text_swin_14m.pth
