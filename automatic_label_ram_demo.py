@@ -1,3 +1,6 @@
+import sys
+sys.path.append("./efficientvit")
+sys.path.append("./segment_anything")
 import argparse
 import os
 
@@ -14,12 +17,12 @@ from GroundingDINO.groundingdino.models import build_model
 from GroundingDINO.groundingdino.util.slconfig import SLConfig
 from GroundingDINO.groundingdino.util.utils import clean_state_dict, get_phrases_from_posmap
 
-# segment anything
-from segment_anything import (
-    build_sam,
-    build_sam_hq,
-    SamPredictor
-) 
+
+from segment_anything.utils.transforms import ResizeLongestSide
+# New efficientsam
+from efficientvit.sam_model_zoo import create_sam_model
+from efficientvit.models.efficientvit.sam import EfficientViTSamPredictor
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -46,7 +49,6 @@ def load_image(image_path):
     )
     image, _ = transform(image_pil, None)  # 3, h, w
     return image_pil, image
-
 
 def check_tags_chinese(tags_chinese, pred_phrases, max_tokens=100, model="gpt-3.5-turbo"):
     object_list = [obj.split('(')[0] for obj in pred_phrases]
@@ -181,12 +183,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sam_checkpoint", type=str, required=True, help="path to checkpoint file"
     )
-    parser.add_argument(
-        "--sam_hq_checkpoint", type=str, default=None, help="path to sam-hq checkpoint file"
-    )
-    parser.add_argument(
-        "--use_sam_hq", action="store_true", help="using sam-hq for prediction"
-    )
     parser.add_argument("--input_image", type=str, required=True, help="path to image file")
     parser.add_argument("--split", default=",", type=str, help="split for text prompt")
     parser.add_argument("--openai_key", type=str, help="key for chatgpt")
@@ -207,8 +203,6 @@ if __name__ == "__main__":
     ram_checkpoint = args.ram_checkpoint  # change the path of the model
     grounded_checkpoint = args.grounded_checkpoint  # change the path of the model
     sam_checkpoint = args.sam_checkpoint
-    sam_hq_checkpoint = args.sam_hq_checkpoint
-    use_sam_hq = args.use_sam_hq
     image_path = args.input_image
     split = args.split
     openai_key = args.openai_key
@@ -263,7 +257,6 @@ if __name__ == "__main__":
     tags_chinese=res[1].replace(' |', ',')
 
     print("Image Tags: ", res[0])
-    print("图像标签: ", res[1])
 
     # run grounding dino model
     boxes_filt, scores, pred_phrases = get_grounding_output(
@@ -271,14 +264,14 @@ if __name__ == "__main__":
     )
 
     # initialize SAM
-    if use_sam_hq:
-        print("Initialize SAM-HQ Predictor")
-        predictor = SamPredictor(build_sam_hq(checkpoint=sam_hq_checkpoint).to(device))
-    else:
-        predictor = SamPredictor(build_sam(checkpoint=sam_checkpoint).to(device))
+    efficientvit_sam = create_sam_model(
+      name="l0", weight_url="/home/ubuntu/VQASynth/l0.pt",
+    )
+    efficientvit_sam = efficientvit_sam.cuda().eval()
+    efficientvit_sam_predictor = EfficientViTSamPredictor(efficientvit_sam)
     image = cv2.imread(image_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    predictor.set_image(image)
+    efficientvit_sam_predictor.set_image(image)
 
     size = image_pil.size
     H, W = size[1], size[0]
@@ -297,15 +290,17 @@ if __name__ == "__main__":
     tags_chinese = check_tags_chinese(tags_chinese, pred_phrases)
     print(f"Revise tags_chinese with number: {tags_chinese}")
 
-    transformed_boxes = predictor.transform.apply_boxes_torch(boxes_filt, image.shape[:2]).to(device)
+    target_length = 1024
+    resizer = ResizeLongestSide(target_length)
+    transformed_boxes = resizer.apply_boxes_torch(boxes_filt, image.shape[:2]).to(device)
 
-    masks, _, _ = predictor.predict_torch(
+    masks, _, _ = efficientvit_sam_predictor.predict_torch(
         point_coords = None,
         point_labels = None,
         boxes = transformed_boxes.to(device),
         multimask_output = False,
     )
-    
+
     # draw output image
     plt.figure(figsize=(10, 10))
     plt.imshow(image)
