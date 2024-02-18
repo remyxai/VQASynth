@@ -11,6 +11,10 @@ import torchvision
 from PIL import Image
 import litellm
 
+# llava 1.6
+from llama_cpp import Llama
+from llama_cpp.llama_chat_format import Llava15ChatHandler
+
 # Grounding DINO
 import GroundingDINO.groundingdino.datasets.transforms as T
 from GroundingDINO.groundingdino.models import build_model
@@ -35,6 +39,12 @@ import torchvision.transforms as TS
 # ChatGPT or nltk is required when using tags_chineses
 # import openai
 # import nltk
+import base64
+
+def image_to_base64_data_uri(file_path):
+    with open(file_path, "rb") as img_file:
+        base64_data = base64.b64encode(img_file.read()).decode('utf-8')
+        return f"data:image/png;base64,{base64_data}"
 
 def load_image(image_path):
     # load image
@@ -212,6 +222,7 @@ if __name__ == "__main__":
     text_threshold = args.text_threshold
     iou_threshold = args.iou_threshold
     device = args.device
+
     
     # ChatGPT or nltk is required when using tags_chineses
     # openai.api_key = openai_key
@@ -237,26 +248,44 @@ if __name__ == "__main__":
                 ])
     
     # load model
-    ram_model = ram(pretrained=ram_checkpoint,
-                                        image_size=384,
-                                        vit='swin_l')
+    #ram_model = ram(pretrained=ram_checkpoint,
+    #                                    image_size=384,
+    #                                    vit='swin_l')
     # threshold for tagging
     # we reduce the threshold to obtain more tags
-    ram_model.eval()
+    #ram_model.eval()
 
-    ram_model = ram_model.to(device)
-    raw_image = image_pil.resize(
-                    (384, 384))
-    raw_image  = transform(raw_image).unsqueeze(0).to(device)
+    #ram_model = ram_model.to(device)
+    #raw_image = image_pil.resize(
+    #                (384, 384))
+    #raw_image  = transform(raw_image).unsqueeze(0).to(device)
 
-    res = inference_ram(raw_image , ram_model)
+    #res = inference_ram(raw_image , ram_model)
+    #print(res)
+    data_uri = image_to_base64_data_uri(image_path)
+
+    chat_handler = Llava15ChatHandler(clip_model_path="/home/ubuntu/llava-v1.6-mistral-7b/mmproj-model-f16.gguf", verbose=True)
+    llm = Llama(model_path="/home/ubuntu/llava-v1.6-mistral-7b/llava-v1.6-mistral-7b.Q3_K_M.gguf",chat_handler=chat_handler,n_ctx=2048,logits_all=True, n_gpu_layers=-1)
+    res = llm.create_chat_completion(
+         messages = [
+             {"role": "system", "content": "You are an assistant who perfectly describes images."},
+             {
+                 "role": "user",
+                 "content": [
+                     {"type": "image_url", "image_url": {"url": data_uri}},
+                     {"type" : "text", "text": "Examine the provided image carefully and describe each prominent object or person with one succinct sentence, focusing on key visual details such as colors, clothing, posture for people, and material, size, or arrangement for objects."}
+                 ]
+             }
+         ]
+    )
+    tags = res["choices"][0]["message"]["content"].replace(",", "").strip()
 
     # Currently ", " is better for detecting single tags
     # while ". " is a little worse in some case
-    tags=res[0].replace(' |', ',')
-    tags_chinese=res[1].replace(' |', ',')
+    #tags=res[0].replace(' |', ',')
+    tags = tags.replace(".", ",")
 
-    print("Image Tags: ", res[0])
+    print("Image Tags: ", tags)
 
     # run grounding dino model
     boxes_filt, scores, pred_phrases = get_grounding_output(
@@ -287,8 +316,6 @@ if __name__ == "__main__":
     boxes_filt = boxes_filt[nms_idx]
     pred_phrases = [pred_phrases[idx] for idx in nms_idx]
     print(f"After NMS: {boxes_filt.shape[0]} boxes")
-    tags_chinese = check_tags_chinese(tags_chinese, pred_phrases)
-    print(f"Revise tags_chinese with number: {tags_chinese}")
 
     target_length = 1024
     resizer = ResizeLongestSide(target_length)
@@ -316,4 +343,4 @@ if __name__ == "__main__":
         bbox_inches="tight", dpi=300, pad_inches=0.0
     )
 
-    save_mask_data(output_dir, tags_chinese, masks, boxes_filt, pred_phrases)
+    save_mask_data(output_dir, tags, masks, boxes_filt, pred_phrases)
