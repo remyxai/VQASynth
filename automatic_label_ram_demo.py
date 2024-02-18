@@ -1,3 +1,4 @@
+import gc
 import sys
 sys.path.append("./efficientvit")
 sys.path.append("./segment_anything")
@@ -45,6 +46,40 @@ def image_to_base64_data_uri(file_path):
     with open(file_path, "rb") as img_file:
         base64_data = base64.b64encode(img_file.read()).decode('utf-8')
         return f"data:image/png;base64,{base64_data}"
+
+def extract_descriptions_from_incomplete_json(json_like_str):
+    """
+    This function attempts to repair a JSON-like string that may have incomplete or improperly formatted sections,
+    then it parses the string into a JSON object and extracts a list of descriptions.
+    
+    Args:
+    json_like_str (str): A JSON-like string that may be improperly formatted.
+    
+    Returns:
+    list: A list of description strings extracted from the JSON object.
+    """
+    # Find the last occurrence of ',"object' which indicates the start of an incomplete object entry
+    last_object_idx = json_like_str.rfind(',"object')
+    
+    # If found, slice the string up to that point and close the JSON object
+    if last_object_idx != -1:
+        json_str = json_like_str[:last_object_idx] + '}'
+    else:
+        # If there's no incomplete object entry, ensure the string is a valid JSON object
+        json_str = json_like_str.strip()
+        if not json_str.endswith('}'):
+            json_str += '}'
+    
+    try:
+        # Parse the corrected string into a JSON object
+        json_obj = json.loads(json_str)
+        
+        # Extract descriptions from the JSON object
+        descriptions = [details['description'].replace(".","") for key, details in json_obj.items() if 'description' in details]
+        
+        return descriptions
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Error parsing JSON: {e}")
 
 def load_image(image_path):
     # load image
@@ -248,24 +283,10 @@ if __name__ == "__main__":
                 ])
     
     # load model
-    #ram_model = ram(pretrained=ram_checkpoint,
-    #                                    image_size=384,
-    #                                    vit='swin_l')
-    # threshold for tagging
-    # we reduce the threshold to obtain more tags
-    #ram_model.eval()
-
-    #ram_model = ram_model.to(device)
-    #raw_image = image_pil.resize(
-    #                (384, 384))
-    #raw_image  = transform(raw_image).unsqueeze(0).to(device)
-
-    #res = inference_ram(raw_image , ram_model)
-    #print(res)
     data_uri = image_to_base64_data_uri(image_path)
 
-    chat_handler = Llava15ChatHandler(clip_model_path="/home/ubuntu/llava-v1.6-mistral-7b/mmproj-model-f16.gguf", verbose=True)
-    llm = Llama(model_path="/home/ubuntu/llava-v1.6-mistral-7b/llava-v1.6-mistral-7b.Q3_K_M.gguf",chat_handler=chat_handler,n_ctx=2048,logits_all=True, n_gpu_layers=-1)
+    chat_handler = Llava15ChatHandler(clip_model_path="/home/ubuntu/llava-v1.6-34B-gguf/mmproj-model-f16.gguf", verbose=True)
+    llm = Llama(model_path="/home/ubuntu/llava-v1.6-34B-gguf/llava-v1.6-34b.Q4_K_M.gguf",chat_handler=chat_handler,n_ctx=2048,logits_all=True, n_gpu_layers=-1)
     res = llm.create_chat_completion(
          messages = [
              {"role": "system", "content": "You are an assistant who perfectly describes images."},
@@ -273,19 +294,22 @@ if __name__ == "__main__":
                  "role": "user",
                  "content": [
                      {"type": "image_url", "image_url": {"url": data_uri}},
-                     {"type" : "text", "text": "Examine the provided image carefully and describe each prominent object or person with one succinct sentence, focusing on key visual details such as colors, clothing, posture for people, and material, size, or arrangement for objects."}
-                 ]
+                     {"type" : "text", "text": 'Create a JSON representation where each entry consists of a key "object" with a numerical suffix starting from 1, and a corresponding "description" key with a value that is a concise, up to six-word sentence describing each main, distinct object or person in the image. Each pair should uniquely describe one element without repeating keys. An example: {"object1": { "description": "Man in red hat walking." },"object2": { "description": "Wooden pallet with boxes." },"object3": { "description": "Cardboard boxes stacked." },"object4": { "description": "Man in green vest standing." }}'}
+                ]
              }
          ]
     )
-    tags = res["choices"][0]["message"]["content"].replace(",", "").strip()
 
-    # Currently ", " is better for detecting single tags
-    # while ". " is a little worse in some case
-    #tags=res[0].replace(' |', ',')
-    tags = tags.replace(".", ",")
+    res_cleaned = list(set(extract_descriptions_from_incomplete_json(res["choices"][0]["message"]["content"])))
+    tags = ",".join(res_cleaned)
+
 
     print("Image Tags: ", tags)
+    del chat_handler
+    del llm
+    gc.collect()
+    torch.cuda.empty_cache()
+
 
     # run grounding dino model
     boxes_filt, scores, pred_phrases = get_grounding_output(

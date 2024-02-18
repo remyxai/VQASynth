@@ -24,13 +24,15 @@ RUN python3 -m pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --
 WORKDIR /home/appuser/
 RUN git clone https://github.com/IDEA-Research/Grounded-Segment-Anything.git
 WORKDIR /home/appuser/Grounded-Segment-Anything
-RUN git clone https://github.com/mit-han-lab/efficientvit.git
+RUN git clone https://github.com/mit-han-lab/efficientvit.git && cd efficientvit && pip install -e .
 RUN python3 -m pip install segment-anything
 
 # Llava v1.6
 RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir
-RUN wget https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf
-RUN wget https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q3_K_M.gguf
+#RUN wget https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf
+#RUN wget https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q3_K_M.gguf
+#RUN wget https://huggingface.co/cjpais/llava-v1.6-34B-gguf/resolve/main/mmproj-model-f16.gguf
+#RUN wget https://huggingface.co/cjpais/llava-v1.6-34B-gguf/resolve/main/llava-v1.6-34b.Q4_K_M.gguf
 
 RUN python3 -m pip install --no-cache-dir wheel
 RUN python3 -m pip install --no-cache-dir --no-build-isolation -e GroundingDINO
