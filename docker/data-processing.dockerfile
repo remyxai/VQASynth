@@ -27,6 +27,11 @@ WORKDIR /home/appuser/Grounded-Segment-Anything
 RUN git clone https://github.com/mit-han-lab/efficientvit.git
 RUN python3 -m pip install segment-anything
 
+# Llava v1.6
+RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir
+RUN wget https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf
+RUN wget https://huggingface.co/cjpais/llava-1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q3_K_M.gguf
+
 RUN python3 -m pip install --no-cache-dir wheel
 RUN python3 -m pip install --no-cache-dir --no-build-isolation -e GroundingDINO
 RUN python3 -m pip install git+https://github.com/xinyu1205/recognize-anything.git
