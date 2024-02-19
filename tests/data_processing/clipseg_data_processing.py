@@ -23,6 +23,7 @@ from zoedepth.utils.config import get_config
 from segment_anything.utils.transforms import ResizeLongestSide
 from efficientvit.sam_model_zoo import create_sam_model
 from efficientvit.models.efficientvit.sam import EfficientViTSamPredictor
+from transformers import SamModel, SamProcessor
 
 # llava v1.6
 from llama_cpp import Llama
@@ -316,7 +317,6 @@ if __name__ == "__main__":
     for idx in range(preds.shape[0]):
         sampled_points.append(sample_points_from_heatmap(preds[idx][0], original_size, num_points=10))
 
-    from transformers import SamModel, SamProcessor
 
     sam_model = SamModel.from_pretrained("facebook/sam-vit-huge").to("cuda" if torch.cuda.is_available() else "cpu")
     sam_processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
