@@ -1,6 +1,6 @@
 # VQASynth
 
-*:construction: This repository is currently under construction and is a work in progress.*
+*:construction: This repository is currently under construction.
 
 VQASynth is a library designed to synthesize datasets for training multimodal models. It includes example pipelines for constructing VQA datasets and training code for popular multimodal models.
 
