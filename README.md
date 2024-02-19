@@ -33,18 +33,6 @@ docker run --gpus all -v /path/to/output/:/path/to/output vqasynth:dino-dataproc
 
 The scripts will return assets like 3D point clouds, segmented images, labels, and prompt examples.
 
-## Contributing
-
-We welcome contributions of all kinds. If you're interested in helping with VQASynth, please read our CONTRIBUTING file for more information on how to get started.
-
-## License
-
-This project is licensed under the apache license, version 2.0 - see the LICENSE file for details.
-
-## Contact
-
-For questions, suggestions, or contributions, please contact us at contact@remyx.ai or open an issue.
-
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
 ```
