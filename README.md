@@ -35,7 +35,7 @@ The scripts will return assets like 3D point clouds, segmented images, labels, a
 
 ## Contributing
 
-We welcome contributions of all kinds. If you're interested in helping with VGASynth, please read our CONTRIBUTING file for more information on how to get started.
+We welcome contributions of all kinds. If you're interested in helping with VQASynth, please read our CONTRIBUTING file for more information on how to get started.
 
 ## License
 
