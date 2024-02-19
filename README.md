@@ -2,7 +2,7 @@
 
 *:construction: This repository is currently under construction.*
 
-Use VQASynth pipelines to synthesize VQA datasets for boosting multimodal reasoning.
+Use this framework to synthesize VQA datasets for boosting multimodal reasoning.
 
 ## Getting Started
 
