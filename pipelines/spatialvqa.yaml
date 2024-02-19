@@ -1,0 +1,39 @@
+version: '3.8'
+services:
+  depth_estimation:
+    build:
+      context: ./depth_estimation
+    volumes:
+      - ./data:/app/data
+
+  point_cloud:
+    build:
+      context: ./point_cloud
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - depth_estimation
+
+  llama_captions:
+    build:
+      context: ./llama_captions
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - depth_estimation
+
+  clipseg:
+    build:
+      context: ./clipseg
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - llama_captions
+
+  point_cloud_segmentation:
+    build:
+      context: ./point_cloud_segmentation
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - clipseg
