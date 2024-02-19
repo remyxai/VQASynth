@@ -2,7 +2,7 @@
 
 *:construction: This repository is currently under construction.*
 
-VQASynth is a framework for applying image processing pipelines to synthesize VQA datasets and for popular multimodal models.
+Use VQASynth pipelines to synthesize VQA datasets for boosting multimodal reasoning.
 
 ## Getting Started
 
@@ -14,9 +14,9 @@ Before running the demo scripts, ensure you have the following installed:
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
 ## Usage
-This repository compares two image annotation pipelines using LLaVA for object captioning and SAM for segmentation. 
-The first uses CLIPSeg for region proposal, while the second uses GroundingDINO. 
-Inspired by SpatialVLM, each uses ZoeDepth to adapt Vision Langauge Models for spatial reasoning.
+Inspired by SpatialVLM, this repo uses ZoeDepth to adapt Vision Langauge Models for spatial reasoning.
+The demos feature pipelines using LLaVA for object captioning and SAM for segmentation. 
+One uses CLIPSeg for region proposal, while the other uses GroundingDINO. 
 
 
 CLIPSeg-based SpatialVLM data processing (recommended):
