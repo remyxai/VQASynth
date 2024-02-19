@@ -1,16 +1,19 @@
 import os
 import cv2
+import gc
 import sys
 import math
 import torch
-import pypotree
+import json
 import base64
+import argparse
 import numpy as np
 import open3d as o3d
 
 import matplotlib
 import matplotlib.cm
 from matplotlib import pyplot as plt
+from PIL import Image
 
 sys.path.append("./ZoeDepth")
 sys.path.append("./efficientvit")
@@ -33,14 +36,6 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 conf = get_config("zoedepth", "infer")
 depth_model = build_model(conf)
 
-intrinsic_parameters = {
-    'width': width,
-    'height': height,
-    'fx': 1.5 * width,
-    'fy': 1.5 * width,
-    'cx': width / 2,
-    'cy': height / 2,
-}
 
 def depth(img):
     depth = depth_model.infer_pil(img)
@@ -259,13 +254,27 @@ if __name__ == "__main__":
     image_path = args.input_image
 
     # Step 1: Depth estimation
-    original_img = Image.open(image_path)
-    depth_img = depth(original_img)
-    pcd = create_point_cloud_from_rgbd(rgb_path, depth_path, intrinsic_parameters)
+    print("Depth estimation")
+    original_image = Image.open(image_path)
+    depth_image = depth(original_image)
+    width, height = original_image.size
+    intrinsic_parameters = {
+        'width': width,
+        'height': height,
+        'fx': 1.5 * width,
+        'fy': 1.5 * width,
+        'cx': width / 2,
+        'cy': height / 2,
+    }
+    depth_path = "tmp_depth_out.png"
+    depth_image.save(depth_path)
+
+    pcd = create_point_cloud_from_rgbd(image_path, depth_path, intrinsic_parameters)
     pcd_canonicalized, canonicalized, transformation = canonicalize_point_cloud(pcd)
     cloud = np.asarray(pcd_canonicalized.points)
 
     # Step 2: Llava Captions
+    print("llava captions")
     data_uri = image_to_base64_data_uri(image_path)
 
     chat_handler = Llava15ChatHandler(clip_model_path="mmproj-model-f16.gguf", verbose=True)
@@ -291,6 +300,7 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
 
     # Step 3 : Clipseg
+    print("clipseg")
     clipseg_processor = AutoProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
     clipseg_model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
 
@@ -300,37 +310,58 @@ if __name__ == "__main__":
     preds = logits.detach().unsqueeze(1)
 
     sampled_points = []
-    original_size = img.shape[:2][::-1]
+    original_image_cv = cv2.imread(image_path)
+    original_image_cv = cv2.cvtColor(original_image_cv, cv2.COLOR_BGR2RGB)
+    original_size = original_image_cv.shape[:2][::-1]
     for idx in range(preds.shape[0]):
         sampled_points.append(sample_points_from_heatmap(preds[idx][0], original_size, num_points=10))
 
+    from transformers import SamModel, SamProcessor
+
+    sam_model = SamModel.from_pretrained("facebook/sam-vit-huge").to("cuda" if torch.cuda.is_available() else "cpu")
+    sam_processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+
+    sam_masks = []
+    for idx in range(preds.shape[0]):
+        sam_inputs = sam_processor(original_image, input_points=[sampled_points[idx]], return_tensors="pt").to(device)
+        with torch.no_grad():
+            sam_outputs = sam_model(**sam_inputs)
+
+        sam_masks.append(sam_processor.image_processor.post_process_masks(
+            sam_outputs.pred_masks.cpu(), sam_inputs["original_sizes"].cpu(), sam_inputs["reshaped_input_sizes"].cpu()
+            ))
+    """
     efficientvit_sam = create_sam_model(
           name="l0", weight_url="l0.pt",
         )
     efficientvit_sam = efficientvit_sam.cuda().eval()
     efficientvit_sam_predictor = EfficientViTSamPredictor(efficientvit_sam)
-    efficientvit_sam_predictor.set_image(original_image)
+    efficientvit_sam_predictor.set_image(original_image_cv)
 
     sam_masks = []
     for idx in range(preds.shape[0]):
-        masks, iou_predictions, _ = predictor.predict(
-            point_coords=[sampled_points[idx]],
-            point_labels="0",
+        point_coords = np.array([sampled_points[idx]])
+        masks, iou_predictions, _ = efficientvit_sam_predictor.predict(
+            point_coords=point_coords,
+            point_labels=[0]*len(point_coords),
             box=None,
             multimask_output=True,
         )
 
         mask = masks[iou_predictions.argmax()]
         sam_masks.append(mask)
+    """
 
     # Step 4: Get segmented pointcloud
+    print("pointcloud seg")
+    depth_image_cv = cv2.imread(depth_path)
     point_clouds = []
     for i, mask_tensor in enumerate(sam_masks):
         mask = cv2.cvtColor(255 * mask_tensor[0].numpy().squeeze().transpose((1, 2, 0)).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         mask_binary = mask > 0
 
-        masked_rgb = apply_mask_to_image(original_image, mask_binary)
-        masked_depth = apply_mask_to_image(depth, mask_binary)
+        masked_rgb = apply_mask_to_image(original_image_cv, mask_binary)
+        masked_depth = apply_mask_to_image(depth_image_cv, mask_binary)
 
         masked_rgb_path = f'temp_masked_rgb_{i}.png'
         masked_depth_path = f'temp_masked_depth_{i}.png'
@@ -349,6 +380,7 @@ if __name__ == "__main__":
         point_clouds[idx] = inlier_cloud
 
     # Step 5: Calculate cloud distances
+    print("Distance calcs")
     distance_info = calculate_distances_between_point_clouds(point_clouds)
 
     # Now 'distance_info' contains the distance info for each pair of point clouds
