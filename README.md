@@ -2,22 +2,24 @@
 
 *:construction: This repository is currently under construction.*
 
-VQASynth is a library designed to synthesize datasets for training multimodal models. It includes example pipelines for constructing VQA datasets and training code for popular multimodal models.
+VQASynth is a framework for applying image processing pipelines to synthesize VQA datasets and for popular multimodal models.
 
 ## Getting Started
 
 ### Prerequisites
 
-Before running the test scripts, ensure you have the following installed:
+Before running the demo scripts, ensure you have the following installed:
 - Python 3.9 or later
 - [Docker](https://docs.docker.com/engine/install/), [Docker Compose](https://docs.docker.com/compose/install/)
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
 ## Usage
-Currently, the repository contains two test scripts to demonstrate the capabilities of the initial data processing pipelines:
+This repository compares two image annotation pipelines using LLaVA for object captioning and SAM for segmentation. 
+The first uses CLIPSeg for region proposal, while the second uses GroundingDINO. 
+Inspired by SpatialVLM, each uses ZoeDepth to adapt Vision Langauge Models for spatial reasoning.
 
 
-ClipSeg-based SpatialVLM data processing (recommended):
+CLIPSeg-based SpatialVLM data processing (recommended):
 ```bash
 cd tests/data_processing/
 docker build -f clipseg_data_processing.dockerfile -t vqasynth:clipseg-dataproc-test .
@@ -31,7 +33,7 @@ docker build -f groundingDino_data_processing.dockerfile -t vqasynth:dino-datapr
 docker run --gpus all -v /path/to/output/:/path/to/output vqasynth:dino-dataproc-test --input_image="warehouse_rgb.jpg" --output_dir "/path/to/output" 
 ```
 
-The scripts will return assets like 3D point clouds, segmented images, labels, and prompt examples.
+The scripts will produce 3D point clouds, segmented images, labels, and prompt examples for a test image.
 
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
