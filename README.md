@@ -1,6 +1,6 @@
 # VQASynth
 
-Use this framework to synthesize VQA datasets for enhanced multimodal reasoning.
+Pipelines to synthesize VQA datasets for enhanced multimodal reasoning.
 
 ### Environment
 
