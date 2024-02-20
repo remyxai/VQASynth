@@ -20,7 +20,6 @@ sys.path.append("./efficientvit")
 
 from zoedepth.models.builder import build_model
 from zoedepth.utils.config import get_config
-from segment_anything.utils.transforms import ResizeLongestSide
 from efficientvit.sam_model_zoo import create_sam_model
 from efficientvit.models.efficientvit.sam import EfficientViTSamPredictor
 from transformers import SamModel, SamProcessor
