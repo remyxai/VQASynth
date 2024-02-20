@@ -14,7 +14,7 @@ Inspired by SpatialVLM, this repo uses ZoeDepth to adapt Vision Langauge Models 
 The demos feature pipelines using LLaVA for object captioning and SAM for segmentation. 
 One uses CLIPSeg for region proposal, while the other uses GroundingDINO. 
 
-![VQASynth-diagram.png](https://github.com/smellslikeml/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
+![VQASynth-diagram.png](https://github.com/remyxai/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
 
 CLIPSeg-based SpatialVLM data processing (recommended):
 ```bash
