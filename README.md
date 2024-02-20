@@ -1,6 +1,6 @@
 # VQASynth
 
-Pipelines to synthesize VQA datasets for enhanced multimodal reasoning.
+Enhance the reasoning of multimodal models with pipelines to synthesize VQA datasets.
 
 ### Environment
 
