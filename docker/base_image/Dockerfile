@@ -15,17 +15,17 @@ RUN apt-get install --no-install-recommends wget ffmpeg=7:* \
     libsm6=2:* libxext6=2:* git=1:* vim=2:* -y \
     && apt-get clean && apt-get autoremove && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
-COPY . /app/VQASynth
-WORKDIR /app/VQASynth
-RUN ls -lh .
-RUN pip install .
-
-RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir
-
 WORKDIR /app/models
 RUN wget https://huggingface.co/han-cai/efficientvit-sam/resolve/main/l0.pt
 RUN wget https://huggingface.co/cjpais/llava-v1.6-34B-gguf/resolve/main/mmproj-model-f16.gguf
 RUN wget https://huggingface.co/cjpais/llava-v1.6-34B-gguf/resolve/main/llava-v1.6-34b.Q4_K_M.gguf
+
+RUN python3 -m pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+
+WORKDIR /app/VQASynth
+COPY . /app/VQASynth
+RUN ls -lh .
+RUN pip install .
+RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir
 
 WORKDIR /app

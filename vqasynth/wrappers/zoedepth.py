@@ -14,8 +14,8 @@ class ZoeDepth:
         self.conf = get_config("zoedepth", "infer")
         self.depth_model = build_model(self.conf)
 
-    def infer_depth(self, image_path):
-        depth = depth_model.infer_pil(img)
+    def infer_depth(self, img):
+        depth = self.depth_model.infer_pil(img)
         raw_depth = Image.fromarray((depth*256).astype('uint16'))
         return raw_depth
 
