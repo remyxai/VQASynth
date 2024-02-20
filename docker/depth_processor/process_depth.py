@@ -3,7 +3,7 @@ import cv2
 import pickle
 import argparse
 import pandas as pd
-from vqasynth.wrappers.zoedepth_wrapper import ZoeDepthWrapper
+from vqasynth.wrappers.zoedepth import ZoeDepth
 
 def process_images_in_chunks(image_dir, chunk_size=500):
     """Generator function to yield chunks of images from the directory."""
@@ -21,7 +21,7 @@ def main(image_dir, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    zoe_depth = ZoeDepthWrapper()
+    zoe_depth = ZoeDepth()
     chunk_index = 0
 
     for chunk in process_images_in_chunks(image_dir):

@@ -1,0 +1,2 @@
+recursive-include vqasynth/external/ZoeDepth *
+recursive-include vqasynth/external/efficientvit *
