@@ -32,6 +32,13 @@ docker run --gpus all -v /path/to/output/:/path/to/output vqasynth:dino-dataproc
 
 The scripts will produce 3D point clouds, segmented images, labels, and prompt examples for a test image.
 
+## Notebooks
+We've hosted some notebooks visualizing and experimenting with the techniques included in this repo.
+
+| Notebook | Description | Launch |
+|----------|-------------|--------|
+| Spatial Reasoning with Point Clouds | Visualize point clouds and evaluate spatial relationships | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1f3rr-y233GvxWVzPE7_mK-DY52pG0fsm?usp=sharing) |
+
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
 ```
