@@ -1,5 +1,46 @@
+import pickle
 import numpy as np
 import open3d as o3d
+
+def serialize_pointclouds(pointclouds):
+    serialized_data = []
+    for pcd in pointclouds:
+        # Extract relevant data from each PointCloud
+        points = np.asarray(pcd.points)
+        colors = np.asarray(pcd.colors) if pcd.has_colors() else None
+        normals = np.asarray(pcd.normals) if pcd.has_normals() else None
+
+        # Serialize each component to bytes
+        pcd_data = {
+            'points': pickle.dumps(points),
+            'colors': pickle.dumps(colors) if colors is not None else None,
+            'normals': pickle.dumps(normals) if normals is not None else None,
+        }
+
+        # Add the serialized data for the current PointCloud to the list
+        serialized_data.append(pcd_data)
+    return serialized_data
+
+def restore_pointclouds(serialized_data):
+    restored_pointclouds = []
+    for data in serialized_data:
+        # Deserialize each component
+        points = pickle.loads(data['points'])
+        colors = pickle.loads(data['colors']) if data['colors'] is not None else None
+        normals = pickle.loads(data['normals']) if data['normals'] is not None else None
+
+        # Create a new PointCloud object and assign the deserialized data
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        if colors is not None:
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+        if normals is not None:
+            pcd.normals = o3d.utility.Vector3dVector(normals)
+
+        # Add the restored PointCloud to the list
+        restored_pointclouds.append(pcd)
+    return restored_pointclouds
+
 
 def create_point_cloud_from_rgbd(rgb_image, depth_image, intrinsic_parameters):
     rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
