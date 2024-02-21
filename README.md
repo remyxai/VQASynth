@@ -1,13 +1,6 @@
 # VQASynth
 
-Pipelines to synthesize VQA datasets for enhanced multimodal reasoning.
-
-### Environment
-
-Before running the demo scripts, ensure you have the following installed:
-- Python 3.9 or later
-- [Docker](https://docs.docker.com/engine/install/), [Docker Compose V2](https://docs.docker.com/compose/migrate/)
-- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+Enhance the reasoning of multimodal models with pipelines to synthesize VQA datasets.
 
 ## Background
 Inspired by SpatialVLM, this repo uses ZoeDepth to adapt Vision Langauge Models for spatial reasoning.
@@ -15,6 +8,13 @@ The demos feature pipelines using LLaVA for object captioning and SAM for segmen
 One uses CLIPSeg for region proposal, while the other uses GroundingDINO. 
 
 ![VQASynth-diagram.png](https://github.com/remyxai/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
+
+### Environment
+
+Before running the demo scripts, ensure you have the following installed:
+- Python 3.9 or later
+- [Docker](https://docs.docker.com/engine/install/), [Docker Compose V2](https://docs.docker.com/compose/migrate/)
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
 CLIPSeg-based SpatialVLM data processing (recommended):
 ```bash
@@ -31,6 +31,7 @@ docker run --gpus all -v /path/to/output/:/path/to/output vqasynth:dino-dataproc
 ```
 
 The scripts will produce 3D point clouds, segmented images, labels, and prompt examples for a test image.
+
 
 ## Run a Pipeline on Your Images
 
