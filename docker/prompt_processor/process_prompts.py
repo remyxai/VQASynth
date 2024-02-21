@@ -16,12 +16,15 @@ def prompt_image_data(row):
     captions = row["captions"]
     pointclouds = restore_pointclouds(row["pointclouds"])
 
-    objects = list(zip(captions, pointclouds))
-    all_pairs = [(i, j) for i in range(len(objects)) for j in range(len(objects)) if i != j]
-    random.shuffle(all_pairs)
-    selected_pairs = all_pairs[:5]
-    object_pairs = [(objects[i], objects[j]) for i,j in selected_pairs]
-    prompts = evaluate_predicates_on_pairs(object_pairs)
+    try:
+        objects = list(zip(captions, pointclouds))
+        all_pairs = [(i, j) for i in range(len(objects)) for j in range(len(objects)) if i != j]
+        random.shuffle(all_pairs)
+        selected_pairs = all_pairs[:5]
+        object_pairs = [(objects[i], objects[j]) for i,j in selected_pairs]
+        prompts = evaluate_predicates_on_pairs(object_pairs)
+    except:
+        prompts = []
     return prompts
 
 def main(image_dir, output_dir):

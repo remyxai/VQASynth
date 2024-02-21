@@ -23,6 +23,7 @@ def pointcloud_image_data(row):
     }
 
     point_clouds = []
+    serialized_data = []
     for i, mask in enumerate(row["masks"]):
         mask_binary = mask > 0
 
@@ -45,7 +46,8 @@ def pointcloud_image_data(row):
         inlier_cloud = pcd.select_by_index(ind)
         point_clouds[idx] = inlier_cloud
 
-    serialized_data = serialize_pointclouds(point_clouds)
+    if point_clouds:
+        serialized_data = serialize_pointclouds(point_clouds)
 
     return serialized_data
 

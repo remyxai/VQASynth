@@ -11,7 +11,10 @@ clipseg = CLIPSeg(model_name="CIDAS/clipseg-rd64-refined")
 sam = SAM(model_name="facebook/sam-vit-huge", device="cuda")
 
 def segment_image_data(row):
-    preds = clipseg.run_inference(row["image"], row["captions"])
+    try:
+        preds = clipseg.run_inference(row["image"], row["captions"])
+    except:
+        return []
 
     sampled_points = []
     sam_masks = []

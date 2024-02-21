@@ -1,39 +1,77 @@
 version: '3.8'
+
 services:
-  depth_estimation:
+  depth_processor:
     build:
-      context: ./depth_estimation
+      context: ../docker/depth_processor
     volumes:
-      - ./data:/app/data
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
 
-  point_cloud:
+  caption_processor:
     build:
-      context: ./point_cloud
+      context: ../docker/caption_processor
     volumes:
-      - ./data:/app/data
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - depth_estimation
+      - depth_processor
+    command: --output_dir ${OUTPUT_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
 
-  llama_captions:
+  segment_processor:
     build:
-      context: ./llama_captions
+      context: ../docker/segment_processor
     volumes:
-      - ./data:/app/data
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - depth_estimation
+      - caption_processor
+    command: --output_dir ${OUTPUT_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
 
-  clipseg:
+  pointcloud_processor:
     build:
-      context: ./clipseg
+      context: ../docker/pointcloud_processor
     volumes:
-      - ./data:/app/data
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - llama_captions
+      - segment_processor
+    command: --output_dir ${OUTPUT_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
 
-  point_cloud_segmentation:
+  prompt_processor:
     build:
-      context: ./point_cloud_segmentation
+      context: ../docker/prompt_processor
     volumes:
-      - ./data:/app/data
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - clipseg
+      - pointcloud_processor
+    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
