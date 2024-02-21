@@ -4,12 +4,29 @@ import numpy as np
 from transformers import SamModel, SamProcessor
 from transformers import AutoProcessor, CLIPSegForImageSegmentation
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def load_sam_model(model_name="facebook/sam-vit-huge")
-    sam_model = SamModel.from_pretrained(model_name).to("cuda" if torch.cuda.is_available() else "cpu")
-    sam_processor = SamProcessor.from_pretrained(model_name)
-    return sam_model, sam_processor
+class CLIPSeg:
+    def __init__(self, model_name="CIDAS/clipseg-rd64-refined"):
+        self.clipseg_processor = AutoProcessor.from_pretrained(model_name)
+        self.clipseg_model = CLIPSegForImageSegmentation.from_pretrained(model_name)
+
+    def run_inference(self, image, text_descriptions):
+        inputs = self.clipseg_processor(text=text_descriptions, images=[image] * len(text_descriptions), padding=True, return_tensors="pt")
+        outputs = self.clipseg_model(**inputs)
+        logits = outputs.logits
+        return logits.detach().unsqueeze(1)
+
+class SAM:
+    def __init__(self, model_name="facebook/sam-vit-huge", device="cuda"):
+        self.device = device
+        self.sam_model = SamModel.from_pretrained(model_name).to(self.device)
+        self.sam_processor = SamProcessor.from_pretrained(model_name)
+
+    def run_inference_from_points(self, image, points):
+        sam_inputs = self.sam_processor(image, input_points=points, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            sam_outputs = self.sam_model(**sam_inputs)
+        return self.sam_processor.image_processor.post_process_masks(sam_outputs.pred_masks.cpu(), sam_inputs["original_sizes"].cpu(), sam_inputs["reshaped_input_sizes"].cpu())
 
 def find_medoid_and_closest_points(points, num_closest=5):
     """
@@ -35,6 +52,7 @@ def sample_points_from_heatmap(heatmap, original_size, num_points=5, percentile=
     """
     Sample points from the given heatmap, focusing on areas with higher values.
     """
+    width, height = original_size
     threshold = np.percentile(heatmap.numpy(), percentile)
     masked_heatmap = torch.where(heatmap > threshold, heatmap, torch.tensor(0.0))
     probabilities = torch.softmax(masked_heatmap.flatten(), dim=0)
