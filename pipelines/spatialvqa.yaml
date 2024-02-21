@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  depth_processor:
+    build:
+      context: ../docker/depth_processor
+    volumes:
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
+  caption_processor:
+    build:
+      context: ../docker/caption_processor
+    volumes:
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - depth_processor
+    command: --output_dir ${OUTPUT_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
+  segment_processor:
+    build:
+      context: ../docker/segment_processor
+    volumes:
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - caption_processor
+    command: --output_dir ${OUTPUT_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
+  pointcloud_processor:
+    build:
+      context: ../docker/pointcloud_processor
+    volumes:
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - segment_processor
+    command: --output_dir ${OUTPUT_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
+  prompt_processor:
+    build:
+      context: ../docker/prompt_processor
+    volumes:
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - pointcloud_processor
+    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]

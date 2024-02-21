@@ -20,7 +20,6 @@ sys.path.append("./efficientvit")
 
 from zoedepth.models.builder import build_model
 from zoedepth.utils.config import get_config
-from segment_anything.utils.transforms import ResizeLongestSide
 from efficientvit.sam_model_zoo import create_sam_model
 from efficientvit.models.efficientvit.sam import EfficientViTSamPredictor
 from transformers import SamModel, SamProcessor
@@ -330,27 +329,6 @@ if __name__ == "__main__":
         sam_masks.append(sam_processor.image_processor.post_process_masks(
             sam_outputs.pred_masks.cpu(), sam_inputs["original_sizes"].cpu(), sam_inputs["reshaped_input_sizes"].cpu()
             ))
-    """
-    efficientvit_sam = create_sam_model(
-          name="l0", weight_url="l0.pt",
-        )
-    efficientvit_sam = efficientvit_sam.cuda().eval()
-    efficientvit_sam_predictor = EfficientViTSamPredictor(efficientvit_sam)
-    efficientvit_sam_predictor.set_image(original_image_cv)
-
-    sam_masks = []
-    for idx in range(preds.shape[0]):
-        point_coords = np.array([sampled_points[idx]])
-        masks, iou_predictions, _ = efficientvit_sam_predictor.predict(
-            point_coords=point_coords,
-            point_labels=[0]*len(point_coords),
-            box=None,
-            multimask_output=True,
-        )
-
-        mask = masks[iou_predictions.argmax()]
-        sam_masks.append(mask)
-    """
 
     # Step 4: Get segmented pointcloud
     print("pointcloud seg")

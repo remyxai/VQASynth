@@ -1,0 +1,6 @@
+[submodule "vqasynth/external/ZoeDepth"]
+	path = vqasynth/external/ZoeDepth
+	url = https://github.com/isl-org/ZoeDepth.git
+[submodule "vqasynth/external/efficientvit"]
+	path = vqasynth/external/efficientvit
+	url = https://github.com/mit-han-lab/efficientvit.git
