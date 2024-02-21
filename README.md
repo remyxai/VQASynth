@@ -35,7 +35,7 @@ The scripts will produce 3D point clouds, segmented images, labels, and prompt e
 
 ## Run a Pipeline on Your Images
 
-We've included an example pipeline using Docker Compose to quickly transform a directory of images into a VQA formatted dataset emphasizing spatial relations between objects. It produces a dataset following conventions for training models like [LLaVA](https://llava-vl.github.io/). We recommend using an A10 GPU or larger for processing.
+The main pipeline uses Docker Compose to process a directory of images into a VQA dataset including spatial relations between objects. The dataset follows conventions for training models like [LLaVA](https://llava-vl.github.io/). We recommend using an A10 GPU or larger for processing.
 
 Make sure to update [.env](pipelines/.env) with the full path to your image directory and output directory. Then launch the pipeline with:
 
