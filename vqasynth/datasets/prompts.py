@@ -1,89 +1,159 @@
-# Requires pcd objects, produced by pointcloud.py
+import random
+import numpy as np
 
-def tall_choice(pcd_a, pcd_b):
-    # Compute heights
-    height_a = pcd_a.get_axis_aligned_bounding_box().get_extent()[1]
-    height_b = pcd_b.get_axis_aligned_bounding_box().get_extent()[1]
-    
-    return "A" if height_a > height_b else "B" if height_b > height_a else "Equal"
+def tall_choice(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    result = "taller" if height_A > height_B else "taller" if height_B > height_A else "equally tall"
+    return f"Which object is taller? Answer: {A_desc if height_A > height_B else B_desc if height_B > height_A else 'Neither'} is {result}."
 
-def gap(pcd_a, pcd_b):
-    # This requires a more complex spatial analysis to find the closest points or edges between objects.
-    # Placeholder for simplicity
-    return "Gap estimation not implemented"
+def gap(A, B):
+    # Placeholder for simplicity as gap calculation requires complex spatial analysis
+    return "Gap estimation between two objects requires complex spatial analysis not implemented in this function."
 
-def tall_short_classify(pcd_a, pcd_b):
-    height_a = pcd_a.get_axis_aligned_bounding_box().get_extent()[1]
-    height_b = pcd_b.get_axis_aligned_bounding_box().get_extent()[1]
-    
-    return "Tall-Short" if height_a > height_b else "Short-Tall" if height_b > height_a else "Equal"
+def tall_short_classify(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    relation = "taller than" if height_A > height_B else "shorter than" if height_A < height_B else "equally tall as"
+    return f"Comparing heights, {A_desc} is {relation} {B_desc}."
 
-def above_predicate(pcd_a, pcd_b):
-    min_z_a = pcd_a.get_axis_aligned_bounding_box().get_min_bound()[2]
-    max_z_b = pcd_b.get_axis_aligned_bounding_box().get_max_bound()[2]
-    
-    return min_z_a > max_z_b
+def above_predicate(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    min_z_A = A_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
+    max_z_B = B_cloud.get_axis_aligned_bounding_box().get_max_bound()[2]
+    return f"Is {A_desc} above {B_desc}? Answer: {'Yes' if min_z_A > max_z_B else 'No'}."
 
-def below_predicate(pcd_a, pcd_b):
-    max_z_a = pcd_a.get_axis_aligned_bounding_box().get_max_bound()[2]
-    min_z_b = pcd_b.get_axis_aligned_bounding_box().get_min_bound()[2]
-    
-    return max_z_a < min_z_b
+def below_predicate(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    max_z_A = A_cloud.get_axis_aligned_bounding_box().get_max_bound()[2]
+    min_z_B = B_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
+    return f"Is {A_desc} below {B_desc}? Answer: {'Yes' if max_z_A < min_z_B else 'No'}."
 
-def short_choice(pcd_a, pcd_b):
-    return "A" if not tall_choice(pcd_a, pcd_b) == "A" else "B"
+def short_choice(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    result = "shorter" if height_A < height_B else "shorter" if height_B < height_A else "equally short"
+    return f"Which object is shorter? Answer: {A_desc if height_A < height_B else B_desc if height_B < height_A else 'Neither'} is {result}."
 
-def below_diff(pcd_a, pcd_b):
-    min_z_a = pcd_a.get_axis_aligned_bounding_box().get_min_bound()[2]
-    min_z_b = pcd_b.get_axis_aligned_bounding_box().get_min_bound()[2]
-    
-    return abs(min_z_a - min_z_b)
+def below_diff(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    min_z_A = A_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
+    min_z_B = B_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
+    diff = abs(min_z_A - min_z_B)
+    return f"The difference in elevation from the bottom of {A_desc} to the bottom of {B_desc} is {diff} units."
 
-def tall_predicate(pcd_a, pcd_b):
-    return tall_choice(pcd_a, pcd_b) == "A"
+def tall_predicate(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    return f"Is {A_desc} taller than {B_desc}? Answer: {'Yes' if height_A > height_B else 'No'}."
 
-def short_predicate(pcd_a, pcd_b):
-    return short_choice(pcd_a, pcd_b) == "A"
+def short_predicate(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    return f"Is {A_desc} shorter than {B_desc}? Answer: {'Yes' if height_A < height_B else 'No'}."
 
-def above_diff(pcd_a, pcd_b):
-    max_z_a = pcd_a.get_axis_aligned_bounding_box().get_max_bound()[2]
-    max_z_b = pcd_b.get_axis_aligned_bounding_box().get_max_bound()[2]
-    
-    return abs(max_z_a - max_z_b)
+def above_diff(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    max_z_A = A_cloud.get_axis_aligned_bounding_box().get_max_bound()[2]
+    max_z_B = B_cloud.get_axis_aligned_bounding_box().get_max_bound()[2]
+    diff = abs(max_z_A - max_z_B)
+    return f"The vertical distance from the top of {A_desc} to the top of {B_desc} is {diff} units."
 
-def vertical_dist(pcd_a, pcd_b):
-    center_a = pcd_a.get_center()[2]
-    center_b = pcd_b.get_center()[2]
-    
-    return abs(center_a - center_b)
+def vertical_dist(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    center_z_A = A_cloud.get_center()[2]
+    center_z_B = B_cloud.get_center()[2]
+    distance = abs(center_z_A - center_z_B)
+    return f"The vertical distance between {A_desc} and {B_desc} is {distance} units."
 
-def horizontal_dist(pcd_a, pcd_b):
-    center_a = pcd_a.get_center()
-    center_b = pcd_b.get_center()
-    
-    return np.sqrt((center_a[0] - center_b[0])**2 + (center_a[1] - center_b[1])**2)
+def horizontal_dist(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    center_A = A_cloud.get_center()
+    center_B = B_cloud.get_center()
+    distance = np.sqrt((center_A[0] - center_B[0])**2 + (center_A[1] - center_B[1])**2)
+    return f"The horizontal distance between {A_desc} and {B_desc} is {distance} units."
 
-def above_below_classify(pcd_a, pcd_b):
-    if above_predicate(pcd_a, pcd_b):
-        return "Above"
-    elif below_predicate(pcd_a, pcd_b):
-        return "Below"
+def above_below_classify(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    if above_predicate(A, B).endswith("Yes"):
+        relation = "above"
+    elif below_predicate(A, B).endswith("Yes"):
+        relation = "below"
     else:
-        return "Uncertain"
+        relation = "neither above nor below"
+    return f"In terms of elevation, {A_desc} is {relation} {B_desc}."
 
-def height(pcd):
-    return pcd.get_axis_aligned_bounding_box().get_extent()[1]
+def height(A):
+    A_desc, A_cloud = A
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    return f"The height of {A_desc} is {height_A} units."
 
-def width(pcd):
-    return pcd.get_axis_aligned_bounding_box().get_extent()[0]
+def width(A):
+    A_desc, A_cloud = A
+    width_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[0]
+    return f"The width of {A_desc} is {width_A} units."
 
-def above_choice(pcd_a, pcd_b):
-    return "A" if above_predicate(pcd_a, pcd_b) else "B" if below_predicate(pcd_a, pcd_b) else "Equal"
+def above_choice(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    if above_predicate(A, B).endswith("Yes"):
+        chosen = A_desc
+    elif below_predicate(A, B).endswith("Yes"):
+        chosen = B_desc
+    else:
+        chosen = "neither"
+    return f"Which object is more above? Answer: {chosen}."
 
-def below_choice(pcd_a, pcd_b):
-    return "B" if below_predicate(pcd_a, pcd_b) else "A" if above_predicate(pcd_a, pcd_b) else "Equal"
+def below_choice(A, B):
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    if below_predicate(A, B).endswith("Yes"):
+        chosen = A_desc
+    elif above_predicate(A, B).endswith("Yes"):
+        chosen = B_desc
+    else:
+        chosen = "neither"
+    return f"Which object is more below? Answer: {chosen}."
 
-def elevation(pcd):
-    # Assuming the reference plane is Z=0
-    min_z = pcd.get_axis_aligned_bounding_box().get_min_bound()[2]
-    return min_z
+def elevation(A):
+    A_desc, A_cloud = A
+    min_z_A = A_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
+    return f"The elevation of {A_desc} from the reference plane is {min_z_A} units."
+
+def evaluate_predicates_on_pairs(pairs):
+    all_predicates = [tall_choice, gap, tall_short_classify, above_predicate, below_predicate,
+                      short_choice, below_diff, tall_predicate, short_predicate, above_diff,
+                      vertical_dist, horizontal_dist, above_below_classify, height, width,
+                      above_choice, below_choice, elevation]
+    
+    selected_predicates = random.sample(all_predicates, 5)
+    
+    results = []
+    
+    for A, B in pairs:
+        pair_results = []
+        for predicate in selected_predicates:
+            try:
+                pair_results.append(predicate(A, B))
+            except:
+                pair_results.append(predicate(A))
+
+        results.extend(pair_results)
+    return results
