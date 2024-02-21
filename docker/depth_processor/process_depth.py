@@ -1,5 +1,4 @@
 import os
-import io
 import pickle
 import argparse
 import pandas as pd
@@ -30,19 +29,13 @@ def main(image_dir, output_dir):
 
         for image_filename in chunk:
             image_path = os.path.join(image_dir, image_filename)
-            # Load the image with Pillow
-            with Image.open(image_path) as img:
-                # Use a BytesIO object to capture the image's binary data
-                img_binary_io = io.BytesIO()
-                img.save(img_binary_io, format=img.format)
-                image_binary = img_binary_io.getvalue()
 
-                # Assuming ZoeDepthWrapper can take a Pillow image
-                depth_map = zoe_depth.infer_depth(img)
+            img = Image.open(image_path)
+            depth_map = zoe_depth.infer_depth(img)
 
             records.append({
                 "image_filename": image_filename,
-                "image_binary": image_binary,
+                "image": img,
                 "depth_map": depth_map
             })
 
