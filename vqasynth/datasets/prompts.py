@@ -1,5 +1,7 @@
 import random
 import numpy as np
+from itertools import combinations
+
 
 def tall_choice(A, B):
     A_desc, A_cloud = A
@@ -136,6 +138,53 @@ def elevation(A):
     A_desc, A_cloud = A
     min_z_A = A_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
     return f"The elevation of {A_desc} from the reference plane is {min_z_A} units."
+
+def human_like_distance(distance_meters):
+    # Define the choices with units included
+    if distance_meters < 1:
+        choices = [
+            (0.5, "meters", 0.25),
+            (round(distance_meters, 4), "meters", 0.75),
+            (distance_meters * 3.28084, "feet", 0.15),
+            (distance_meters * 39.3701, "inches", 0.1)
+        ]
+    elif distance_meters < 10:
+        choices = [
+            (round(distance_meters, 4), "meters", 0.8),
+            (round(distance_meters * 3.28084, 4), "feet", 0.2)
+        ]
+    elif distance_meters < 100:
+        choices = [
+            (5 * round(distance_meters / 5, 4), "meters", 0.5),
+            (10 * round(distance_meters / 10, 4), "meters", 0.3),
+            (distance_meters * 1.09361, "yards", 0.2)
+        ]
+    else:
+        choices = [
+            (10 * round(distance_meters / 10, 4), "meters", 0.4),
+            (50 * round(distance_meters / 50, 4), "meters", 0.3),
+            (100 * round(distance_meters / 100, 4), "meters", 0.2),
+            (distance_meters * 0.000621371, "miles", 0.1)
+        ]
+
+    # Normalize probabilities and make a selection
+    total_probability = sum(prob for _, _, prob in choices)
+    cumulative_distribution = []
+    cumulative_sum = 0
+    for value, unit, probability in choices:
+        cumulative_sum += probability / total_probability  # Normalize probabilities
+        cumulative_distribution.append((cumulative_sum, value, unit))
+
+    # Randomly choose based on the cumulative distribution
+    r = random.random()
+    for cumulative_prob, value, unit in cumulative_distribution:
+        if r < cumulative_prob:
+            #return f"{value} {unit}"
+            return value, unit
+
+    # Fallback to the last choice if something goes wrong
+    #return f"{choices[-1][0]} {choices[-1][1]}"
+    return choices[-1][0], choices[-1][1]
 
 def evaluate_predicates_on_pairs(pairs):
     all_predicates = [tall_choice, gap, tall_short_classify, above_predicate, below_predicate,
