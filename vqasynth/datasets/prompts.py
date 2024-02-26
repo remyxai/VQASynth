@@ -2,6 +2,23 @@ import random
 import numpy as np
 from itertools import combinations
 
+distance_template_questions = [
+"What is the distance between [A] and [B]?", "How far apart are [A] and [B]?",
+"How distant is [A] from [B]?", "How far is [A] from [B]?",
+"How close is [A] from [B]?",
+"Could you measure the distance between [A] and [B]?",
+"Can you tell me the distance of [A] from [B]?", "How far away is [A] from [B]?",
+"Can you provide the distance measurement between [A] and [B]?",
+"Can you give me an estimation of the distance between [A] and [B]?", "Could you provide the distance between [A] and [B]?",
+"How much distance is there between [A] and [B]?", "Tell me the distance between [A] and [B].",
+"Give me the distance from [A] to [B].", "Measure the distance from [A] to [B].",
+"Measure the distance between [A] and [B]."]
+
+distance_template_answers = ["[X]",
+"[A] and [B] are [X] apart.", "[A] is [X] away from [B].",
+"A distance of [X] exists between [A] and [B].", "[A] is [X] from [B].",
+"[A] and [B] are [X] apart from each other.", "They are [X] apart.",
+"The distance of [A] from [B] is [X]."]
 
 def tall_choice(A, B):
     A_desc, A_cloud = A
@@ -140,31 +157,21 @@ def elevation(A):
     return f"The elevation of {A_desc} from the reference plane is {min_z_A} units."
 
 def human_like_distance(distance_meters):
-    # Define the choices with units included
-    if distance_meters < 1:
+    # Define the choices with units included, focusing on the 0.1 to 10 meters range
+    if distance_meters < 1:  # For distances less than 1 meter
         choices = [
-            (0.5, "meters", 0.25),
-            (round(distance_meters, 4), "meters", 0.75),
-            (distance_meters * 3.28084, "feet", 0.15),
-            (distance_meters * 39.3701, "inches", 0.1)
+            (round(distance_meters * 100, 2), "centimeters", 0.2),  # Centimeters for very small distances
+            (round(distance_meters * 39.3701, 2), "inches", 0.8)  # Inches for the majority of cases under 1 meter
         ]
-    elif distance_meters < 10:
+    elif distance_meters < 3:  # For distances less than 3 meters
         choices = [
-            (round(distance_meters, 4), "meters", 0.8),
-            (round(distance_meters * 3.28084, 4), "feet", 0.2)
+            (round(distance_meters, 2), "meters", 0.5),
+            (round(distance_meters * 3.28084, 2), "feet", 0.5)  # Feet as a common unit within indoor spaces
         ]
-    elif distance_meters < 100:
+    else:  # For distances from 3 up to 10 meters
         choices = [
-            (5 * round(distance_meters / 5, 4), "meters", 0.5),
-            (10 * round(distance_meters / 10, 4), "meters", 0.3),
-            (distance_meters * 1.09361, "yards", 0.2)
-        ]
-    else:
-        choices = [
-            (10 * round(distance_meters / 10, 4), "meters", 0.4),
-            (50 * round(distance_meters / 50, 4), "meters", 0.3),
-            (100 * round(distance_meters / 100, 4), "meters", 0.2),
-            (distance_meters * 0.000621371, "miles", 0.1)
+            (round(distance_meters, 2), "meters", 0.7),  # Meters for clarity and international understanding
+            (round(distance_meters * 3.28084, 2), "feet", 0.3)  # Feet for additional context
         ]
 
     # Normalize probabilities and make a selection
@@ -179,12 +186,31 @@ def human_like_distance(distance_meters):
     r = random.random()
     for cumulative_prob, value, unit in cumulative_distribution:
         if r < cumulative_prob:
-            #return f"{value} {unit}"
-            return value, unit
+            return f"{value} {unit}"
 
     # Fallback to the last choice if something goes wrong
-    #return f"{choices[-1][0]} {choices[-1][1]}"
-    return choices[-1][0], choices[-1][1]
+    return f"{choices[-1][0]} {choices[-1][1]}"
+
+
+def calculate_distances_between_point_clouds(A,B):
+    dist_pcd1_to_pcd2 = np.asarray(A.compute_point_cloud_distance(B))
+
+    # Calculate the minimum, average, and maximum distances for this pair
+    avg_dist = np.mean(dist_pcd1_to_pcd2)
+
+    return human_like_distance(avg_dist)
+
+def generate_spatial_reasoning_data(obj_a, obj_b, human_readable_dist, template_questions, template_answers):
+    # Select a random question and answer template
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_answers)
+
+    # Replace placeholders with actual values
+    question = question_template.replace('[A]', obj_a[0].lower()).replace('[B]', obj_b[0].lower())
+    answer = answer_template.replace('[A]', obj_a[0].lower()).replace('[B]', obj_b[0].lower()).replace('[X]', human_readable_dist)
+
+    # Add to the dataset
+    return question + " Answer: " +  answer
 
 def evaluate_predicates_on_pairs(pairs):
     all_predicates = [tall_choice, gap, tall_short_classify, above_predicate, below_predicate,
@@ -203,6 +229,8 @@ def evaluate_predicates_on_pairs(pairs):
                 pair_results.append(predicate(A, B))
             except:
                 pair_results.append(predicate(A))
+            distance = calculate_distances_between_point_clouds(A[1], B[1])
+            pair_results.append(generate_spatial_reasoning_data(A[0], B[0], distance, distance_template_questions, distance_template_answers))
 
         results.extend(pair_results)
     return results

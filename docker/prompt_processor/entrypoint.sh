@@ -27,3 +27,4 @@ echo "Starting prompt processing..."
 python3 process_prompts.py "${original_args[@]}"
 
 rm "${output_dir}/pointcloud_done.txt" 
+touch "${output_dir}/data_processing_done.txt"
