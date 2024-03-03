@@ -5,7 +5,7 @@ import pandas as pd
 from PIL import Image
 from vqasynth.wrappers.zoedepth import ZoeDepth
 
-def process_images_in_chunks(image_dir, chunk_size=500):
+def process_images_in_chunks(image_dir, chunk_size=100):
     """Generator function to yield chunks of images from the directory."""
     chunk = []
     for image_filename in os.listdir(image_dir):
@@ -25,12 +25,13 @@ def main(image_dir, output_dir):
     chunk_index = 0
 
     for chunk in process_images_in_chunks(image_dir):
+        print("Processing chunk ", chunk_index)
         records = []
 
         for image_filename in chunk:
             image_path = os.path.join(image_dir, image_filename)
 
-            img = Image.open(image_path)
+            img = Image.open(image_path).convert('RGB')
             depth_map = zoe_depth.infer_depth(img)
 
             records.append({

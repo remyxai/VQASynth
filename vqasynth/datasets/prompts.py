@@ -1,159 +1,567 @@
 import random
 import numpy as np
+from itertools import combinations
+from vqasynth.datasets.prompt_templates import *
 
-def tall_choice(A, B):
+from vqasynth.datasets.pointcloud import human_like_distance, calculate_distances_between_point_clouds
+
+
+# Predicate prompts
+
+def left_predicate(A, B):
+    template_questions = left_predicate_questions
+    true_responses = left_true_responses
+    false_responses = left_false_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
-    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    result = "taller" if height_A > height_B else "taller" if height_B > height_A else "equally tall"
-    return f"Which object is taller? Answer: {A_desc if height_A > height_B else B_desc if height_B > height_A else 'Neither'} is {result}."
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
 
-def gap(A, B):
-    # Placeholder for simplicity as gap calculation requires complex spatial analysis
-    return "Gap estimation between two objects requires complex spatial analysis not implemented in this function."
+    A_pos = A_cloud.get_center()
+    B_pos = B_cloud.get_center()
 
-def tall_short_classify(A, B):
+    is_left = A_pos[0] < B_pos[0]  # Compare X coordinates
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_left else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+
+def right_predicate(A, B):
+    template_questions = right_predicate_questions
+    true_responses = right_true_responses
+    false_responses = right_false_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
-    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    relation = "taller than" if height_A > height_B else "shorter than" if height_A < height_B else "equally tall as"
-    return f"Comparing heights, {A_desc} is {relation} {B_desc}."
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    A_pos = A_cloud.get_center()
+    B_pos = B_cloud.get_center()
+
+    is_right = A_pos[0] > B_pos[0]  # Compare X coordinates
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_right else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
 
 def above_predicate(A, B):
+    template_questions = above_predicate_questions
+    true_responses = above_true_responses
+    false_responses = above_false_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
-    min_z_A = A_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
-    max_z_B = B_cloud.get_axis_aligned_bounding_box().get_max_bound()[2]
-    return f"Is {A_desc} above {B_desc}? Answer: {'Yes' if min_z_A > max_z_B else 'No'}."
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    A_pos = A_cloud.get_center()
+    B_pos = B_cloud.get_center()
+
+    is_above = A_pos[1] > B_pos[1]  
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_above else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
 
 def below_predicate(A, B):
-    A_desc, A_cloud = A
-    B_desc, B_cloud = B
-    max_z_A = A_cloud.get_axis_aligned_bounding_box().get_max_bound()[2]
-    min_z_B = B_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
-    return f"Is {A_desc} below {B_desc}? Answer: {'Yes' if max_z_A < min_z_B else 'No'}."
+    template_questions = below_predicate_questions
+    true_responses = below_true_responses
+    false_responses = below_false_responses
 
-def short_choice(A, B):
     A_desc, A_cloud = A
     B_desc, B_cloud = B
-    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    result = "shorter" if height_A < height_B else "shorter" if height_B < height_A else "equally short"
-    return f"Which object is shorter? Answer: {A_desc if height_A < height_B else B_desc if height_B < height_A else 'Neither'} is {result}."
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
 
-def below_diff(A, B):
+    A_pos = A_cloud.get_center()
+    B_pos = B_cloud.get_center()
+
+    is_below = A_pos[1] < B_pos[1]  
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_below else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+
+def wide_predicate(A, B):
+    template_questions = wide_predicate_questions
+    true_responses = wide_true_responses
+    false_responses = wide_false_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
-    min_z_A = A_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
-    min_z_B = B_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
-    diff = abs(min_z_A - min_z_B)
-    return f"The difference in elevation from the bottom of {A_desc} to the bottom of {B_desc} is {diff} units."
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    width_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[0]
+    width_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[0]
+
+    is_wider = width_A > width_B
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_wider else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+
+def big_predicate(A, B):
+    template_questions = big_predicate_questions
+    true_responses = big_true_responses
+    false_responses = big_false_responses
+
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    extent_A = A_cloud.get_axis_aligned_bounding_box().get_extent()
+    volume_A = extent_A[0] * extent_A[1] * extent_A[2]
+
+    extent_B = B_cloud.get_axis_aligned_bounding_box().get_extent()
+    volume_B = extent_B[0] * extent_B[1] * extent_B[2]
+
+    is_bigger = volume_A > volume_B
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_bigger else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
 
 def tall_predicate(A, B):
+    template_questions = tall_predicate_questions
+    true_responses = tall_true_responses
+    false_responses = tall_false_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
     height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
     height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    return f"Is {A_desc} taller than {B_desc}? Answer: {'Yes' if height_A > height_B else 'No'}."
+
+    is_taller = height_A > height_B
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_taller else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
 
 def short_predicate(A, B):
+    template_questions = short_predicate_questions
+    true_responses = short_true_responses
+    false_responses = short_false_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
     height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
     height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    return f"Is {A_desc} shorter than {B_desc}? Answer: {'Yes' if height_A < height_B else 'No'}."
 
-def above_diff(A, B):
+    is_shorter = height_A < height_B
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_shorter else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+
+def thin_predicate(A, B):
+    template_questions = thin_predicate_questions
+    true_responses = thin_true_responses
+    false_responses = thin_false_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
-    max_z_A = A_cloud.get_axis_aligned_bounding_box().get_max_bound()[2]
-    max_z_B = B_cloud.get_axis_aligned_bounding_box().get_max_bound()[2]
-    diff = abs(max_z_A - max_z_B)
-    return f"The vertical distance from the top of {A_desc} to the top of {B_desc} is {diff} units."
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
 
-def vertical_dist(A, B):
-    A_desc, A_cloud = A
-    B_desc, B_cloud = B
-    center_z_A = A_cloud.get_center()[2]
-    center_z_B = B_cloud.get_center()[2]
-    distance = abs(center_z_A - center_z_B)
-    return f"The vertical distance between {A_desc} and {B_desc} is {distance} units."
-
-def horizontal_dist(A, B):
-    A_desc, A_cloud = A
-    B_desc, B_cloud = B
-    center_A = A_cloud.get_center()
-    center_B = B_cloud.get_center()
-    distance = np.sqrt((center_A[0] - center_B[0])**2 + (center_A[1] - center_B[1])**2)
-    return f"The horizontal distance between {A_desc} and {B_desc} is {distance} units."
-
-def above_below_classify(A, B):
-    A_desc, A_cloud = A
-    B_desc, B_cloud = B
-    if above_predicate(A, B).endswith("Yes"):
-        relation = "above"
-    elif below_predicate(A, B).endswith("Yes"):
-        relation = "below"
-    else:
-        relation = "neither above nor below"
-    return f"In terms of elevation, {A_desc} is {relation} {B_desc}."
-
-def height(A):
-    A_desc, A_cloud = A
-    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
-    return f"The height of {A_desc} is {height_A} units."
-
-def width(A):
-    A_desc, A_cloud = A
     width_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[0]
-    return f"The width of {A_desc} is {width_A} units."
+    width_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[0]
+
+    is_thinner = width_A < width_B
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_thinner else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+
+def small_predicate(A, B):
+    template_questions = small_predicate_questions
+    true_responses = small_true_responses
+    false_responses = small_false_responses
+
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    extent_A = A_cloud.get_axis_aligned_bounding_box().get_extent()
+    volume_A = extent_A[0] * extent_A[1] * extent_A[2]
+
+    extent_B = B_cloud.get_axis_aligned_bounding_box().get_extent()
+    volume_B = extent_B[0] * extent_B[1] * extent_B[2]
+
+    is_smaller = volume_A < volume_B
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_smaller else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+
+def behind_predicate(A, B):
+    template_questions = behind_predicate_questions
+    true_responses = behind_true
+    false_responses = behind_false
+
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    A_center = A_cloud.get_axis_aligned_bounding_box().get_center()
+    B_center = B_cloud.get_axis_aligned_bounding_box().get_center()
+    is_behind = A_center[2] > B_center[2]
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_behind else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+
+def front_predicate(A, B):
+    template_questions = front_predicate_questions
+    true_responses = front_true
+    false_responses = front_false
+
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    A_center = A_cloud.get_axis_aligned_bounding_box().get_center()
+    B_center = B_cloud.get_axis_aligned_bounding_box().get_center()
+    is_in_front = A_center[2] < B_center[2]
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(
+        true_responses if is_in_front else false_responses
+    )
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+
+# Choice prompts
+
+def left_choice(A, B):
+    template_questions = left_choice_questions
+    template_responses = left_choice_responses
+
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    A_pos = A_cloud.get_center()
+    B_pos = B_cloud.get_center()
+
+    more_left = A_desc if A_pos[0] < B_pos[0] else B_desc
+
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = answer_template.replace("[X]", more_left)
+
+    return question + " Answer: " + answer
+
+
+def right_choice(A, B):
+    template_questions = right_choice_questions
+    template_responses = right_choice_responses
+
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    A_pos = A_cloud.get_center()
+    B_pos = B_cloud.get_center()
+
+    more_right = A_desc if A_pos[0] > B_pos[0] else B_desc
+
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = answer_template.replace("[X]", more_right)
+
+    return question + " Answer: " + answer
+
 
 def above_choice(A, B):
+    template_questions = above_choice_questions
+    template_responses = above_choice_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
-    if above_predicate(A, B).endswith("Yes"):
-        chosen = A_desc
-    elif below_predicate(A, B).endswith("Yes"):
-        chosen = B_desc
-    else:
-        chosen = "neither"
-    return f"Which object is more above? Answer: {chosen}."
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    A_pos = A_cloud.get_center()
+    B_pos = B_cloud.get_center()
+
+    more_above = A_desc if A_pos[1] > B_pos[1] else B_desc
+
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = answer_template.replace("[X]", more_above)
+
+    return question + " Answer: " + answer
+
 
 def below_choice(A, B):
+    template_questions = below_choice_questions
+    template_responses = below_choice_responses
+
     A_desc, A_cloud = A
     B_desc, B_cloud = B
-    if below_predicate(A, B).endswith("Yes"):
-        chosen = A_desc
-    elif above_predicate(A, B).endswith("Yes"):
-        chosen = B_desc
-    else:
-        chosen = "neither"
-    return f"Which object is more below? Answer: {chosen}."
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
 
-def elevation(A):
+    A_pos = A_cloud.get_center()
+    B_pos = B_cloud.get_center()
+
+    more_below = A_desc if A_pos[1] < B_pos[1] else B_desc
+
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = answer_template.replace("[X]", more_below)
+
+    return question + " Answer: " + answer
+
+
+def tall_choice(A, B):
+    template_questions = tall_choice_questions
+    template_responses = tall_choice_responses
+
     A_desc, A_cloud = A
-    min_z_A = A_cloud.get_axis_aligned_bounding_box().get_min_bound()[2]
-    return f"The elevation of {A_desc} from the reference plane is {min_z_A} units."
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
 
-def evaluate_predicates_on_pairs(pairs):
-    all_predicates = [tall_choice, gap, tall_short_classify, above_predicate, below_predicate,
-                      short_choice, below_diff, tall_predicate, short_predicate, above_diff,
-                      vertical_dist, horizontal_dist, above_below_classify, height, width,
-                      above_choice, below_choice, elevation]
-    
-    selected_predicates = random.sample(all_predicates, 5)
-    
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+
+    taller = A_desc if height_A > height_B else B_desc
+
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = answer_template.replace("[X]", taller)
+
+    return question + " Answer: " + answer
+
+
+def short_choice(A, B):
+    template_questions = short_choice_questions
+    template_responses = short_choice_responses
+
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+
+    shorter = A_desc if height_A < height_B else B_desc
+
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = answer_template.replace("[X]", shorter)
+
+    return question + " Answer: " + answer
+
+
+# Distance prompts
+
+def generate_spatial_reasoning_data(
+    A, B, human_readable_dist, template_questions, template_answers
+):
+    A_desc, B_desc = A[0].lower(), B[0].lower()
+
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_answers)
+
+    # Replace placeholders with actual values
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = (
+        answer_template.replace("[A]", A_desc)
+        .replace("[B]", B_desc)
+        .replace("[X]", human_readable_dist)
+    )
+
+    # Add to the dataset
+    return question + " Answer: " + answer
+
+
+def vertical_distance_data(A, B):
+    template_questions = vertical_distance_questions
+    template_answers = vertical_distance_answers
+
+    A_center = A[1].get_axis_aligned_bounding_box().get_center()
+    B_center = B[1].get_axis_aligned_bounding_box().get_center()
+    vertical_distance = abs(A_center[1] - B_center[1])
+    human_readable_dist = human_like_distance(vertical_distance)
+
+    return generate_spatial_reasoning_data(
+        A, B, human_readable_dist, template_questions, template_answers
+    )
+
+
+def horizontal_distance_data(A, B):
+    template_questions = horizontal_distance_questions
+    template_answers = horizontal_distance_answers
+
+    A_center = A[1].get_axis_aligned_bounding_box().get_center()
+    B_center = B[1].get_axis_aligned_bounding_box().get_center()
+    horizontal_distance = np.sqrt(
+        (A_center[0] - B_center[0]) ** 2 + (A_center[2] - B_center[2]) ** 2
+    )
+
+    human_readable_dist = human_like_distance(horizontal_distance)
+    return generate_spatial_reasoning_data(
+        A, B, human_readable_dist, template_questions, template_answers
+    )
+
+
+def width_data(A, B=None):
+    A_desc = A[0].lower()
+
+    template_questions = width_questions
+    template_answers = width_answers
+
+    width = A[1].get_axis_aligned_bounding_box().get_extent()[0]
+
+    human_readable_width = human_like_distance(width)
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_answers)
+
+    question = question_template.replace("[A]", A_desc)
+    answer = answer_template.replace("[A]", A_desc).replace("[X]", human_readable_width)
+
+    return question + " Answer: " + answer
+
+def height_data(A, B=None):
+    A_desc = A[0].lower()
+
+    template_questions = height_questions
+    template_answers = height_answers
+
+    width = A[1].get_axis_aligned_bounding_box().get_extent()[0]
+
+    human_readable_width = human_like_distance(width)
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_answers)
+
+    question = question_template.replace("[A]", A_desc)
+    answer = answer_template.replace("[A]", A_desc).replace("[X]", human_readable_width)
+
+    return question + " Answer: " + answer
+
+
+def evaluate_predicates_on_pairs(pairs, is_canonicalized):
+    all_prompt_variants = [
+        left_predicate,
+        right_predicate,
+        wide_predicate,
+        big_predicate,
+        thin_predicate,
+        small_predicate,
+        behind_predicate,
+        front_predicate,
+        left_choice,
+        right_choice,
+    ]
+
+    add_canonicalized = [
+            tall_choice,
+            above_predicate,
+            below_predicate,
+            short_choice,
+            below_choice,
+            tall_predicate,
+            short_predicate,
+            above_choice,
+            vertical_distance_data,
+            horizontal_distance_data,
+            width_data,
+            height_data,
+        ]
+
+    if is_canonicalized:
+        all_prompt_variants += add_canonicalized
+
+    selected_predicates_choices = random.sample(all_prompt_variants, 10)
+
     results = []
-    
+
     for A, B in pairs:
         pair_results = []
-        for predicate in selected_predicates:
-            try:
-                pair_results.append(predicate(A, B))
-            except:
-                pair_results.append(predicate(A))
+        for prompt_func in selected_predicates_choices:
+            pair_results.append(prompt_func(A, B))
+
+        # Run each of the distance functions
+        distance = calculate_distances_between_point_clouds(A[1], B[1])
+        pair_results.append(
+            generate_spatial_reasoning_data(
+                A,
+                B,
+                distance,
+                distance_template_questions,
+                distance_template_answers,
+            )
+        )
 
         results.extend(pair_results)
     return results

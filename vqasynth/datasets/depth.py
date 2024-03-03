@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from zoedepth.models.builder import build_model
 from zoedepth.utils.config import get_config
+from vqasynth.datasets.utils import colorize
 
 # ZoeD_N
 def load_zoe_depth():
@@ -14,5 +15,6 @@ def load_zoe_depth():
 
 def depth(img, depth_model):
     depth = depth_model.infer_pil(img)
-    raw_depth = Image.fromarray((depth*256).astype('uint16'))
-    return raw_depth
+    colored_depth = colorize(depth, cmap='gray_r')
+    output_depth = Image.fromarray(colored_depth).convert('L')
+    return output_depth
