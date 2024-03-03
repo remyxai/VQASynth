@@ -1,53 +1,27 @@
 import pickle
 import numpy as np
 import open3d as o3d
+import random
 
-def serialize_pointclouds(pointclouds):
-    serialized_data = []
-    for pcd in pointclouds:
-        # Extract relevant data from each PointCloud
-        points = np.asarray(pcd.points)
-        colors = np.asarray(pcd.colors) if pcd.has_colors() else None
-        normals = np.asarray(pcd.normals) if pcd.has_normals() else None
+def save_pointcloud(pcd, file_path):
+    """
+    Save a point cloud to a file using Open3D.
+    """
+    o3d.io.write_point_cloud(file_path, pcd)
 
-        # Serialize each component to bytes
-        pcd_data = {
-            'points': pickle.dumps(points),
-            'colors': pickle.dumps(colors) if colors is not None else None,
-            'normals': pickle.dumps(normals) if normals is not None else None,
-        }
-
-        # Add the serialized data for the current PointCloud to the list
-        serialized_data.append(pcd_data)
-    return serialized_data
-
-def restore_pointclouds(serialized_data):
+def restore_pointclouds(pointcloud_paths):
     restored_pointclouds = []
-    for data in serialized_data:
-        # Deserialize each component
-        points = pickle.loads(data['points'])
-        colors = pickle.loads(data['colors']) if data['colors'] is not None else None
-        normals = pickle.loads(data['normals']) if data['normals'] is not None else None
-
-        # Create a new PointCloud object and assign the deserialized data
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
-        if colors is not None:
-            pcd.colors = o3d.utility.Vector3dVector(colors)
-        if normals is not None:
-            pcd.normals = o3d.utility.Vector3dVector(normals)
-
-        # Add the restored PointCloud to the list
-        restored_pointclouds.append(pcd)
+    for path in pointcloud_paths:
+        restored_pointclouds.append(o3d.io.read_point_cloud(path))
     return restored_pointclouds
 
 
 def create_point_cloud_from_rgbd(rgb_image, depth_image, intrinsic_parameters):
     rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
-        o3d.io.read_image(rgb_image),
-        o3d.io.read_image(depth_image),
-        depth_scale=1000.0,
-        depth_trunc=10.0,
+        o3d.geometry.Image(rgb_image),
+        o3d.geometry.Image(depth_image),
+        depth_scale=0.125, #1000.0,
+        depth_trunc=10.0, #10.0,
         convert_rgb_to_intensity=False
     )
     intrinsic = o3d.camera.PinholeCameraIntrinsic()
@@ -96,27 +70,69 @@ def canonicalize_point_cloud(pcd, canonicalize_threshold=0.3):
     else:
         return pcd, canonicalized, None
 
-def calculate_distances_between_point_clouds(point_clouds):
-    distances_info = []
 
-    for i, pcd1 in enumerate(point_clouds):
-        for j in range(i + 1, len(point_clouds)):
-            pcd2 = point_clouds[j]
-            dist_pcd1_to_pcd2 = np.asarray(pcd1.compute_point_cloud_distance(pcd2))
-            dist_pcd2_to_pcd1 = np.asarray(pcd2.compute_point_cloud_distance(pcd1))
-            combined_distances = np.concatenate((dist_pcd1_to_pcd2, dist_pcd2_to_pcd1))
-            min_dist = np.min(combined_distances)
-            avg_dist = np.mean(combined_distances)
-            max_dist = np.max(combined_distances)
+# Distance calculations
+def human_like_distance(distance_meters):
+    # Define the choices with units included, focusing on the 0.1 to 10 meters range
+    if distance_meters < 1:  # For distances less than 1 meter
+        choices = [
+            (
+                round(distance_meters * 100, 2),
+                "centimeters",
+                0.2,
+            ),  # Centimeters for very small distances
+            (
+                round(distance_meters * 39.3701, 2),
+                "inches",
+                0.8,
+            ),  # Inches for the majority of cases under 1 meter
+        ]
+    elif distance_meters < 3:  # For distances less than 3 meters
+        choices = [
+            (round(distance_meters, 2), "meters", 0.5),
+            (
+                round(distance_meters * 3.28084, 2),
+                "feet",
+                0.5,
+            ),  # Feet as a common unit within indoor spaces
+        ]
+    else:  # For distances from 3 up to 10 meters
+        choices = [
+            (
+                round(distance_meters, 2),
+                "meters",
+                0.7,
+            ),  # Meters for clarity and international understanding
+            (
+                round(distance_meters * 3.28084, 2),
+                "feet",
+                0.3,
+            ),  # Feet for additional context
+        ]
 
-            distances_info.append({
-                'pcd_pair': (i, j),
-                'min_distance': min_dist,
-                'average_distance': avg_dist,
-                'max_distance': max_dist
-            })
+    # Normalize probabilities and make a selection
+    total_probability = sum(prob for _, _, prob in choices)
+    cumulative_distribution = []
+    cumulative_sum = 0
+    for value, unit, probability in choices:
+        cumulative_sum += probability / total_probability  # Normalize probabilities
+        cumulative_distribution.append((cumulative_sum, value, unit))
 
-    return distances_info
+    # Randomly choose based on the cumulative distribution
+    r = random.random()
+    for cumulative_prob, value, unit in cumulative_distribution:
+        if r < cumulative_prob:
+            return f"{value} {unit}"
+
+    # Fallback to the last choice if something goes wrong
+    return f"{choices[-1][0]} {choices[-1][1]}"
+
+def calculate_distances_between_point_clouds(A, B):
+    dist_pcd1_to_pcd2 = np.asarray(A.compute_point_cloud_distance(B))
+    dist_pcd2_to_pcd1 = np.asarray(B.compute_point_cloud_distance(A))
+    combined_distances = np.concatenate((dist_pcd1_to_pcd2, dist_pcd2_to_pcd1))
+    avg_dist = np.mean(combined_distances)
+    return human_like_distance(avg_dist)
 
 def calculate_centroid(pcd):
     """Calculate the centroid of a point cloud."""

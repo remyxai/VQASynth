@@ -4,11 +4,11 @@ import pickle
 import argparse
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from vqasynth.datasets.segment import apply_mask_to_image
-from vqasynth.datasets.pointcloud import create_point_cloud_from_rgbd, serialize_pointclouds
+from vqasynth.datasets.pointcloud import create_point_cloud_from_rgbd, save_pointcloud, canonicalize_point_cloud
 
-
-def pointcloud_image_data(row):
+def pointcloud_image_data(row, output_dir):
     original_image_cv = cv2.cvtColor(np.array(row["image"].convert('RGB')), cv2.COLOR_RGB2BGR)
     depth_image_cv = cv2.cvtColor(np.array(row["depth_map"].convert('RGB')), cv2.COLOR_RGB2BGR)
 
@@ -23,45 +23,56 @@ def pointcloud_image_data(row):
     }
 
     point_clouds = []
-    serialized_data = []
+    point_cloud_data = []
+
+    original_pcd = create_point_cloud_from_rgbd(original_image_cv, depth_image_cv, intrinsic_parameters)
+    pcd, canonicalized, transformation = canonicalize_point_cloud(original_pcd, canonicalize_threshold=0.3)
+
     for i, mask in enumerate(row["masks"]):
         mask_binary = mask > 0
 
         masked_rgb = apply_mask_to_image(original_image_cv, mask_binary)
         masked_depth = apply_mask_to_image(depth_image_cv, mask_binary)
 
-        masked_rgb_path = f'temp_masked_rgb_{i}.png'
-        masked_depth_path = f'temp_masked_depth_{i}.png'
-        cv2.imwrite(masked_rgb_path, masked_rgb)
-        cv2.imwrite(masked_depth_path, masked_depth)
-
-        pcd = create_point_cloud_from_rgbd(masked_rgb_path, masked_depth_path, intrinsic_parameters)
+        pcd = create_point_cloud_from_rgbd(masked_rgb, masked_depth, intrinsic_parameters)
         point_clouds.append(pcd)
-
-        os.remove(masked_rgb_path)
-        os.remove(masked_depth_path)
 
     for idx, pcd in enumerate(point_clouds):
         cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
         inlier_cloud = pcd.select_by_index(ind)
-        point_clouds[idx] = inlier_cloud
+        if canonicalized:
+            pcd.transform(transformation)
+        pointcloud_filepath = os.path.join(output_dir, "pointclouds", f"pointcloud_{Path(row['image_filename']).stem}_{idx}.pcd")
+        save_pointcloud(inlier_cloud, pointcloud_filepath)
+        point_cloud_data.append(pointcloud_filepath)
 
-    if point_clouds:
-        serialized_data = serialize_pointclouds(point_clouds)
-
-    return serialized_data
+    # Now, return both point_cloud_data and the canonicalized flag
+    return point_cloud_data, canonicalized
 
 def main(output_dir):
+    point_cloud_dir = os.path.join(output_dir, "pointclouds")
+    if not os.path.exists(point_cloud_dir):
+        os.makedirs(point_cloud_dir)
+
     for filename in os.listdir(output_dir):
         if filename.endswith('.pkl'):
             pkl_path = os.path.join(output_dir, filename)
-            # Load the DataFrame from the .pkl file
             df = pd.read_pickle(pkl_path)
 
-            # Process each image and add the results to a new column
-            df['pointclouds'] = df.apply(pointcloud_image_data, axis=1)
+            # Initialize empty lists to hold the pointclouds and canonicalization flags
+            pointclouds = []
+            is_canonicalized = []
 
-            # Save the updated DataFrame back to the .pkl file
+            # Update to process each row and append results to lists
+            for index, row in df.iterrows():
+                pcd_data, canonicalized = pointcloud_image_data(row, output_dir)
+                pointclouds.append(pcd_data)
+                is_canonicalized.append(canonicalized)
+
+            # Assign lists to new DataFrame columns
+            df['pointclouds'] = pointclouds
+            df['is_canonicalized'] = is_canonicalized
+
             df.to_pickle(pkl_path)
             print(f"Processed and updated {filename}")
 

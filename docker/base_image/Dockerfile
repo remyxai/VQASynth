@@ -24,7 +24,6 @@ RUN python3 -m pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --
 
 WORKDIR /app/VQASynth
 COPY . /app/VQASynth
-RUN ls -lh .
 RUN pip install .
 RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python==0.2.45 --force-reinstall --no-cache-dir
 

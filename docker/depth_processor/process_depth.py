@@ -5,7 +5,7 @@ import pandas as pd
 from PIL import Image
 from vqasynth.wrappers.zoedepth import ZoeDepth
 
-def process_images_in_chunks(image_dir, chunk_size=10):
+def process_images_in_chunks(image_dir, chunk_size=100):
     """Generator function to yield chunks of images from the directory."""
     chunk = []
     for image_filename in os.listdir(image_dir):

@@ -15,6 +15,7 @@ def prompt_image_data(row):
     image_file = row["image_filename"]
     captions = row["captions"]
     pointclouds = restore_pointclouds(row["pointclouds"])
+    is_canonicalized = row["is_canonicalized"]
 
     try:
         objects = list(zip(captions, pointclouds))
@@ -22,7 +23,7 @@ def prompt_image_data(row):
         random.shuffle(all_pairs)
         selected_pairs = all_pairs[:5]
         object_pairs = [(objects[i], objects[j]) for i,j in selected_pairs]
-        prompts = evaluate_predicates_on_pairs(object_pairs)
+        prompts = evaluate_predicates_on_pairs(object_pairs, is_canonicalized)
     except:
         prompts = []
     return prompts

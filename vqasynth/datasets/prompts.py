@@ -3,75 +3,10 @@ import numpy as np
 from itertools import combinations
 from vqasynth.datasets.prompt_templates import *
 
-
-# Distance calculations
-def human_like_distance(distance_meters):
-    # Define the choices with units included, focusing on the 0.1 to 10 meters range
-    if distance_meters < 1:  # For distances less than 1 meter
-        choices = [
-            (
-                round(distance_meters * 100, 2),
-                "centimeters",
-                0.2,
-            ),  # Centimeters for very small distances
-            (
-                round(distance_meters * 39.3701, 2),
-                "inches",
-                0.8,
-            ),  # Inches for the majority of cases under 1 meter
-        ]
-    elif distance_meters < 3:  # For distances less than 3 meters
-        choices = [
-            (round(distance_meters, 2), "meters", 0.5),
-            (
-                round(distance_meters * 3.28084, 2),
-                "feet",
-                0.5,
-            ),  # Feet as a common unit within indoor spaces
-        ]
-    else:  # For distances from 3 up to 10 meters
-        choices = [
-            (
-                round(distance_meters, 2),
-                "meters",
-                0.7,
-            ),  # Meters for clarity and international understanding
-            (
-                round(distance_meters * 3.28084, 2),
-                "feet",
-                0.3,
-            ),  # Feet for additional context
-        ]
-
-    # Normalize probabilities and make a selection
-    total_probability = sum(prob for _, _, prob in choices)
-    cumulative_distribution = []
-    cumulative_sum = 0
-    for value, unit, probability in choices:
-        cumulative_sum += probability / total_probability  # Normalize probabilities
-        cumulative_distribution.append((cumulative_sum, value, unit))
-
-    # Randomly choose based on the cumulative distribution
-    r = random.random()
-    for cumulative_prob, value, unit in cumulative_distribution:
-        if r < cumulative_prob:
-            return f"{value} {unit}"
-
-    # Fallback to the last choice if something goes wrong
-    return f"{choices[-1][0]} {choices[-1][1]}"
-
-
-def calculate_distances_between_point_clouds(A, B):
-    dist_pcd1_to_pcd2 = np.asarray(A.compute_point_cloud_distance(B))
-
-    # Calculate the minimum, average, and maximum distances for this pair
-    avg_dist = np.mean(dist_pcd1_to_pcd2)
-
-    return human_like_distance(avg_dist)
+from vqasynth.datasets.pointcloud import human_like_distance, calculate_distances_between_point_clouds
 
 
 # Predicate prompts
-
 
 def left_predicate(A, B):
     template_questions = left_predicate_questions
@@ -131,7 +66,7 @@ def above_predicate(A, B):
     A_pos = A_cloud.get_center()
     B_pos = B_cloud.get_center()
 
-    is_above = A_pos[2] > B_pos[2]  # Assuming Z is the vertical axis
+    is_above = A_pos[1] > B_pos[1]  
 
     question_template = random.choice(template_questions)
     response_template = random.choice(true_responses if is_above else false_responses)
@@ -154,7 +89,7 @@ def below_predicate(A, B):
     A_pos = A_cloud.get_center()
     B_pos = B_cloud.get_center()
 
-    is_below = A_pos[2] < B_pos[2]  # Assuming Z is the vertical axis
+    is_below = A_pos[1] < B_pos[1]  
 
     question_template = random.choice(template_questions)
     response_template = random.choice(true_responses if is_below else false_responses)
@@ -207,6 +142,28 @@ def big_predicate(A, B):
 
     question_template = random.choice(template_questions)
     response_template = random.choice(true_responses if is_bigger else false_responses)
+
+    question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
+    answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
+
+    return question + " Answer: " + answer
+
+def tall_predicate(A, B):
+    template_questions = tall_predicate_questions
+    true_responses = tall_true_responses
+    false_responses = tall_false_responses
+
+    A_desc, A_cloud = A
+    B_desc, B_cloud = B
+    A_desc, B_desc = A_desc.lower(), B_desc.lower()
+
+    height_A = A_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+    height_B = B_cloud.get_axis_aligned_bounding_box().get_extent()[1]
+
+    is_taller = height_A > height_B
+
+    question_template = random.choice(template_questions)
+    response_template = random.choice(true_responses if is_taller else false_responses)
 
     question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
     answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
@@ -334,7 +291,6 @@ def front_predicate(A, B):
 
 # Choice prompts
 
-
 def left_choice(A, B):
     template_questions = left_choice_questions
     template_responses = left_choice_responses
@@ -390,7 +346,7 @@ def above_choice(A, B):
     A_pos = A_cloud.get_center()
     B_pos = B_cloud.get_center()
 
-    more_above = A_desc if A_pos[2] > B_pos[2] else B_desc  # Assuming Z is vertical
+    more_above = A_desc if A_pos[1] > B_pos[1] else B_desc
 
     question_template = random.choice(template_questions)
     answer_template = random.choice(template_responses)
@@ -412,7 +368,7 @@ def below_choice(A, B):
     A_pos = A_cloud.get_center()
     B_pos = B_cloud.get_center()
 
-    more_below = A_desc if A_pos[2] < B_pos[2] else B_desc  # Assuming Z is vertical
+    more_below = A_desc if A_pos[1] < B_pos[1] else B_desc
 
     question_template = random.choice(template_questions)
     answer_template = random.choice(template_responses)
@@ -468,7 +424,6 @@ def short_choice(A, B):
 
 
 # Distance prompts
-
 
 def generate_spatial_reasoning_data(
     A, B, human_readable_dist, template_questions, template_answers
@@ -537,33 +492,57 @@ def width_data(A, B=None):
 
     return question + " Answer: " + answer
 
+def height_data(A, B=None):
+    A_desc = A[0].lower()
 
-def evaluate_predicates_on_pairs(pairs):
-    all_predicates_choices = [
-        tall_choice,
+    template_questions = height_questions
+    template_answers = height_answers
+
+    width = A[1].get_axis_aligned_bounding_box().get_extent()[0]
+
+    human_readable_width = human_like_distance(width)
+    question_template = random.choice(template_questions)
+    answer_template = random.choice(template_answers)
+
+    question = question_template.replace("[A]", A_desc)
+    answer = answer_template.replace("[A]", A_desc).replace("[X]", human_readable_width)
+
+    return question + " Answer: " + answer
+
+
+def evaluate_predicates_on_pairs(pairs, is_canonicalized):
+    all_prompt_variants = [
         left_predicate,
         right_predicate,
-        above_predicate,
-        below_predicate,
         wide_predicate,
         big_predicate,
-        short_predicate,
         thin_predicate,
         small_predicate,
         behind_predicate,
         front_predicate,
         left_choice,
         right_choice,
-        above_choice,
-        below_choice,
-        tall_choice,
-        short_choice,
-        vertical_distance_data,
-        horizontal_distance_data,
-        width_data,
     ]
 
-    selected_predicates_choices = random.sample(all_predicates_choices, 10)
+    add_canonicalized = [
+            tall_choice,
+            above_predicate,
+            below_predicate,
+            short_choice,
+            below_choice,
+            tall_predicate,
+            short_predicate,
+            above_choice,
+            vertical_distance_data,
+            horizontal_distance_data,
+            width_data,
+            height_data,
+        ]
+
+    if is_canonicalized:
+        all_prompt_variants += add_canonicalized
+
+    selected_predicates_choices = random.sample(all_prompt_variants, 10)
 
     results = []
 
@@ -574,7 +553,6 @@ def evaluate_predicates_on_pairs(pairs):
 
         # Run each of the distance functions
         distance = calculate_distances_between_point_clouds(A[1], B[1])
-        print("RAW DISTANCE: ", distance)
         pair_results.append(
             generate_spatial_reasoning_data(
                 A,

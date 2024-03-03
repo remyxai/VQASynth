@@ -138,6 +138,24 @@ big_false_responses = [
     "Incorrect, the [A] is not larger than the [B].",
 ]
 
+tall_predicate_questions = [
+    "Is the [A] taller than the [B]?",
+    "Does the [A] have a greater height compared to the [B]?",
+    "Can you confirm if the [A] is taller than the [B]?",
+]
+
+tall_true_responses = [
+    "Yes, the [A] is taller than the [B].",
+    "Indeed, the [A] has a greater height compared to the [B].",
+    "Correct, the [A] is much taller as the [B].",
+]
+
+tall_false_responses = [
+    "No, the [A] is not taller than the [B].",
+    "In fact, the [A] may be shorter or the same height as the [B].",
+    "Incorrect, the [A]'s height is not larger of the [B]'s.",
+]
+
 short_predicate_questions = [
     "Is the [A] shorter than the [B]?",
     "Does the [A] have a lesser height compared to the [B]?",
@@ -387,7 +405,7 @@ horizontal_distance_answers = [
     "It is approximately [X].",
 ]
 
-# Width
+# Width/Height
 width_questions = [
     "Measure the width of the [A].",
     "Determine the horizontal dimensions of the [A].",
@@ -408,5 +426,27 @@ width_answers = [
     "The width of the [A] is [X].",
     "the [A] is [X] wide.",
     "the [A] is [X] in width.",
+    "It is [X].",
+]
+
+height_questions = [
+    "Measure the height of the [A].",
+    "Determine the vertical dimensions of the [A].",
+    "Find out how tall the [A] is.",
+    "What is the height of the [A]?",
+    "How tall is the [A]?",
+    "What are the dimensions of the [A] in terms of height?",
+    "Could you tell me the vericall size of the [A]?",
+    "What is the approximate height of the [A]?",
+    "How tall is the [A]?",
+    "How much space does the [A] occupy vertically?",
+    "How tall is the [A]?",
+    "How tall is the [A] in terms of width?",
+]
+height_answers = [
+    "[X]",
+    "The height of the [A] is [X].",
+    "the [A] is [X] tall.",
+    "the [A] is [X] in height.",
     "It is [X].",
 ]
