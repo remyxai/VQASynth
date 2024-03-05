@@ -53,6 +53,14 @@ Here are some examples:
 | Does the red forklift in warehouse appear on the left side of the brown cardboard boxes stacked? | How close is the man in red hat walking from the wooden pallet with boxes? | Does the man in blue shirt working have a greater height compared to the wooden pallet with boxes on floor? |
 | Incorrect, the red forklift in warehouse is not on the left side of the brown cardboard boxes stacked. | The man in red hat walking is 60.13 centimeters from the wooden pallet with boxes. | Indeed, the man in blue shirt working is taller compared to the wooden pallet with boxes on floor. |
 
+Here's a sample of warehouse images captioned with spatial relationships similar to the table above. 
+
+```bash
+wget https://remyx.ai/assets/vqasynth/vqasynth_warehouse_spaces.zip
+
+# Data is formatted for LLaVA fine-tuning
+unzip vqasynth_warehouse_spaces.zip 
+```
 
 Once completed, you can follow this resource on [fine-tuning LLaVa](https://github.com/haotian-liu/LLaVA/blob/5d8f1760c08b7dfba3ae97b71cbd4c6f17d12dbd/docs/Finetune_Custom_Data.md#L4).
 
