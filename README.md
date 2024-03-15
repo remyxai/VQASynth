@@ -64,7 +64,9 @@ unzip vqasynth_warehouse_spaces.zip
 
 Once completed, you can follow this resource on [fine-tuning LLaVa](https://github.com/haotian-liu/LLaVA/blob/5d8f1760c08b7dfba3ae97b71cbd4c6f17d12dbd/docs/Finetune_Custom_Data.md#L4).
 
-Check out our LLaVA 1.5 LoRA: [SpaceLLaVA](https://huggingface.co/remyxai/SpaceLLaVA)
+## Models
+
+Check out our LLaVA 1.5 LoRA [SpaceLLaVA](https://huggingface.co/remyxai/SpaceLLaVA)
 and MobileVLM-based [SpaceLLaVA-lite](https://huggingface.co/remyxai/SpaceLLaVA-lite)
 
 ## Notebooks
