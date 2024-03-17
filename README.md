@@ -70,6 +70,7 @@ Check out our LLaVA 1.5 LoRA [SpaceLLaVA](https://huggingface.co/remyxai/SpaceLL
 and MobileVLM-based [SpaceLLaVA-lite](https://huggingface.co/remyxai/SpaceLLaVA-lite)
 
 Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
+
 ![image](https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef)
 
 
