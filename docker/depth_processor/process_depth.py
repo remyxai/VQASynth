@@ -5,6 +5,35 @@ import pandas as pd
 from PIL import Image
 from vqasynth.wrappers.zoedepth import ZoeDepth
 
+from datasets import load_dataset
+import os
+import io
+
+
+def load_from_hf(image_dir: str, hf_dataset: str):
+    hf_token = os.environ.get('HF_TOKEN')
+
+    try:
+        dataset = load_dataset(hf_dataset, use_auth_token=hf_token)
+        os.makedirs(image_dir, exist_ok=True)
+
+        for i, example in enumerate(dataset['train']):
+            image = example['image']
+            if isinstance(image, Image.Image):
+                image.save(f'{image_dir}/image_{i}.png')
+            else:
+                Image.open(image).save(f'{image_dir}/image_{i}.png')
+        print(f"Successfully loaded {len(dataset['train'])} images from '{hf_dataset}' to '{image_dir}'")
+        return dataset
+    
+    except Exception as e:
+        if 'Authentication' in str(e) and not hf_token:
+            print("Error: Authentication required. Please set the HF_TOKEN environment variable.")
+        else:
+            print(f"Something went wrong to load dataset from HuggingFace!")
+        return None
+
+
 def process_images_in_chunks(image_dir, chunk_size=100):
     """Generator function to yield chunks of images from the directory."""
     chunk = []
@@ -17,7 +46,11 @@ def process_images_in_chunks(image_dir, chunk_size=100):
     if chunk:  # yield the last chunk if it's not empty
         yield chunk
 
-def main(image_dir, output_dir):
+def main(image_dir, hf_dataset, output_dir):
+
+    if hf_dataset:
+        load_from_hf(image_dir, hf_dataset)
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
@@ -54,6 +87,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Depth extraction", add_help=True)
     parser.add_argument("--image_dir", type=str, required=True, help="path to image directory")
     parser.add_argument("--output_dir", type=str, required=True, help="path to output dataset directory")
+    parser.add_argument("--hf_dataset", type=str, required=False, default=None, help="repo id of huggingface dataset")
     args = parser.parse_args()
-    main(args.image_dir, args.output_dir)
+    main(args.image_dir, args.hf_dataset, args.output_dir)
 
