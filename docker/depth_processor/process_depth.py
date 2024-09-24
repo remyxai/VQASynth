@@ -94,5 +94,8 @@ if __name__ == "__main__":
 
     assert args.image_dir or args.hf_dataset, "Either --image_dir or --hf_dataset must be provided"
 
-    main(args.image_dir, args.hf_dataset, args.output_dir, args.hf_token)
+    hf_dataset = None if args.image_dir else args.hf_dataset
+    print("both HuggingFace dataset and image directory are provided, considering image directory")
+
+    main(args.image_dir, hf_dataset, args.output_dir, args.hf_token)
 
