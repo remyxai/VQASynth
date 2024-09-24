@@ -8,10 +8,11 @@ from vqasynth.wrappers.zoedepth import ZoeDepth
 from datasets import load_dataset
 import os
 import io
+from dotenv import load_dotenv
 
 
-def load_from_hf(image_dir: str, hf_dataset: str):
-    hf_token = os.environ.get('HF_TOKEN')
+
+def load_from_hf(image_dir: str, hf_dataset: str, hf_token: str):
 
     try:
         dataset = load_dataset(hf_dataset, use_auth_token=hf_token)
@@ -46,10 +47,10 @@ def process_images_in_chunks(image_dir, chunk_size=100):
     if chunk:  # yield the last chunk if it's not empty
         yield chunk
 
-def main(image_dir, hf_dataset, output_dir):
+def main(image_dir, hf_dataset, output_dir, hf_token):
 
     if hf_dataset:
-        load_from_hf(image_dir, hf_dataset)
+        load_from_hf(image_dir, hf_dataset, hf_token)
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -88,6 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--image_dir", type=str, required=True, help="path to image directory")
     parser.add_argument("--output_dir", type=str, required=True, help="path to output dataset directory")
     parser.add_argument("--hf_dataset", type=str, required=False, default=None, help="repo id of huggingface dataset")
+    parser.add_argument("--hf_token", type=str, required=False, default=None, help="token for huggingface")
     args = parser.parse_args()
-    main(args.image_dir, args.hf_dataset, args.output_dir)
+    main(args.image_dir, args.hf_dataset, args.output_dir, args.hf_token)
 

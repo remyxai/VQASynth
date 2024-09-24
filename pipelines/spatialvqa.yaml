@@ -7,7 +7,7 @@ services:
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR} ${HF_DATASET:+--hf_dataset ${HF_DATASET}}
+    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR} ${HF_DATASET:+--hf_dataset ${HF_DATASET}} ${HF_TOKEN:+--hf_token ${HF_TOKEN}}
     environment:
       NVIDIA_VISIBLE_DEVICES: all
     deploy:
@@ -69,7 +69,7 @@ services:
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - pointcloud_processor
-    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR} ${HF_DATASET_NAME:+--hf_dataset_name ${HF_DATASET_NAME}}
+    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR} ${HF_SAVE_DATASET_NAME:+--hf_save_dataset_name ${HF_SAVE_DATASET_NAME}} ${HF_TOKEN:+--hf_token ${HF_TOKEN}}
     deploy:
       resources:
         reservations:

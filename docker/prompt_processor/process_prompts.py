@@ -11,8 +11,9 @@ from vqasynth.datasets.pointcloud import restore_pointclouds
 from vqasynth.datasets.prompts import evaluate_predicates_on_pairs
 from datasets import Dataset
 
-def save_results_to_hf(results, hf_dataset_name):
-    hf_token = os.environ.get('HF_TOKEN')
+
+
+def save_results_to_hf(results, hf_dataset_name, hf_token):
     if not hf_token:
         raise ValueError("HF_TOKEN environment variable is not set. Please set it to your Hugging Face API token.")
 
@@ -21,6 +22,7 @@ def save_results_to_hf(results, hf_dataset_name):
 
         hf_dataset.push_to_hub(hf_dataset_name, token=hf_token)
         print(f"Results successfully saved to Hugging Face dataset: {hf_dataset_name}")
+        
 
         api.update_repo_visibility(hf_dataset_name, private=True, token=hf_token)  # Set to private by default
         api.add_metadata(hf_dataset_name, {
@@ -54,7 +56,7 @@ def save_as_json_local(output_dir, final_samples):
     with open(output_json, "w") as json_file:
         json.dump(final_samples, json_file, indent=4)
 
-def main(image_dir, output_dir):
+def main(image_dir, output_dir, hf_save_dataset_name, hf_token):
     final_samples = []
     for filename in os.listdir(output_dir):
         if filename.endswith('.pkl'):
@@ -98,9 +100,9 @@ def main(image_dir, output_dir):
                         final_samples.append(sample)
 
     # If hf_dataset_name is provided, push to Hugging Face
-    if hf_dataset_name:
+    if hf_save_dataset_name:
         try:
-            save_results_to_hf(final_samples, hf_dataset_name)
+            save_results_to_hf(final_samples, hf_save_dataset_name, hf_token)
         except Exception as e:
             print(f"Failed to push to Hugging Face: {str(e)}")
             save_as_json_local(output_dir, final_samples)
@@ -115,8 +117,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process images from .pkl files", add_help=True)
     parser.add_argument("--image_dir", type=str, required=True, help="path to image directory")
     parser.add_argument("--output_dir", type=str, required=True, help="path to directory containing .pkl files")
-    parser.add_argument("--hf_dataset_name", type=str, required=False, default=None, help="name of the dataset to push to huggingface, \
+    parser.add_argument("--hf_save_dataset_name", type=str, required=False, default=None, help="name of the dataset to push to huggingface, \
                             if not provided, it will store as a json object locally")
+    parser.add_argument("--hf_token", type=str, required=False, default=None, help="token for huggingface")
     args = parser.parse_args()
 
-    main(args.image_dir, args.output_dir)
+    main(args.image_dir, args.output_dir, args.hf_save_dataset_name, args.hf_token)

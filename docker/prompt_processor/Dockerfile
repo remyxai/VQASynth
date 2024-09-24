@@ -4,7 +4,7 @@ WORKDIR /app
 COPY process_prompts.py /app
 COPY entrypoint.sh /app
 
-RUN pip install pandas
+RUN pip install pandas datasets
 RUN chmod +x /app/entrypoint.sh
 
 # Set the entrypoint script to run when the container starts
