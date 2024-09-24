@@ -49,8 +49,12 @@ def process_images_in_chunks(image_dir, chunk_size=100):
 
 def main(image_dir, hf_dataset, output_dir, hf_token):
 
-    if hf_dataset:
-        load_from_hf(image_dir, hf_dataset, hf_token)
+    if image_dir is None and hf_dataset:
+        image_dir = "/path/to/image_dir" 
+        dataset = load_from_hf(image_dir, hf_dataset, hf_token)
+        if dataset is None:
+            print("Failed to load dataset from HuggingFace. Exiting.")
+            return
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -94,8 +98,5 @@ if __name__ == "__main__":
 
     assert args.image_dir or args.hf_dataset, "Either --image_dir or --hf_dataset must be provided"
 
-    hf_dataset = None if args.image_dir else args.hf_dataset
-    print("both HuggingFace dataset and image directory are provided, considering image directory")
-
-    main(args.image_dir, hf_dataset, args.output_dir, args.hf_token)
+    main(args.image_dir, args.hf_dataset, args.output_dir, args.hf_token)
 
