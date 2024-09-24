@@ -86,10 +86,13 @@ def main(image_dir, hf_dataset, output_dir, hf_token):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Depth extraction", add_help=True)
-    parser.add_argument("--image_dir", type=str, required=True, help="path to image directory")
     parser.add_argument("--output_dir", type=str, required=True, help="path to output dataset directory")
+    parser.add_argument("--image_dir", type=str, required=False, default=None, help="path to image directory")
     parser.add_argument("--hf_dataset", type=str, required=False, default=None, help="repo id of huggingface dataset")
     parser.add_argument("--hf_token", type=str, required=False, default=None, help="token for huggingface")
     args = parser.parse_args()
+
+    assert args.image_dir or args.hf_dataset, "Either --image_dir or --hf_dataset must be provided"
+
     main(args.image_dir, args.hf_dataset, args.output_dir, args.hf_token)
 
