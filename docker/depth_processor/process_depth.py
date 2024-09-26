@@ -5,6 +5,36 @@ import pandas as pd
 from PIL import Image
 from vqasynth.wrappers.zoedepth import ZoeDepth
 
+from datasets import load_dataset
+import os
+import io
+from dotenv import load_dotenv
+
+
+
+def load_from_hf(image_dir: str, hf_dataset: str, hf_token: str):
+
+    try:
+        dataset = load_dataset(hf_dataset, use_auth_token=hf_token)
+        os.makedirs(image_dir, exist_ok=True)
+
+        for i, example in enumerate(dataset['train']):
+            image = example['image']
+            if isinstance(image, Image.Image):
+                image.save(f'{image_dir}/image_{i}.png')
+            else:
+                Image.open(image).save(f'{image_dir}/image_{i}.png')
+        print(f"Successfully loaded {len(dataset['train'])} images from '{hf_dataset}' to '{image_dir}'")
+        return dataset
+    
+    except Exception as e:
+        if 'Authentication' in str(e) and not hf_token:
+            print("Error: Authentication required. Please set the HF_TOKEN environment variable.")
+        else:
+            print(f"Something went wrong to load dataset from HuggingFace!")
+        return None
+
+
 def process_images_in_chunks(image_dir, chunk_size=100):
     """Generator function to yield chunks of images from the directory."""
     chunk = []
@@ -17,7 +47,15 @@ def process_images_in_chunks(image_dir, chunk_size=100):
     if chunk:  # yield the last chunk if it's not empty
         yield chunk
 
-def main(image_dir, output_dir):
+def main(image_dir, hf_dataset, output_dir, hf_token):
+
+    if image_dir is None and hf_dataset:
+        image_dir = "/path/to/image_dir" 
+        dataset = load_from_hf(image_dir, hf_dataset, hf_token)
+        if dataset is None:
+            print("Failed to load dataset from HuggingFace. Exiting.")
+            return
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
@@ -52,8 +90,13 @@ def main(image_dir, output_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Depth extraction", add_help=True)
-    parser.add_argument("--image_dir", type=str, required=True, help="path to image directory")
     parser.add_argument("--output_dir", type=str, required=True, help="path to output dataset directory")
+    parser.add_argument("--image_dir", type=str, required=False, default=None, help="path to image directory")
+    parser.add_argument("--hf_dataset", type=str, required=False, default=None, help="repo id of huggingface dataset")
+    parser.add_argument("--hf_token", type=str, required=False, default=None, help="token for huggingface")
     args = parser.parse_args()
-    main(args.image_dir, args.output_dir)
+
+    assert args.image_dir or args.hf_dataset, "Either --image_dir or --hf_dataset must be provided"
+
+    main(args.image_dir, args.hf_dataset, args.output_dir, args.hf_token)
 
