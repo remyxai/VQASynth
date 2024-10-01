@@ -5,25 +5,62 @@ import argparse
 import numpy as np
 import pandas as pd
 from vqasynth.datasets.segment import CLIPSeg, SAM, sample_points_from_heatmap
+from transformers import AutoProcessor, AutoModelForCausalLM 
+import torch
 
+device = "cuda" 
+assert torch.cuda.is_available()
+torch_dtype = torch.float16
 
-clipseg = CLIPSeg(model_name="CIDAS/clipseg-rd64-refined")
+model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-large", torch_dtype=torch_dtype, trust_remote_code=True).to(device)
+processor = AutoProcessor.from_pretrained("microsoft/Florence-2-large", trust_remote_code=True)
 sam = SAM(model_name="facebook/sam-vit-huge", device="cuda")
+
+def florence_caption(image):
+    prompt = "<MORE_DETAILED_CAPTION>"
+    inputs = processor(text=prompt, images=image, return_tensors="pt").to(device, torch_dtype)
+
+    generated_ids = model.generate(
+        input_ids=inputs["input_ids"],
+        pixel_values=inputs["pixel_values"],
+        max_new_tokens=1024,
+        num_beams=3,
+        do_sample=False
+    )
+    generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+    parsed_answer = processor.post_process_generation(generated_text, task=prompt, image_size=(image.width, image.height))
+
+    prompt = parsed_answer[prompt]
+
+    inputs = processor(text=prompt, images=image, return_tensors="pt").to(device, torch_dtype)
+
+    generated_ids = model.generate(
+        input_ids=inputs["input_ids"],
+        pixel_values=inputs["pixel_values"],
+        max_new_tokens=1024,
+        num_beams=3,
+        do_sample=False
+    )
+    generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+    parsed_answer = processor.post_process_generation(generated_text, task="<CAPTION_TO_PHRASE_GROUNDING>", image_size=(image.width, image.height))
+    
+    parsed_answer = parsed_answer['<CAPTION_TO_PHRASE_GROUNDING>']
+    bboxes = parsed_answer['bboxes']
+    labels = parsed_answer['labels']
+    return list(zip(bboxes, labels))
+
 
 def segment_image_data(row):
     try:
-        preds = clipseg.run_inference(row["image"], row["captions"])
 
-        sampled_points = []
+        caption_points = florence_caption(row["image"])
         sam_masks = []
+
 
         original_size = row["image"].size
 
-        for idx in range(preds.shape[0]):
-            sampled_points.append(sample_points_from_heatmap(preds[idx][0], original_size, num_points=10))
-
-        for idx in range(preds.shape[0]):
-            mask_tensor = sam.run_inference_from_points(row["image"], [sampled_points[idx]])
+        for idx in range(len(caption_points)):
+            mask_tensor = sam.run_inference_from_points(row["image"], [caption_points[idx]])
             mask = cv2.cvtColor(255 * mask_tensor[0].numpy().squeeze().transpose((1, 2, 0)).astype(np.uint8), cv2.COLOR_BGR2GRAY)
             sam_masks.append(mask)
 
