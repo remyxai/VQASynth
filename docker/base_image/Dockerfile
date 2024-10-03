@@ -6,9 +6,9 @@ ENV CUDA_HOME /usr/local/cuda-11.8/
 RUN apt-get update && apt-get install -y software-properties-common && \
     add-apt-repository ppa:deadsnakes/ppa && \
     apt-get update && \
-    apt-get install -y python3.9 python3.9-dev python3.9-distutils python3-pip && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1 && \
-    update-alternatives --set python3 /usr/bin/python3.9 && \
+    apt-get install -y python3.10 python3.10-dev python3.10-distutils python3-pip && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
+    update-alternatives --set python3 /usr/bin/python3.10 && \
     python3 -m pip install --upgrade pip setuptools wheel
 
 RUN apt-get install --no-install-recommends wget ffmpeg=7:* \
