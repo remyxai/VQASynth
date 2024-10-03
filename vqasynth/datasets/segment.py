@@ -3,7 +3,7 @@ import numpy as np
 
 from transformers import SamModel, SamProcessor
 from transformers import AutoProcessor, CLIPSegForImageSegmentation
-
+from sam2.sam2_image_predictor import SAM2ImagePredictor
 
 class CLIPSeg:
     def __init__(self, model_name="CIDAS/clipseg-rd64-refined"):
@@ -27,6 +27,20 @@ class SAM:
         with torch.no_grad():
             sam_outputs = self.sam_model(**sam_inputs)
         return self.sam_processor.image_processor.post_process_masks(sam_outputs.pred_masks.cpu(), sam_inputs["original_sizes"].cpu(), sam_inputs["reshaped_input_sizes"].cpu())
+
+class SAM2:
+    def __init__(self, model_name="facebook/sam2-hiera-large", device="cuda"):
+        self.device = device
+        self.sam2_model = SAM2ImagePredictor.from_pretrained(model_name, device=self.device)
+
+    def run_inference_from_points(self, image, input_point, input_label):
+        self.sam2_model.set_image(image)
+        masks, scores, logits = self.sam2_model.predict(
+                point_coords=input_point,
+                point_labels=input_label,
+                multimask_output=True,
+            )
+        return masks.astype(bool)
 
 def find_medoid_and_closest_points(points, num_closest=5):
     """

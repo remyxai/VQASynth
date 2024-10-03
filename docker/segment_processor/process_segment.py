@@ -4,9 +4,11 @@ import pickle
 import argparse
 import numpy as np
 import pandas as pd
-from vqasynth.datasets.segment import CLIPSeg, SAM, sample_points_from_heatmap
+from vqasynth.datasets.segment import CLIPSeg, SAM2, sample_points_from_heatmap
 from transformers import AutoProcessor, AutoModelForCausalLM 
 import torch
+
+
 
 device = "cuda" 
 assert torch.cuda.is_available()
@@ -14,7 +16,7 @@ torch_dtype = torch.float16
 
 model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-large", torch_dtype=torch_dtype, trust_remote_code=True).to(device)
 processor = AutoProcessor.from_pretrained("microsoft/Florence-2-large", trust_remote_code=True)
-sam = SAM(model_name="facebook/sam-vit-huge", device="cuda")
+sam = SAM2(model_name="facebook/sam2-hiera-large", device="cuda")
 
 def florence_caption(image):
     prompt = "<MORE_DETAILED_CAPTION>"
