@@ -1,15 +1,42 @@
 version: '3.8'
 
 services:
+  filter_dataset:
+    build:
+      context: ../docker/filter_dataset
+    volumes:
+      - ${IMAGE_DIR:-${OUTPUT_DIR}/images}:${IMAGE_DIR:-${OUTPUT_DIR}/images}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    command: >
+      --output_dir ${OUTPUT_DIR}
+      --classes ${CLASSES}
+      --filter_dataset ${FILTER_DATASET}
+      ${IMAGE_DIR:+--input_dir ${IMAGE_DIR}}
+      ${HF_DATASET:+--hf_dataset ${HF_DATASET}}
+      ${HF_TOKEN:+--hf_token ${HF_TOKEN}}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   depth_processor:
     build:
       context: ../docker/depth_processor
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${IMAGE_DIR:-${OUTPUT_DIR}/images}:${IMAGE_DIR:-${OUTPUT_DIR}/images}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    command: --output_dir ${OUTPUT_DIR} ${IMAGE_DIR:+--image_dir ${IMAGE_DIR}} ${HF_DATASET:+--hf_dataset ${HF_DATASET}} ${HF_TOKEN:+--hf_token ${HF_TOKEN}}
+    command: >
+      --output_dir ${OUTPUT_DIR}
+      ${IMAGE_DIR:+--image_dir ${IMAGE_DIR}}
     environment:
       NVIDIA_VISIBLE_DEVICES: all
+    depends_on:
+      - filter_dataset
     deploy:
       resources:
         reservations:
@@ -20,7 +47,7 @@ services:
     build:
       context: ../docker/caption_processor
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${IMAGE_DIR:-${OUTPUT_DIR}/images}:${IMAGE_DIR:-${OUTPUT_DIR}/images}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - depth_processor
@@ -35,7 +62,7 @@ services:
     build:
       context: ../docker/segment_processor
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${IMAGE_DIR:-${OUTPUT_DIR}/images}:${IMAGE_DIR:-${OUTPUT_DIR}/images}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - caption_processor
@@ -50,7 +77,7 @@ services:
     build:
       context: ../docker/pointcloud_processor
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${IMAGE_DIR:-${OUTPUT_DIR}/images}:${IMAGE_DIR:-${OUTPUT_DIR}/images}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - segment_processor
@@ -65,11 +92,11 @@ services:
     build:
       context: ../docker/prompt_processor
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${IMAGE_DIR:-${OUTPUT_DIR}/images}:${IMAGE_DIR:-${OUTPUT_DIR}/images}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - pointcloud_processor
-    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR} ${HF_SAVE_DATASET_NAME:+--hf_save_dataset_name ${HF_SAVE_DATASET_NAME}} ${HF_TOKEN:+--hf_token ${HF_TOKEN}}
+    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR:-${OUTPUT_DIR}/images} ${HF_SAVE_DATASET_NAME:+--hf_save_dataset_name ${HF_SAVE_DATASET_NAME}} ${HF_TOKEN:+--hf_token ${HF_TOKEN}}
     deploy:
       resources:
         reservations:
