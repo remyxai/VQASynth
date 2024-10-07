@@ -20,15 +20,15 @@ def create_point_cloud_from_rgbd(rgb_image, depth_image, intrinsic_parameters):
     rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
         o3d.geometry.Image(rgb_image),
         o3d.geometry.Image(depth_image),
-        depth_scale=0.125, #1000.0,
-        depth_trunc=10.0, #10.0,
+        depth_scale=1.0, 
+        depth_trunc=10.0,
         convert_rgb_to_intensity=False
     )
     intrinsic = o3d.camera.PinholeCameraIntrinsic()
     intrinsic.set_intrinsics(intrinsic_parameters['width'], intrinsic_parameters['height'],
                              intrinsic_parameters['fx'], intrinsic_parameters['fy'],
                              intrinsic_parameters['cx'], intrinsic_parameters['cy'])
-    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic)
+    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbc, intrinsic)
     return pcd
 
 def canonicalize_point_cloud(pcd, canonicalize_threshold=0.3):

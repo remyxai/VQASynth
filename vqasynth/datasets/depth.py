@@ -27,5 +27,4 @@ class DepthEstimator:
         depth_normalized = cv2.normalize(np.array(depth), None, 255, 0, cv2.NORM_MINMAX, cv2.CV_8U)
         focallength_px = prediction["focallength_px"] 
 
-        return depth_normalized, focallength_px
-
+        return depth_normalized, focallength_px.item()

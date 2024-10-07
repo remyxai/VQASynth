@@ -11,13 +11,14 @@ from vqasynth.datasets.pointcloud import create_point_cloud_from_rgbd, save_poin
 def pointcloud_image_data(row, output_dir):
     original_image_cv = cv2.cvtColor(np.array(row["image"].convert('RGB')), cv2.COLOR_RGB2BGR)
     depth_image_cv = cv2.cvtColor(np.array(row["depth_map"].convert('RGB')), cv2.COLOR_RGB2BGR)
+    focallength = row["focallength"]
 
     width, height = row["image"].size
     intrinsic_parameters = {
         'width': width,
         'height': height,
-        'fx': 1.5 * width,
-        'fy': 1.5 * width,
+        'fx': focallength,
+        'fy': focallength,
         'cx': width / 2,
         'cy': height / 2,
     }
