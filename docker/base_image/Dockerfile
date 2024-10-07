@@ -27,4 +27,7 @@ COPY . /app/VQASynth
 RUN pip install .
 RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python==0.2.45 --force-reinstall --no-cache-dir
 
+# depth deps
+RUN pip install git+https://github.com/apple/ml-depth-pro.git
+
 WORKDIR /app

@@ -3,7 +3,7 @@ import pickle
 import argparse
 import pandas as pd
 from PIL import Image
-from vqasynth.wrappers.zoedepth import ZoeDepth
+from vqasynth.datasets.depth import DepthEstimator
 
 def process_images_in_chunks(image_dir, chunk_size=100):
     """Generator function to yield chunks of images from the directory."""
@@ -21,7 +21,7 @@ def main(image_dir, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    zoe_depth = ZoeDepth()
+    depth = DepthEstimator()
     chunk_index = 0
 
     for chunk in process_images_in_chunks(image_dir):
@@ -32,12 +32,13 @@ def main(image_dir, output_dir):
             image_path = os.path.join(image_dir, image_filename)
 
             img = Image.open(image_path).convert('RGB')
-            depth_map = zoe_depth.infer_depth(img)
+            depth_map, focallength_px = depth.run_inference(img)
 
             records.append({
                 "image_filename": image_filename,
                 "image": img,
-                "depth_map": depth_map
+                "depth_map": depth_map,
+                "focallength": focallength_px,
             })
 
         # Convert records to a pandas DataFrame
