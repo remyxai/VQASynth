@@ -57,7 +57,7 @@ class SAM2:
         self.device = device
         self.sam2_model = SAM2ImagePredictor.from_pretrained(model_name, device=self.device)
 
-    def run_inference_from_points(self, image, input_box):
+    def run_inference(self, image, input_box):
         input_box = np.array(list(map(int, input_box['bboxes'][0])))
         self.sam2_model.set_image(image)
         masks, scores, _ = self.sam2_model.predict(
