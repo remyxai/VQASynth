@@ -28,7 +28,7 @@ def create_point_cloud_from_rgbd(rgb_image, depth_image, intrinsic_parameters):
     intrinsic.set_intrinsics(intrinsic_parameters['width'], intrinsic_parameters['height'],
                              intrinsic_parameters['fx'], intrinsic_parameters['fy'],
                              intrinsic_parameters['cx'], intrinsic_parameters['cy'])
-    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbc, intrinsic)
+    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic)
     return pcd
 
 def canonicalize_point_cloud(pcd, canonicalize_threshold=0.3):
