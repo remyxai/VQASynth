@@ -31,23 +31,17 @@ class FlorenceSeg:
             if caption:
                 task = "<CAPTION_TO_PHRASE_GROUNDING>"
                 prompt = f"{task} {caption}"
+                inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
 
-
-                url = "https://remyx.ai/assets/spatialvlm/warehouse_rgb.jpg?download=true"
-                image = Image.open("/content/pliers.png").convert("RGB") #requests.get(url, stream=True).raw)
-
-                inputs = processor(text=prompt, images=image, return_tensors="pt").to(device, torch_dtype)
-
-                generated_ids = model.generate(
+                generated_ids = self.model.generate(
                     input_ids=inputs["input_ids"],
                     pixel_values=inputs["pixel_values"],
                     max_new_tokens=1024,
                     num_beams=3,
                     do_sample=False
                 )
-                generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-
-                parsed_answer = processor.post_process_generation(generated_text, task=task, image_size=(image.width, image.height))
+                generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+                parsed_answer = self.processor.post_process_generation(generated_text, task=task, image_size=(image.width, image.height))
                 final_answers.append(parsed_answer[task])
 
         return final_answers
