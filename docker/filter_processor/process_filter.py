@@ -17,34 +17,11 @@ def process_images_in_chunks(image_dir, chunk_size=100):
     if chunk:  # yield the last chunk if it's not empty
         yield chunk
 
-def filter_by_tags(tags, include_tags, exclude_tags):
-    """
-    Determines if an image should be included based on the tags, include_tags, and exclude_tags.
-
-    Args:
-        tags (list): List of tags for the image.
-        include_tags (list): Tags to include (if present in image, include it).
-        exclude_tags (list): Tags to exclude (if present in image, discard it).
-
-    Returns:
-        bool: True if image should be included, False otherwise.
-    """
-    if include_tags and not any(tag in include_tags for tag in tags):
-        return False
-    if exclude_tags and any(tag in exclude_tags for tag in tags):
-        return False
-    return True
-
-def main(image_dir, output_dir, include_tags=None, exclude_tags=None):
+def main(image_dir, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    if isinstance(include_tags, str):
-        include_tags = include_tags.split(',')
-    if isinstance(exclude_tags, str):
-        exclude_tags = exclude_tags.split(',')
-
-    tagger = ImageTagger()
+    zoe_depth = ZoeDepth()
     chunk_index = 0
 
     for chunk in process_images_in_chunks(image_dir):
@@ -55,14 +32,13 @@ def main(image_dir, output_dir, include_tags=None, exclude_tags=None):
             image_path = os.path.join(image_dir, image_filename)
 
             img = Image.open(image_path).convert('RGB')
-            tags = tagger.get_top_tags(img)
+            depth_map = zoe_depth.infer_depth(img)
 
-            if should_include_image(tags, include_tags, exclude_tags):
-                records.append({
-                    "image_filename": image_filename,
-                    "image": img,
-                    "tags": tags
-                })
+            records.append({
+                "image_filename": image_filename,
+                "image": img,
+                "depth_map": depth_map
+            })
 
         # Convert records to a pandas DataFrame
         df = pd.DataFrame(records)
@@ -78,8 +54,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Depth extraction", add_help=True)
     parser.add_argument("--image_dir", type=str, required=True, help="path to image directory")
     parser.add_argument("--output_dir", type=str, required=True, help="path to output dataset directory")
-    parser.add_argument("--include_tags", type=str, help="Comma-separated list of tags to include (optional)")
-    parser.add_argument("--exclude_tags", type=str, help="Comma-separated list of tags to exclude (optional)")
     args = parser.parse_args()
     main(args.image_dir, args.output_dir)
 

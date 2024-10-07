@@ -1,4 +1,6 @@
 import io
+import os
+import clip
 import base64
 import numpy as np
 import torch
@@ -6,6 +8,39 @@ from PIL import Image
 
 import matplotlib
 import matplotlib.cm
+from torchvision.datasets import CIFAR100
+
+class ImageTagger:
+    def __init__(self, model_name='ViT-B/32', device=None):
+        """Initialize the CLIP model and load CIFAR100 dataset."""
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.model, self.preprocess = clip.load(model_name, self.device)
+        self.cifar100 = CIFAR100(root=os.path.expanduser("~/.cache"), download=True, train=False)
+        self.text_inputs = torch.cat([clip.tokenize(f"a photo of a {c}") for c in self.cifar100.classes]).to(self.device)
+
+    def get_top_tags(self, image, top_k=5):
+        """
+        Run inference on an image and return the top K predicted tags as strings.
+
+        Args:
+            image (PIL.Image.Image): Input image for inference.
+            top_k (int): Number of top predictions to return (default: 5).
+
+        Returns:
+            list: Top K predicted tags as strings.
+        """
+        image_input = self.preprocess(image).unsqueeze(0).to(self.device)
+        
+        with torch.no_grad():
+            image_features = self.model.encode_image(image_input)
+            text_features = self.model.encode_text(self.text_inputs)
+
+        image_features /= image_features.norm(dim=-1, keepdim=True)
+        text_features /= text_features.norm(dim=-1, keepdim=True)
+        similarity = (100.0 * image_features @ text_features.T).softmax(dim=-1)
+        _, indices = similarity[0].topk(top_k)
+
+        return [self.cifar100.classes[index] for index in indices]
 
 def image_to_base64_data_uri(image_input):
     # Check if the input is a file path (string)
