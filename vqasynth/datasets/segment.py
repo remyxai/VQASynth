@@ -4,7 +4,7 @@ import numpy as np
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoModelForCausalLM, AutoProcessor
 
-class FlorenceSeg:
+class Florence2:
     def __init__(self, model_name="microsoft/Florence-2-large", device="cuda"):
         self.device = device
         self.torch_dtype = torch.float16
@@ -103,31 +103,6 @@ def sample_points_from_heatmap(heatmap, original_size, num_points=5, percentile=
         y = width * y / w
         pts.append([y, x])
     return pts
-
-def sample_points_from_bbox(bbox, num_points=5):
-    """
-    Sample points from the given bounding box and find the medoid and closest points.
-
-    Parameters:
-    bbox (list or tuple): Bounding box coordinates [xmin, ymin, xmax, ymax].
-    num_points (int): Number of points to sample.
-
-    Returns:
-    list: A list of sampled points with coordinates [x, y].
-    """
-    xmin, ymin, xmax, ymax = bbox
-
-    # Sample random points within the bounding box
-    sampled_x = np.random.uniform(xmin, xmax, num_points)
-    sampled_y = np.random.uniform(ymin, ymax, num_points)
-    sampled_points = np.vstack((sampled_x, sampled_y)).T  # Shape (num_points, 2)
-
-    # Find the medoid and closest points
-    medoid, closest_points = find_medoid_and_closest_points(sampled_points)
-
-    # Return as a list of [x, y] coordinates
-    return [list(pt) for pt in closest_points]
-
 
 def apply_mask_to_image(image, mask):
     """

@@ -3,14 +3,14 @@ import pickle
 import argparse
 import numpy as np
 import pandas as pd
-from vqasynth.datasets.segment import Flore, SAM2
+from vqasynth.datasets.segment import Florence2, SAM2
 
-florence = Florence()
+florence2 = Florence2()
 sam2 = SAM2()
 
 def segment_image_data(row):
     try:
-        preds = florence.run_inference(row["image"])
+        preds = florence2.run_inference(row["image"])
         sam_masks = []
 
         original_size = row["image"].size
