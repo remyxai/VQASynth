@@ -63,7 +63,7 @@ def main(image_dir, output_dir, include_tags=None, exclude_tags=None):
             img = Image.open(image_path).convert('RGB')
             tags = tagger.get_top_tags(img)
 
-            if should_include_image(tags, include_tags, exclude_tags):
+            if filter_by_tags(tags, include_tags, exclude_tags):
                 records.append({
                     "full_path": image_path,
                     "image_filename": image_filename,

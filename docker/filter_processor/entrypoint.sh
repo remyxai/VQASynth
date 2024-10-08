@@ -1,25 +1,24 @@
 #!/bin/bash
 
-output_dir="/checkpoint"
-original_args=("$@")
+# Parse the config.yaml file using yq or python
+CONFIG_FILE=/app/config/config.yaml
 
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --output_dir)
-        output_dir="$2"
-        shift 2
-        ;;
-        *)
-        shift
-        ;;
-    esac
-done
+IMAGE_DIR=$(yq e '.directories.image_dir' $CONFIG_FILE)
+OUTPUT_DIR=$(yq e '.directories.output_dir' $CONFIG_FILE)
+INCLUDE_TAGS=$(yq e '.arguments.include_tags' $CONFIG_FILE)
+EXCLUDE_TAGS=$(yq e '.arguments.exclude_tags' $CONFIG_FILE)
 
-echo "Using output directory: $output_dir"
+# Export these values as environment variables
+export IMAGE_DIR
+export OUTPUT_DIR
 
 # Start the filtering process
 echo "Starting image filtering process..."
-python3 process_filter.py "${original_args[@]}"
+python3 process_filter.py \
+    --image_dir="${IMAGE_DIR}" \
+    --output_dir="${OUTPUT_DIR}" \
+    --include_tags="${INCLUDE_TAGS}" \
+    --exclude_tags="${EXCLUDE_TAGS}"
 
 # Mark filtering as done
-touch "${output_dir}/filter_done.txt"
+touch "${OUTPUT_DIR}/filter_done.txt"

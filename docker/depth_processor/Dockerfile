@@ -7,8 +7,9 @@ RUN pip install git+https://github.com/apple/ml-depth-pro.git
 RUN mkdir -p checkpoints && \
     wget https://ml-site.cdn-apple.com/models/depth-pro/depth_pro.pt -P checkpoints
 
-COPY process_depth.py /app
-COPY entrypoint.sh /app
+COPY docker/depth_processor/process_depth.py /app
+COPY docker/depth_processor/entrypoint.sh /app
+COPY config/config.yaml /app/config/config.yaml
 
 RUN chmod +x /app/entrypoint.sh
 
