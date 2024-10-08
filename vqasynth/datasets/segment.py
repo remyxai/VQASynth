@@ -1,32 +1,85 @@
 import torch
 import numpy as np
 
-from transformers import SamModel, SamProcessor
-from transformers import AutoProcessor, CLIPSegForImageSegmentation
+from sam2.sam2_image_predictor import SAM2ImagePredictor
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 
-class CLIPSeg:
-    def __init__(self, model_name="CIDAS/clipseg-rd64-refined"):
-        self.clipseg_processor = AutoProcessor.from_pretrained(model_name)
-        self.clipseg_model = CLIPSegForImageSegmentation.from_pretrained(model_name)
-
-    def run_inference(self, image, text_descriptions):
-        inputs = self.clipseg_processor(text=text_descriptions, images=[image] * len(text_descriptions), padding=True, return_tensors="pt")
-        outputs = self.clipseg_model(**inputs)
-        logits = outputs.logits
-        return logits.detach().unsqueeze(1)
-
-class SAM:
-    def __init__(self, model_name="facebook/sam-vit-huge", device="cuda"):
+class Florence2:
+    def __init__(self, model_name="microsoft/Florence-2-large", device="cuda"):
         self.device = device
-        self.sam_model = SamModel.from_pretrained(model_name).to(self.device)
-        self.sam_processor = SamProcessor.from_pretrained(model_name)
+        self.torch_dtype = torch.float16
+        self.processor = AutoProcessor.from_pretrained(
+            model_name, trust_remote_code=True
+        )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name, torch_dtype=self.torch_dtype, trust_remote_code=True
+        ).to(self.device)
 
-    def run_inference_from_points(self, image, points):
-        sam_inputs = self.sam_processor(image, input_points=points, return_tensors="pt").to(self.device)
-        with torch.no_grad():
-            sam_outputs = self.sam_model(**sam_inputs)
-        return self.sam_processor.image_processor.post_process_masks(sam_outputs.pred_masks.cpu(), sam_inputs["original_sizes"].cpu(), sam_inputs["reshaped_input_sizes"].cpu())
+    def run_inference(self, image):
+        final_answers = []
+        task = "<MORE_DETAILED_CAPTION>"
+        prompt = f"{task}"
+        inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(
+            self.device, self.torch_dtype
+        )
+
+        generated_ids = self.model.generate(
+            input_ids=inputs["input_ids"],
+            pixel_values=inputs["pixel_values"],
+            max_new_tokens=1024,
+            num_beams=3,
+            do_sample=False,
+        )
+        generated_text = self.processor.batch_decode(
+            generated_ids, skip_special_tokens=False
+        )[0]
+        parsed_answer = self.processor.post_process_generation(
+            generated_text, task=prompt, image_size=(image.width, image.height)
+        )
+        captions = parsed_answer[task].split(".")
+
+        for caption in captions:
+            if caption:
+                task = "<CAPTION_TO_PHRASE_GROUNDING>"
+                prompt = f"{task} {caption}"
+                inputs = self.processor(
+                    text=prompt, images=image, return_tensors="pt"
+                ).to(self.device, self.torch_dtype)
+
+                generated_ids = self.model.generate(
+                    input_ids=inputs["input_ids"],
+                    pixel_values=inputs["pixel_values"],
+                    max_new_tokens=1024,
+                    num_beams=3,
+                    do_sample=False,
+                )
+                generated_text = self.processor.batch_decode(
+                    generated_ids, skip_special_tokens=False
+                )[0]
+                parsed_answer = self.processor.post_process_generation(
+                    generated_text, task=task, image_size=(image.width, image.height)
+                )
+                final_answers.append(parsed_answer[task])
+
+        return final_answers
+
+
+class SAM2:
+    def __init__(self, model_name="facebook/sam2-hiera-large", device="cuda"):
+        self.device = device
+        self.sam2_model = SAM2ImagePredictor.from_pretrained(
+            model_name, trust_remote_code=True, device=self.device
+        )
+
+    def run_inference(self, image, input_box):
+        input_box = np.array(list(map(int, input_box)))
+        self.sam2_model.set_image(image)
+        masks, scores, _ = self.sam2_model.predict(
+            point_coords=None, box=input_box[None, :], multimask_output=False
+        )
+        return masks.astype(bool)
+
 
 def find_medoid_and_closest_points(points, num_closest=5):
     """
@@ -40,13 +93,16 @@ def find_medoid_and_closest_points(points, num_closest=5):
     np.array: The medoid point.
     np.array: The closest points to the medoid.
     """
-    distances = np.sqrt(((points[:, np.newaxis, :] - points[np.newaxis, :, :]) ** 2).sum(axis=-1))
+    distances = np.sqrt(
+        ((points[:, np.newaxis, :] - points[np.newaxis, :, :]) ** 2).sum(axis=-1)
+    )
     distance_sums = distances.sum(axis=1)
     medoid_idx = np.argmin(distance_sums)
     medoid = points[medoid_idx]
     sorted_indices = np.argsort(distances[medoid_idx])
-    closest_indices = sorted_indices[1:num_closest + 1]
+    closest_indices = sorted_indices[1 : num_closest + 1]
     return medoid, points[closest_indices]
+
 
 def sample_points_from_heatmap(heatmap, original_size, num_points=5, percentile=0.95):
     """
@@ -59,7 +115,9 @@ def sample_points_from_heatmap(heatmap, original_size, num_points=5, percentile=
 
     attn = torch.sigmoid(heatmap)
     w = attn.shape[0]
-    sampled_indices = torch.multinomial(torch.tensor(probabilities.ravel()), num_points, replacement=True)
+    sampled_indices = torch.multinomial(
+        torch.tensor(probabilities.ravel()), num_points, replacement=True
+    )
 
     sampled_coords = np.array(np.unravel_index(sampled_indices, attn.shape)).T
     medoid, sampled_coords = find_medoid_and_closest_points(sampled_coords)

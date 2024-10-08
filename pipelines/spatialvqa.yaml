@@ -16,21 +16,6 @@ services:
           devices:
           - capabilities: ["gpu"]
 
-  caption_processor:
-    build:
-      context: ../docker/caption_processor
-    volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
-      - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    depends_on:
-      - depth_processor
-    command: --output_dir ${OUTPUT_DIR}
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - capabilities: ["gpu"]
-
   segment_processor:
     build:
       context: ../docker/segment_processor

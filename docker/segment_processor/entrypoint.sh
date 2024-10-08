@@ -17,14 +17,14 @@ done
 
 echo "Using output directory: $output_dir"
 
-echo "Waiting for captions processing to complete..."
+echo "Waiting for depth processing to complete..."
 
-while [ ! -f "${output_dir}/captions_done.txt" ]; do
+while [ ! -f "${output_dir}/depth_done.txt" ]; do
   sleep 10
 done
 
 echo "Starting segmentation processing..."
 python3 process_segment.py "${original_args[@]}"
 
-rm "${output_dir}/captions_done.txt" 
+rm "${output_dir}/depth_done.txt" 
 touch "${output_dir}/segment_done.txt"
