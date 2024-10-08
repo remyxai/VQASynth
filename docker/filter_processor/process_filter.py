@@ -88,4 +88,4 @@ if __name__ == "__main__":
     parser.add_argument("--include_tags", type=str, required=False, default=None, help="Comma-separated list of tags to include (optional)")
     parser.add_argument("--exclude_tags", type=str, required=False, default=None, help="Comma-separated list of tags to exclude (optional)")
     args = parser.parse_args()
-    main(args.image_dir, args.output_dir)
+    main(args.image_dir, args.output_dir, args.include_tags, args.exclude_tags)
