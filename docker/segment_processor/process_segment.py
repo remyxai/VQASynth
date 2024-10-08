@@ -1,53 +1,71 @@
 import os
-import cv2
 import pickle
+import random
 import argparse
 import numpy as np
 import pandas as pd
-from vqasynth.datasets.segment import CLIPSeg, SAM, sample_points_from_heatmap
+from vqasynth.datasets.segment import Florence2, SAM2
 
+florence2 = Florence2()
+sam2 = SAM2()
 
-clipseg = CLIPSeg(model_name="CIDAS/clipseg-rd64-refined")
-sam = SAM(model_name="facebook/sam-vit-huge", device="cuda")
 
 def segment_image_data(row):
     try:
-        preds = clipseg.run_inference(row["image"], row["captions"])
-
-        sampled_points = []
+        preds = florence2.run_inference(row["image"])
         sam_masks = []
+        final_bboxes = []
+        final_captions = []
 
         original_size = row["image"].size
 
-        for idx in range(preds.shape[0]):
-            sampled_points.append(sample_points_from_heatmap(preds[idx][0], original_size, num_points=10))
+        object_counter = 1
+        for pred in preds:
+            bboxes = pred.get("bboxes", [])
+            captions = pred.get("labels", [])
 
-        for idx in range(preds.shape[0]):
-            mask_tensor = sam.run_inference_from_points(row["image"], [sampled_points[idx]])
-            mask = cv2.cvtColor(255 * mask_tensor[0].numpy().squeeze().transpose((1, 2, 0)).astype(np.uint8), cv2.COLOR_BGR2GRAY)
-            sam_masks.append(mask)
+            if bboxes and captions and len(bboxes) == len(captions):
+                random_index = random.randint(0, len(bboxes) - 1)
+                selected_bbox = bboxes[random_index]
+                selected_caption = captions[random_index]
 
-        return sam_masks
-    except:
-        return []
+                mask_tensor = sam2.run_inference(row["image"], selected_bbox)
+                mask = mask_tensor[0]
+                mask_uint8 = (mask.astype(np.uint8)) * 255
+                sam_masks.append(mask_uint8)
+
+                final_bboxes.append(selected_bbox)
+                final_captions.append(selected_caption)
+
+        return sam_masks, final_bboxes, final_captions
+    except Exception as e:
+        print(f"Error during segmentation: {str(e)}")
+        return [], [], []
+
 
 def main(output_dir):
     for filename in os.listdir(output_dir):
-        if filename.endswith('.pkl'):
+        if filename.endswith(".pkl"):
             pkl_path = os.path.join(output_dir, filename)
-            # Load the DataFrame from the .pkl file
             df = pd.read_pickle(pkl_path)
-
-            # Process each image and add the results to a new column
-            df['masks'] = df.apply(segment_image_data, axis=1)
-
-            # Save the updated DataFrame back to the .pkl file
+            df[["masks", "bboxes", "captions"]] = pd.DataFrame(
+                df.apply(lambda row: segment_image_data(row), axis=1).tolist(),
+                index=df.index,
+            )
             df.to_pickle(pkl_path)
             print(f"Processed and updated {filename}")
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process images from .pkl files", add_help=True)
-    parser.add_argument("--output_dir", type=str, required=True, help="path to directory containing .pkl files")
+    parser = argparse.ArgumentParser(
+        description="Process images from .pkl files", add_help=True
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        required=True,
+        help="path to directory containing .pkl files",
+    )
     args = parser.parse_args()
 
     main(args.output_dir)
