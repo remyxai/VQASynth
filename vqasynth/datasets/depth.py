@@ -1,20 +1,30 @@
-import sys
-sys.path.append("./ZoeDepth")
-
+import cv2
 import numpy as np
 from PIL import Image
-from zoedepth.models.builder import build_model
-from zoedepth.utils.config import get_config
+import depth_pro
 from vqasynth.datasets.utils import colorize
 
-# ZoeD_N
-def load_zoe_depth():
-    conf = get_config("zoedepth", "infer")
-    depth_model = build_model(conf)
-    return depth_model
+class DepthEstimator:
+    def __init__(self):
+        """Initialize the model and transforms."""
+        self.model, self.transform = depth_pro.create_model_and_transforms()
+        self.model.eval()
 
-def depth(img, depth_model):
-    depth = depth_model.infer_pil(img)
-    colored_depth = colorize(depth, cmap='gray_r')
-    output_depth = Image.fromarray(colored_depth).convert('L')
-    return output_depth
+    def run_inference(self, image_path):
+        """
+        Takes a Pillow RGB image, preprocesses it, and returns the depth and focal length in pixels.
+
+        Args:
+            image_path: path to image
+
+        Returns:
+            tuple: depth in meters, focal length in pixels
+        """
+        image, _, f_px = depth_pro.load_rgb(image_path)
+        image_tensor = self.transform(image)
+        prediction = self.model.infer(image_tensor, f_px=f_px)
+        depth = prediction["depth"]
+        depth_normalized = cv2.normalize(np.array(depth), None, 255, 0, cv2.NORM_MINMAX, cv2.CV_8U)
+        focallength_px = prediction["focallength_px"] 
+
+        return depth_normalized, focallength_px.item()
