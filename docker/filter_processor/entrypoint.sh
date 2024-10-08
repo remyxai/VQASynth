@@ -3,14 +3,6 @@
 output_dir="/checkpoint"
 original_args=("$@")
 
-if [[ -n "$INCLUDE_TAGS" ]]; then
-    original_args+=("--include_tags" "$INCLUDE_TAGS")
-fi
-
-if [[ -n "$EXCLUDE_TAGS" ]]; then
-    original_args+=("--exclude_tags" "$EXCLUDE_TAGS")
-fi
-
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --output_dir)
@@ -25,7 +17,9 @@ done
 
 echo "Using output directory: $output_dir"
 
+# Start the filtering process
+echo "Starting image filtering process..."
 python3 process_filter.py "${original_args[@]}"
 
+# Mark filtering as done
 touch "${output_dir}/filter_done.txt"
-

@@ -6,59 +6,45 @@ import numpy as np
 from PIL import Image
 from vqasynth.datasets.depth import DepthEstimator
 
-def process_images_in_chunks(image_dir, chunk_size=100):
-    """Generator function to yield chunks of images from the directory."""
-    chunk = []
-    for image_filename in os.listdir(image_dir):
-        if image_filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-            chunk.append(image_filename)
-            if len(chunk) == chunk_size:
-                yield chunk
-                chunk = []
-    if chunk:  # yield the last chunk if it's not empty
-        yield chunk
+depth = DepthEstimator()
 
-def main(image_dir, output_dir):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    depth = DepthEstimator()
-    chunk_index = 0
-
-    for chunk in process_images_in_chunks(image_dir):
-        print("Processing chunk ", chunk_index)
-        records = []
-
-        for image_filename in chunk:
-            image_path = os.path.join(image_dir, image_filename)
-
-            img = Image.open(image_path).convert('RGB')
-            depth_map, focallength_px = depth.run_inference(image_path)
-
-            if depth_map.dtype != np.uint16:
-                depth_map = (depth_map / np.max(depth_map) * 65535).astype(np.uint16)
+def depth_data(row):
+    try:
+        image_path = row["full_path"]
+        depth_map, focallength_px = depth.run_inference(image_path)
+        if depth_map.dtype != np.uint16:
+            depth_map = (depth_map / np.max(depth_map) * 65535).astype(np.uint16)
             depth_image = Image.fromarray(depth_map, mode='I;16')
 
-            records.append({
-                "image_filename": image_filename,
-                "image": img,
-                "depth_map": depth_image,
-                "focallength": focallength_px,
-            })
+        return depth_image, focallength_px
+    except Exception as e:
+        print(f"Error during segmentation: {str(e)}")
+        return [], 0
 
-        # Convert records to a pandas DataFrame
-        df = pd.DataFrame(records)
 
-        # Save the DataFrame to a .pkl file
-        output_filepath = os.path.join(output_dir, f"chunk_{chunk_index}.pkl")
-        df.to_pickle(output_filepath)
+def main(output_dir):
+    for filename in os.listdir(output_dir):
+        if filename.endswith(".pkl"):
+            pkl_path = os.path.join(output_dir, filename)
+            df = pd.read_pickle(pkl_path)
+            df[["depth_map", "focallength"]] = pd.DataFrame(
+                df.apply(lambda row: depth_data(row), axis=1).tolist(),
+                index=df.index,
+            )
+            df.to_pickle(pkl_path)
+            print(f"Processed and updated {filename}")
 
-        print(f"Processed chunk {chunk_index} with {len(chunk)} images.")
-        chunk_index += 1
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser("Depth extraction", add_help=True)
-    parser.add_argument("--image_dir", type=str, required=True, help="path to image directory")
-    parser.add_argument("--output_dir", type=str, required=True, help="path to output dataset directory")
+    parser = argparse.ArgumentParser(
+        description="Process images from .pkl files", add_help=True
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        required=True,
+        help="path to directory containing .pkl files",
+    )
     args = parser.parse_args()
-    main(args.image_dir, args.output_dir)
+
+    main(args.output_dir)

@@ -1,11 +1,11 @@
 FROM smellslikeml/vqasynth:base
 WORKDIR /app
 
+RUN pip install git+https://github.com/openai/CLIP.git
+
 COPY process_filter.py /app
 COPY entrypoint.sh /app
 
-RUN pip install pandas
 RUN chmod +x /app/entrypoint.sh
 
-# Set the entrypoint script to run when the container starts
 ENTRYPOINT ["/app/entrypoint.sh"]

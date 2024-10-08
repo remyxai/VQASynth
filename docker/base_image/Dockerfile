@@ -34,6 +34,7 @@ RUN pip install .
 RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python==0.2.45 --force-reinstall --no-cache-dir
 
 # Reinstalling to avoid numpy>2 upgrade
+RUN pip install git+https://github.com/openai/CLIP.git
 RUN pip uninstall -y numpy && pip install numpy==1.26.4
 
 WORKDIR /app

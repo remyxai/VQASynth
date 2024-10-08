@@ -7,8 +7,6 @@ services:
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
-      - ${INCLUDE_TAGS}:${INCLUDE_TAGS}
-      - ${EXCLUDE_TAGS}:${EXCLUDE_TAGS}
     command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR} --include_tags ${INCLUDE_TAGS} --exclude_tags ${EXCLUDE_TAGS}
     environment:
       NVIDIA_VISIBLE_DEVICES: all
