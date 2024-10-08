@@ -25,11 +25,15 @@ WORKDIR /app/models
 RUN wget https://huggingface.co/cjpais/llava-v1.6-34B-gguf/resolve/main/mmproj-model-f16.gguf
 RUN wget https://huggingface.co/cjpais/llava-v1.6-34B-gguf/resolve/main/llava-v1.6-34b.Q4_K_M.gguf
 
-RUN python3 -m pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+RUN pip install 'git+https://github.com/facebookresearch/sam2.git'
+RUN pip uninstall -y torch torchvision torchaudio && pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 
 WORKDIR /app/VQASynth
 COPY . /app/VQASynth
 RUN pip install .
 RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python==0.2.45 --force-reinstall --no-cache-dir
+
+# Reinstalling to avoid numpy>2 upgrade
+RUN pip uninstall -y numpy && pip install numpy==1.26.4
 
 WORKDIR /app
