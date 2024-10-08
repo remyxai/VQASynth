@@ -10,18 +10,18 @@ class DepthEstimator:
         self.model, self.transform = depth_pro.create_model_and_transforms()
         self.model.eval()
 
-    def run_inference(self, image: Image.Image):
+    def run_inference(self, image_path):
         """
         Takes a Pillow RGB image, preprocesses it, and returns the depth and focal length in pixels.
 
         Args:
-            image (Image.Image): Pillow RGB image
+            image_path: path to image
 
         Returns:
             tuple: depth in meters, focal length in pixels
         """
+        image, _, f_px = depth_pro.load_rgb(image_path)
         image_tensor = self.transform(image)
-        _, _, f_px = depth_pro.load_rgb(image)
         prediction = self.model.infer(image_tensor, f_px=f_px)
         depth = prediction["depth"]
         depth_normalized = cv2.normalize(np.array(depth), None, 255, 0, cv2.NORM_MINMAX, cv2.CV_8U)

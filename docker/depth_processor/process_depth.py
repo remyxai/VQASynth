@@ -2,6 +2,7 @@ import os
 import pickle
 import argparse
 import pandas as pd
+import numpy as np
 from PIL import Image
 from vqasynth.datasets.depth import DepthEstimator
 
@@ -32,12 +33,16 @@ def main(image_dir, output_dir):
             image_path = os.path.join(image_dir, image_filename)
 
             img = Image.open(image_path).convert('RGB')
-            depth_map, focallength_px = depth.run_inference(img)
+            depth_map, focallength_px = depth.run_inference(image_path)
+
+            if depth_map.dtype != np.uint16:
+                depth_map = (depth_map / np.max(depth_map) * 65535).astype(np.uint16)
+            depth_image = Image.fromarray(depth_map, mode='I;16')
 
             records.append({
                 "image_filename": image_filename,
                 "image": img,
-                "depth_map": depth_map,
+                "depth_map": depth_image,
                 "focallength": focallength_px,
             })
 
