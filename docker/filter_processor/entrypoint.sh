@@ -12,13 +12,18 @@ EXCLUDE_TAGS=$(yq e '.arguments.exclude_tags' $CONFIG_FILE)
 export IMAGE_DIR
 export OUTPUT_DIR
 
-# Start the filtering process
-echo "Starting image filtering process..."
+echo "Using output directory: $OUTPUT_DIR"
+echo "Waiting for embedding processing to complete..."
+
+while [ ! -f "${OUTPUT_DIR}/embeddings_done.txt" ]; do
+  sleep 10
+done
+
+echo "Starting filtering processing..."
 python3 process_filter.py \
-    --image_dir="${IMAGE_DIR}" \
     --output_dir="${OUTPUT_DIR}" \
     --include_tags="${INCLUDE_TAGS}" \
     --exclude_tags="${EXCLUDE_TAGS}"
 
-# Mark filtering as done
+rm "${OUTPUT_DIR}/embeddings_done.txt"
 touch "${OUTPUT_DIR}/filter_done.txt"

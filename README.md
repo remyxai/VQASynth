@@ -37,11 +37,13 @@ The scripts will produce 3D point clouds, segmented images, labels, and prompt e
 
 The main pipeline uses Docker Compose to process a directory of images into a VQA dataset including spatial relations between objects. The dataset follows conventions for training models like [LLaVA](https://llava-vl.github.io/). We recommend using an A10 GPU or larger for processing.
 
-Make sure to update [.env](pipelines/.env) with the full path to your image directory and output directory. Then launch the pipeline with:
+Make sure to update the [config.yaml](config/config.yaml) file with the full path to your image directory and output directory. You can also optionally add `include_tags` and/or `exclude_tags` as comma-separated lists in the config file for filtering the dataset based on tags. If no tags are provided, the filtering will not be applied.
+
+Then launch the pipeline with:
 
 ```bash
 cd /path/to/VQASynth
-docker compose -f pipelines/spatialvqa.yaml up --build
+bash run.sh
 ```
 
 In your designated output directory, you'll find a json file `processed_dataset.json` containing the formatted dataset.

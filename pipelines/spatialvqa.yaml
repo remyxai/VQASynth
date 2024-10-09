@@ -1,6 +1,21 @@
 version: '3.8'
 
 services:
+  embeddings_processor:
+    build:
+      context: ../
+      dockerfile: docker/embeddings_processor/Dockerfile
+    volumes:
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
   filter_processor:
     build:
       context: ../
@@ -8,6 +23,8 @@ services:
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - embeddings_processor
     environment:
       NVIDIA_VISIBLE_DEVICES: all
     deploy:
