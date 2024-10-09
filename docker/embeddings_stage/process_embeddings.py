@@ -3,25 +3,14 @@ import pickle
 import argparse
 import pandas as pd
 from PIL import Image
-from vqasynth.datasets.utils import EmbeddingFilter
-
-def process_images_in_chunks(image_dir, chunk_size=100):
-    """Generator function to yield chunks of images from the directory."""
-    chunk = []
-    for image_filename in os.listdir(image_dir):
-        if image_filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-            chunk.append(image_filename)
-            if len(chunk) == chunk_size:
-                yield chunk
-                chunk = []
-    if chunk:  # yield the last chunk if it's not empty
-        yield chunk
+from vqasynth.datasets.embeddings import EmbeddingGenerator
+from vqasynth.datasets.utils import process_images_in_chunks
 
 def main(image_dir, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    embedding_filter = EmbeddingFilter()
+    embedding_generator = EmbeddingGenerator()
     chunk_index = 0
 
     for chunk in process_images_in_chunks(image_dir):
@@ -32,7 +21,7 @@ def main(image_dir, output_dir):
             image_path = os.path.join(image_dir, image_filename)
 
             img = Image.open(image_path).convert('RGB')
-            embedding = embedding_filter.generate_image_embeddings(img)
+            embedding = embedding_generator.run(img)
 
             records.append({
                 "full_path": image_path,

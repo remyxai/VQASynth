@@ -7,39 +7,18 @@ import itertools
 import argparse
 import numpy as np
 import pandas as pd
-from vqasynth.datasets.pointcloud import restore_pointclouds
-from vqasynth.datasets.prompts import evaluate_predicates_on_pairs
-
-
-def prompt_image_data(row):
-    image_file = row["image_filename"]
-    captions = row["captions"]
-    pointclouds = restore_pointclouds(row["pointclouds"])
-    is_canonicalized = row["is_canonicalized"]
-
-    try:
-        objects = list(zip(captions, pointclouds))
-        all_pairs = [(i, j) for i in range(len(objects)) for j in range(len(objects)) if i != j]
-        random.shuffle(all_pairs)
-        selected_pairs = all_pairs[:5]
-        object_pairs = [(objects[i], objects[j]) for i,j in selected_pairs]
-        prompts = evaluate_predicates_on_pairs(object_pairs, is_canonicalized)
-    except:
-        prompts = []
-    return prompts
+from vqasynth.datasets.prompts import PromptGenerator
 
 def main(image_dir, output_dir):
+    prompt_generator = PromptGenerator()
     final_samples = []
     for filename in os.listdir(output_dir):
         if filename.endswith('.pkl'):
             pkl_path = os.path.join(output_dir, filename)
-            # Load the DataFrame from the .pkl file
             df = pd.read_pickle(pkl_path)
 
-            # Process each image and add the results to a new column
-            df['prompts'] = df.apply(prompt_image_data, axis=1)
+            df['prompts'] = df.apply(lambda row: prompt_generator.run(row["image_filename"], row["captions"], row["pointclouds"], row["is_canonicalized"]), axis=1)
 
-            # Save the updated DataFrame back to the .pkl file
             df.to_pickle(pkl_path)
             print(f"Processed and updated {filename}")
 
@@ -65,13 +44,11 @@ def main(image_dir, output_dir):
                     if conversations:  # Ensure we have valid conversation data
                         sample = {
                             "id": image_filename,
-                            # Ensure the image path format fits your structure
                             "image": os.path.join(image_dir, image_filename),
                             "conversations": conversations
                         }
                         final_samples.append(sample)
 
-    # Save the final samples to the output JSON file
     output_json = os.path.join(output_dir, "processed_dataset.json")
     with open(output_json, "w") as json_file:
         json.dump(final_samples, json_file, indent=4)

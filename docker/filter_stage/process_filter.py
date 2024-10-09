@@ -3,10 +3,10 @@ import pickle
 import argparse
 import pandas as pd
 from PIL import Image
-from vqasynth.datasets.utils import EmbeddingFilter 
+from vqasynth.datasets.embeddings import TagFilter
 
 def main(output_dir, include_tags, exclude_tags, confidence_threshold=0.7):
-    embedding_filter = EmbeddingFilter()
+    tag_filter = TagFilter()
     include_tags = include_tags.strip().split(",")
     exclude_tags = exclude_tags.strip().split(",")
 
@@ -16,14 +16,14 @@ def main(output_dir, include_tags, exclude_tags, confidence_threshold=0.7):
             df = pd.read_pickle(pkl_path)
 
             df['tag'] = df.apply(
-                lambda row: embedding_filter.get_best_matching_tag(
+                lambda row: tag_filter.get_best_matching_tag(
                     row['embedding'], include_tags + exclude_tags 
                 ),
                 axis=1
             )
 
             df['keep'] = df.apply(
-                lambda row: embedding_filter.filter_by_tag(
+                lambda row: tag_filter.filter_by_tag(
                     row['tag'], include_tags, exclude_tags
                 ),
                 axis=1
