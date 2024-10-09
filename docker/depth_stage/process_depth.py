@@ -4,7 +4,7 @@ import argparse
 import pandas as pd
 import numpy as np
 from PIL import Image
-from vqasynth.datasets.depth import DepthEstimator
+from vqasynth.depth import DepthEstimator
 
 depth = DepthEstimator()
 

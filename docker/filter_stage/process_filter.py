@@ -3,7 +3,7 @@ import pickle
 import argparse
 import pandas as pd
 from PIL import Image
-from vqasynth.datasets.embeddings import TagFilter
+from vqasynth.embeddings import TagFilter
 
 def main(output_dir, include_tags, exclude_tags, confidence_threshold=0.7):
     tag_filter = TagFilter()

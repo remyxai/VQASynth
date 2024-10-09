@@ -4,7 +4,7 @@ import random
 import argparse
 import numpy as np
 import pandas as pd
-from vqasynth.datasets.localize import Localizer
+from vqasynth.localize import Localizer
 
 localizer = Localizer()
 

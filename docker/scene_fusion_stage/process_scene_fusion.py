@@ -2,7 +2,7 @@ import os
 import pickle
 import argparse
 import pandas as pd
-from vqasynth.datasets.scene_fusion import SpatialSceneConstructor
+from vqasynth.scene_fusion import SpatialSceneConstructor
 
 
 def main(output_dir):

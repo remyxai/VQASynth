@@ -7,7 +7,7 @@ import itertools
 import argparse
 import numpy as np
 import pandas as pd
-from vqasynth.datasets.prompts import PromptGenerator
+from vqasynth.prompts import PromptGenerator
 
 def main(image_dir, output_dir):
     prompt_generator = PromptGenerator()

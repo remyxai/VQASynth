@@ -1,8 +1,8 @@
 import random
 import numpy as np
 from itertools import combinations
-from vqasynth.datasets.prompt_templates import *
-from vqasynth.datasets.scene_fusion import SpatialSceneConstructor 
+from vqasynth.prompt_templates import *
+from vqasynth.scene_fusion import SpatialSceneConstructor 
 
 class PromptGenerator():
     def __init__():

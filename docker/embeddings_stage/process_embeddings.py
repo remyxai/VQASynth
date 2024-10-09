@@ -3,8 +3,8 @@ import pickle
 import argparse
 import pandas as pd
 from PIL import Image
-from vqasynth.datasets.embeddings import EmbeddingGenerator
-from vqasynth.datasets.utils import process_images_in_chunks
+from vqasynth.embeddings import EmbeddingGenerator
+from vqasynth.utils import process_images_in_chunks
 
 def main(image_dir, output_dir):
     if not os.path.exists(output_dir):
