@@ -27,15 +27,11 @@ RUN wget https://github.com/mikefarah/yq/releases/download/v4.30.8/yq_linux_amd6
 
 RUN pip install git+https://github.com/apple/ml-depth-pro.git
 
-RUN mkdir -p checkpoints && \
-    wget https://ml-site.cdn-apple.com/models/depth-pro/depth_pro.pt -P checkpoints
-
 RUN pip install 'git+https://github.com/facebookresearch/sam2.git'
 RUN pip install git+https://github.com/openai/CLIP.git
 
 # Install PyTorch for CUDA 11.8 and other dependencies
 RUN pip install --upgrade torch==2.4.0+cu118 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu118
-RUN pip install transformers==4.44.2 huggingface-hub==0.24.7 accelerate==0.34.2 timm==1.0.9
 
 # Install flash_attn compatible with CUDA 11.8, order is important
 RUN pip uninstall -y flash_attn
@@ -45,8 +41,5 @@ RUN pip install git+https://github.com/Dao-AILab/flash-attention.git@v2.6.0
 WORKDIR /app/VQASynth
 COPY . /app/VQASynth
 RUN pip install .
-
-# Reinstalling to avoid numpy>2 upgrade
-RUN pip uninstall -y numpy && pip install numpy==1.26.4
 
 WORKDIR /app
