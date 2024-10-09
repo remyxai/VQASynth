@@ -1,22 +1,26 @@
 #!/bin/bash
 
-output_dir="/checkpoint"
-original_args=("$@")
+# Parse the config.yaml file using yq or python
+CONFIG_FILE=/app/config/config.yaml
 
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --output_dir)
-        output_dir="$2"
-        shift 2
-        ;;
-        *) 
-        shift
-        ;;
-    esac
+IMAGE_DIR=$(yq e '.directories.image_dir' $CONFIG_FILE)
+OUTPUT_DIR=$(yq e '.directories.output_dir' $CONFIG_FILE)
+
+# Export these values as environment variables
+export IMAGE_DIR
+export OUTPUT_DIR
+
+echo "Using output directory: $OUTPUT_DIR"
+
+echo "Waiting for filter processing to complete..."
+
+while [ ! -f "${OUTPUT_DIR}/filter_done.txt" ]; do
+  sleep 10
 done
 
-echo "Using output directory: $output_dir"
+echo "Starting depth processing..."
+python3 process_depth.py \
+    --output_dir="${OUTPUT_DIR}"
 
-python3 process_depth.py "${original_args[@]}"
-
-touch "${output_dir}/depth_done.txt"
+rm "${OUTPUT_DIR}/filter_done.txt"
+touch "${OUTPUT_DIR}/depth_done.txt"

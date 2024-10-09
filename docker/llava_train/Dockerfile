@@ -8,6 +8,7 @@ RUN pip install -e ".[train]"
 RUN pip install flash-attn --no-build-isolation
 
 COPY entrypoint.sh /app/LLaVA/
+COPY ../../config/config.yaml /app/config/config.yaml
 RUN chmod +x /app/LLaVA/entrypoint.sh
 
 # Set the entrypoint script to run when the container starts

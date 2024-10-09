@@ -1,8 +1,9 @@
 FROM smellslikeml/vqasynth:base
 WORKDIR /app
 
-COPY process_prompts.py /app
-COPY entrypoint.sh /app
+COPY docker/prompt_processor/process_prompts.py /app
+COPY docker/prompt_processor/entrypoint.sh /app
+COPY config/config.yaml /app/config/config.yaml
 
 RUN pip install pandas
 RUN chmod +x /app/entrypoint.sh

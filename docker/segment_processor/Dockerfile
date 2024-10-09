@@ -9,8 +9,9 @@ RUN pip install transformers==4.44.2 huggingface-hub==0.24.7 accelerate==0.34.2 
 RUN pip uninstall -y flash_attn
 RUN pip install git+https://github.com/Dao-AILab/flash-attention.git@v2.6.0
 
-COPY process_segment.py /app
-COPY entrypoint.sh /app
+COPY docker/segment_processor/process_segment.py /app
+COPY docker/segment_processor/entrypoint.sh /app
+COPY config/config.yaml /app/config/config.yaml
 
 RUN chmod +x /app/entrypoint.sh
 

@@ -1,8 +1,9 @@
 FROM smellslikeml/vqasynth:base
 WORKDIR /app
 
-COPY process_pointcloud.py /app
-COPY entrypoint.sh /app
+COPY docker/pointcloud_processor/process_pointcloud.py /app
+COPY docker/pointcloud_processor/entrypoint.sh /app
+COPY config/config.yaml /app/config/config.yaml
 
 RUN pip install pandas
 RUN chmod +x /app/entrypoint.sh

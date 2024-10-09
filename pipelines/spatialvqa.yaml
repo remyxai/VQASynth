@@ -1,13 +1,47 @@
 version: '3.8'
 
 services:
-  depth_processor:
+  embeddings_processor:
     build:
-      context: ../docker/depth_processor
+      context: ../
+      dockerfile: docker/embeddings_processor/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
+  filter_processor:
+    build:
+      context: ../
+      dockerfile: docker/filter_processor/Dockerfile
+    volumes:
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - embeddings_processor
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
+  depth_processor:
+    build:
+      context: ../
+      dockerfile: docker/depth_processor/Dockerfile
+    volumes:
+      - ${IMAGE_DIR}:${IMAGE_DIR}
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - filter_processor
     environment:
       NVIDIA_VISIBLE_DEVICES: all
     deploy:
@@ -18,13 +52,13 @@ services:
 
   segment_processor:
     build:
-      context: ../docker/segment_processor
+      context: ../
+      dockerfile: docker/segment_processor/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - caption_processor
-    command: --output_dir ${OUTPUT_DIR}
     deploy:
       resources:
         reservations:
@@ -33,13 +67,13 @@ services:
 
   pointcloud_processor:
     build:
-      context: ../docker/pointcloud_processor
+      context: ../
+      dockerfile: docker/pointcloud_processor/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - segment_processor
-    command: --output_dir ${OUTPUT_DIR}
     deploy:
       resources:
         reservations:
@@ -48,13 +82,13 @@ services:
 
   prompt_processor:
     build:
-      context: ../docker/prompt_processor
+      context: ../
+      dockerfile: docker/prompt_processor/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - pointcloud_processor
-    command: --output_dir ${OUTPUT_DIR} --image_dir ${IMAGE_DIR}
     deploy:
       resources:
         reservations:
