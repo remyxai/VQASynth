@@ -1,4 +1,4 @@
-FROM smellslikeml/vqasynth:base
+FROM vqasynth:base
 WORKDIR /app
 
 COPY docker/location_refinement_stage/process_location_refinement.py /app

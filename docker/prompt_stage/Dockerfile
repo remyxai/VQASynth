@@ -1,4 +1,4 @@
-FROM smellslikeml/vqasynth:base
+FROM vqasynth:base
 WORKDIR /app
 
 COPY docker/prompt_stage/process_prompts.py /app

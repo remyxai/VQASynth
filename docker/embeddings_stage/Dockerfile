@@ -1,4 +1,4 @@
-FROM smellslikeml/vqasynth:base
+FROM vqasynth:base
 WORKDIR /app
 
 COPY docker/embeddings_stage/process_embeddings.py /app

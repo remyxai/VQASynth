@@ -13,4 +13,8 @@ fi
 export IMAGE_DIR="$IMAGE_DIR"
 export OUTPUT_DIR="$OUTPUT_DIR"
 
+echo "Building base image..."
+docker build -f docker/base_image/Dockerfile -t vqasynth:base .
+
+echo "Launching pipeline"
 docker compose -f pipelines/spatialvqa.yaml up --build

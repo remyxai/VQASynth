@@ -25,8 +25,6 @@ RUN apt-get install --no-install-recommends wget ffmpeg=7:* \
 RUN wget https://github.com/mikefarah/yq/releases/download/v4.30.8/yq_linux_amd64 -O /usr/bin/yq \
     && chmod +x /usr/bin/yq
 
-
-RUN pip install timm==1.0.9
 RUN pip install git+https://github.com/apple/ml-depth-pro.git
 
 RUN mkdir -p checkpoints && \
@@ -49,7 +47,6 @@ COPY . /app/VQASynth
 RUN pip install .
 
 # Reinstalling to avoid numpy>2 upgrade
-RUN pip install git+https://github.com/openai/CLIP.git
 RUN pip uninstall -y numpy && pip install numpy==1.26.4
 
 WORKDIR /app

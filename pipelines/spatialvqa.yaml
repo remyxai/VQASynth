@@ -1,6 +1,17 @@
 version: '3.8'
 
 services:
+  vqasynth_base:
+    build:
+      context: ../
+      dockerfile: docker/base/Dockerfile  # Dockerfile for the vqasynth:base image
+    image: vqasynth:base  # Tag the built image as vqasynth:base
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
   embeddings_stage:
     build:
       context: ../

@@ -1,4 +1,4 @@
-FROM smellslikeml/vqasynth:base
+FROM vqasynth:base
 WORKDIR /app
 
 COPY docker/scene_fusion_stage/process_scene_fusion.py /app

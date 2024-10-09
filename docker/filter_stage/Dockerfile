@@ -1,4 +1,4 @@
-FROM smellslikeml/vqasynth:base
+FROM vqasynth:base
 WORKDIR /app
 
 COPY docker/filter_stage/process_filter.py /app
