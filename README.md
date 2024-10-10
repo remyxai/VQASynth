@@ -1,11 +1,11 @@
 # VQASynth
 
+Spatial Reasoning is crucial for embodied AI applications like robotics, but these reasoning traces are not common in web-scraped data sources.
 Augment image datasets from the Huggingface Hub with scene understanding pipelines. 
 
-## Background
-Spatial Reasoning is crucial for embodied AI applications like robotics, but these reasoning traces are not common in web-scraped data sources.
-Fusing semantic and metric data into templated VQA chat, Vision Language Models can be instruction-tuned with low-rank adapters to enhance their baseline spatial reasoning capabilities. 
+## Description
 
+Fusing semantic and metric data into templated VQA chat, Vision Language Models can be instruction-tuned with low-rank adapters to enhance their baseline spatial reasoning capabilities. 
 VQASynth provides an open-source reproduction of [SpatialVLM](https://arxiv.org/abs/2401.12168), which describes a 3D scene reconstruction pipeline and templates to enhance the spatial reasoning abilities of VLMs including:
 
 * Semantic filtering with [CLIP](https://github.com/openai/CLIP) to normalize the image distribution and attributes
@@ -13,13 +13,13 @@ VQASynth provides an open-source reproduction of [SpatialVLM](https://arxiv.org/
 * Object-level captioning with [FlexCap](https://flex-cap.github.io/) for precise 2D region proposal
 * Plane-fitting with RANSAC for a consistent reference frame in 3D
 
-Early VQASynth experiments used LLaVA for object-level captioning and compared caption and tag base region proposal with models like [groundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [CLIPSeg](https://github.com/timojl/clipseg).
+Initial VQASynth experiments prompted [LLaVA](https://github.com/haotian-liu/LLaVA) for detailed object-level captioning in JSON or tagging with [RAM](https://github.com/xinyu1205/recognize-anything). These experiments also compared caption and tag based region proposal using models like [groundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [CLIPSeg](https://github.com/timojl/clipseg).
 
 ![VQASynth-diagram.png](https://github.com/remyxai/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
 
-Currently, the faster, lighter [Florence-2](https://arxiv.org/abs/2311.06242) is used both for detailed image captions and for generating regions of interest grounded on text captions.
+Now, the faster, lighter [Florence-2](https://arxiv.org/abs/2311.06242) is used both for detailed image captions and for generating regions of interest grounded on text captions.
 
-For improved metric depth estimation, we're running [DepthPro](https://github.com/apple/ml-depth-pro) instead of ZoeDepth and [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
+Additionally, VQASynth has improved metric depth estimation with [DepthPro](https://github.com/apple/ml-depth-pro) instead of ZoeDepth and [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
 
 
 ### Environment
