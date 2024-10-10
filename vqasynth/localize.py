@@ -1,8 +1,10 @@
 import torch
 import numpy as np
+import random
 
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoModelForCausalLM, AutoProcessor
+
 
 class CaptionLocalizer:
     def __init__(self, model_name="microsoft/Florence-2-large", device="cuda"):
@@ -101,9 +103,10 @@ class LocationRefiner:
 
 
 class Localizer:
-    def __init__():
+    def __init__(self):
         self.caption_localizer = CaptionLocalizer()
         self.location_refiner = LocationRefiner()
+
     def run(self, image):
         """
         Produce object location masks, bboxes, and captions
@@ -117,7 +120,7 @@ class Localizer:
         """
 
         try:
-            preds = caption_localizer.run(image)
+            preds = self.caption_localizer.run(image)
             sam_masks = []
             final_bboxes = []
             final_captions = []
@@ -134,7 +137,7 @@ class Localizer:
                     selected_bbox = bboxes[random_index]
                     selected_caption = captions[random_index]
 
-                    mask_tensor = location_refiner.run(image, selected_bbox)
+                    mask_tensor = self.location_refiner.run(image, selected_bbox)
                     mask = mask_tensor[0]
                     mask_uint8 = (mask.astype(np.uint8)) * 255
                     sam_masks.append(mask_uint8)
@@ -146,5 +149,3 @@ class Localizer:
         except Exception as e:
             print(f"Error during localization: {str(e)}")
             return [], [], []
-
-

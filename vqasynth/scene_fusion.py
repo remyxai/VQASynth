@@ -1,3 +1,4 @@
+import os
 import cv2
 import pickle
 import random
@@ -5,7 +6,11 @@ import numpy as np
 import open3d as o3d
 from pathlib import Path
 
+
 class SpatialSceneConstructor:
+    def __init__(self):
+        pass
+
     def save_pointcloud(self, pcd, file_path):
         """
         Save a point cloud to a file using Open3D.
@@ -27,24 +32,33 @@ class SpatialSceneConstructor:
             masked_image[:, :, c] = masked_image[:, :, c] * mask
         return masked_image
 
-    def create_point_cloud_from_rgbd(self, rgb_image, depth_image, intrinsic_parameters):
+    def create_point_cloud_from_rgbd(
+        self, rgb_image, depth_image, intrinsic_parameters
+    ):
         rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
             o3d.geometry.Image(rgb_image),
             o3d.geometry.Image(depth_image),
-            depth_scale=1.0, 
+            depth_scale=1.0,
             depth_trunc=10.0,
-            convert_rgb_to_intensity=False
+            convert_rgb_to_intensity=False,
         )
         intrinsic = o3d.camera.PinholeCameraIntrinsic()
-        intrinsic.set_intrinsics(intrinsic_parameters['width'], intrinsic_parameters['height'],
-                                 intrinsic_parameters['fx'], intrinsic_parameters['fy'],
-                                 intrinsic_parameters['cx'], intrinsic_parameters['cy'])
+        intrinsic.set_intrinsics(
+            intrinsic_parameters["width"],
+            intrinsic_parameters["height"],
+            intrinsic_parameters["fx"],
+            intrinsic_parameters["fy"],
+            intrinsic_parameters["cx"],
+            intrinsic_parameters["cy"],
+        )
         pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic)
         return pcd
 
     def canonicalize_point_cloud(self, pcd, canonicalize_threshold=0.3):
         # Segment the largest plane, assumed to be the floor
-        plane_model, inliers = pcd.segment_plane(distance_threshold=0.01, ransac_n=3, num_iterations=1000)
+        plane_model, inliers = pcd.segment_plane(
+            distance_threshold=0.01, ransac_n=3, num_iterations=1000
+        )
 
         canonicalized = False
         if len(inliers) / len(pcd.points) > canonicalize_threshold:
@@ -66,15 +80,21 @@ class SpatialSceneConstructor:
             # Create the transformation matrix
             transformation = np.identity(4)
             transformation[:3, :3] = np.vstack((new_x, new_y, new_z)).T
-            transformation[:3, 3] = -np.dot(transformation[:3, :3], pcd.points[inliers[0]])
+            transformation[:3, 3] = -np.dot(
+                transformation[:3, :3], pcd.points[inliers[0]]
+            )
 
             # Apply the transformation
             pcd.transform(transformation)
 
             # Additional 180-degree rotation around the Z-axis
-            rotation_z_180 = np.array([[np.cos(np.pi), -np.sin(np.pi), 0],
-                                       [np.sin(np.pi), np.cos(np.pi), 0],
-                                       [0, 0, 1]])
+            rotation_z_180 = np.array(
+                [
+                    [np.cos(np.pi), -np.sin(np.pi), 0],
+                    [np.sin(np.pi), np.cos(np.pi), 0],
+                    [0, 0, 1],
+                ]
+            )
             pcd.rotate(rotation_z_180, center=(0, 0, 0))
 
             return pcd, canonicalized, transformation
@@ -104,11 +124,13 @@ class SpatialSceneConstructor:
                 relative_vector = centroids[j] - centroids[i]
 
                 distance = np.linalg.norm(relative_vector)
-                relative_positions_info.append({
-                    'pcd_pair': (i, j),
-                    'relative_vector': relative_vector,
-                    'distance': distance
-                })
+                relative_positions_info.append(
+                    {
+                        "pcd_pair": (i, j),
+                        "relative_vector": relative_vector,
+                        "distance": distance,
+                    }
+                )
 
         return relative_positions_info
 
@@ -141,26 +163,33 @@ class SpatialSceneConstructor:
 
         return height_i > height_j
 
-
     def run(self, image_filename, image, depth_map, focallength, masks, output_dir):
-        original_image_cv = cv2.cvtColor(np.array(image.convert('RGB')), cv2.COLOR_RGB2BGR)
-        depth_image_cv = cv2.cvtColor(np.array(depth_map.convert('RGB')), cv2.COLOR_RGB2BGR)
+        original_image_cv = cv2.cvtColor(
+            np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR
+        )
+        depth_image_cv = cv2.cvtColor(
+            np.array(depth_map.convert("RGB")), cv2.COLOR_RGB2BGR
+        )
 
         width, height = image.size
         intrinsic_parameters = {
-            'width': width,
-            'height': height,
-            'fx': focallength,
-            'fy': focallength,
-            'cx': width / 2,
-            'cy': height / 2,
+            "width": width,
+            "height": height,
+            "fx": focallength,
+            "fy": focallength,
+            "cx": width / 2,
+            "cy": height / 2,
         }
 
         point_clouds = []
         point_cloud_data = []
 
-        original_pcd = self.create_point_cloud_from_rgbd(original_image_cv, depth_image_cv, intrinsic_parameters)
-        pcd, canonicalized, transformation = self.canonicalize_point_cloud(original_pcd, canonicalize_threshold=0.3)
+        original_pcd = self.create_point_cloud_from_rgbd(
+            original_image_cv, depth_image_cv, intrinsic_parameters
+        )
+        pcd, canonicalized, transformation = self.canonicalize_point_cloud(
+            original_pcd, canonicalize_threshold=0.3
+        )
 
         for i, mask in enumerate(masks):
             mask_binary = mask > 0
@@ -168,7 +197,9 @@ class SpatialSceneConstructor:
             masked_rgb = self.apply_mask_to_image(original_image_cv, mask_binary)
             masked_depth = self.apply_mask_to_image(depth_image_cv, mask_binary)
 
-            pcd = self.create_point_cloud_from_rgbd(masked_rgb, masked_depth, intrinsic_parameters)
+            pcd = self.create_point_cloud_from_rgbd(
+                masked_rgb, masked_depth, intrinsic_parameters
+            )
             point_clouds.append(pcd)
 
         for idx, pcd in enumerate(point_clouds):
@@ -176,7 +207,11 @@ class SpatialSceneConstructor:
             inlier_cloud = pcd.select_by_index(ind)
             if canonicalized:
                 pcd.transform(transformation)
-            pointcloud_filepath = os.path.join(output_dir, "pointclouds", f"pointcloud_{Path(image_filename).stem}_{idx}.pcd")
+            pointcloud_filepath = os.path.join(
+                output_dir,
+                "pointclouds",
+                f"pointcloud_{Path(image_filename).stem}_{idx}.pcd",
+            )
             self.save_pointcloud(inlier_cloud, pointcloud_filepath)
             point_cloud_data.append(pointcloud_filepath)
 

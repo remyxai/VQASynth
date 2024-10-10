@@ -28,6 +28,7 @@ class DepthEstimator:
             depth = prediction["depth"]
             depth_map = cv2.normalize(np.array(depth), None, 255, 0, cv2.NORM_MINMAX, cv2.CV_8U)
             focallength_px = prediction["focallength_px"] 
+            focallength_px = focallength_px.item()
 
             if depth_map.dtype != np.uint16:
                 depth_map = (depth_map / np.max(depth_map) * 65535).astype(np.uint16)

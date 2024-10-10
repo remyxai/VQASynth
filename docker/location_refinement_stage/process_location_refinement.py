@@ -14,7 +14,7 @@ def main(output_dir):
             pkl_path = os.path.join(output_dir, filename)
             df = pd.read_pickle(pkl_path)
             df[["masks", "bboxes", "captions"]] = pd.DataFrame(
-                df.apply(lambda row: localizer(row["image"]), axis=1).tolist(),
+                df.apply(lambda row: localizer.run(row["image"]), axis=1).tolist(),
                 index=df.index,
             )
             df.to_pickle(pkl_path)

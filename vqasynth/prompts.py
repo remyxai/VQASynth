@@ -5,7 +5,7 @@ from vqasynth.prompt_templates import *
 from vqasynth.scene_fusion import SpatialSceneConstructor 
 
 class PromptGenerator():
-    def __init__():
+    def __init__(self):
         self.spatial_scene_constructor = SpatialSceneConstructor()
 
     def human_like_distance(self, distance_meters):
@@ -63,7 +63,7 @@ class PromptGenerator():
         # Fallback to the last choice if something goes wrong
         return f"{choices[-1][0]} {choices[-1][1]}"
 
-    def left_predicate(A, B):
+    def left_predicate(self, A, B):
         template_questions = left_predicate_questions
         true_responses = left_true_responses
         false_responses = left_false_responses
@@ -86,7 +86,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def right_predicate(A, B):
+    def right_predicate(self, A, B):
         template_questions = right_predicate_questions
         true_responses = right_true_responses
         false_responses = right_false_responses
@@ -109,7 +109,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def above_predicate(A, B):
+    def above_predicate(self, A, B):
         template_questions = above_predicate_questions
         true_responses = above_true_responses
         false_responses = above_false_responses
@@ -132,7 +132,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def below_predicate(A, B):
+    def below_predicate(self, A, B):
         template_questions = below_predicate_questions
         true_responses = below_true_responses
         false_responses = below_false_responses
@@ -155,7 +155,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def wide_predicate(A, B):
+    def wide_predicate(self, A, B):
         template_questions = wide_predicate_questions
         true_responses = wide_true_responses
         false_responses = wide_false_responses
@@ -178,7 +178,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def big_predicate(A, B):
+    def big_predicate(self, A, B):
         template_questions = big_predicate_questions
         true_responses = big_true_responses
         false_responses = big_false_responses
@@ -203,7 +203,7 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-    def tall_predicate(A, B):
+    def tall_predicate(self, A, B):
         template_questions = tall_predicate_questions
         true_responses = tall_true_responses
         false_responses = tall_false_responses
@@ -226,7 +226,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def short_predicate(A, B):
+    def short_predicate(self, A, B):
         template_questions = short_predicate_questions
         true_responses = short_true_responses
         false_responses = short_false_responses
@@ -249,7 +249,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def thin_predicate(A, B):
+    def thin_predicate(self, A, B):
         template_questions = thin_predicate_questions
         true_responses = thin_true_responses
         false_responses = thin_false_responses
@@ -272,7 +272,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def small_predicate(A, B):
+    def small_predicate(self, A, B):
         template_questions = small_predicate_questions
         true_responses = small_true_responses
         false_responses = small_false_responses
@@ -298,7 +298,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def behind_predicate(A, B):
+    def behind_predicate(self, A, B):
         template_questions = behind_predicate_questions
         true_responses = behind_true
         false_responses = behind_false
@@ -320,7 +320,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def front_predicate(A, B):
+    def front_predicate(self, A, B):
         template_questions = front_predicate_questions
         true_responses = front_true
         false_responses = front_false
@@ -346,7 +346,7 @@ class PromptGenerator():
 
     # Choice prompts
 
-    def left_choice(A, B):
+    def left_choice(self, A, B):
         template_questions = left_choice_questions
         template_responses = left_choice_responses
 
@@ -368,7 +368,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def right_choice(A, B):
+    def right_choice(self, A, B):
         template_questions = right_choice_questions
         template_responses = right_choice_responses
 
@@ -390,7 +390,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def above_choice(A, B):
+    def above_choice(self, A, B):
         template_questions = above_choice_questions
         template_responses = above_choice_responses
 
@@ -412,7 +412,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def below_choice(A, B):
+    def below_choice(self, A, B):
         template_questions = below_choice_questions
         template_responses = below_choice_responses
 
@@ -434,7 +434,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def tall_choice(A, B):
+    def tall_choice(self, A, B):
         template_questions = tall_choice_questions
         template_responses = tall_choice_responses
 
@@ -456,7 +456,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def short_choice(A, B):
+    def short_choice(self, A, B):
         template_questions = short_choice_questions
         template_responses = short_choice_responses
 
@@ -481,7 +481,7 @@ class PromptGenerator():
     # Distance prompts
 
     def generate_spatial_reasoning_data(
-        A, B, human_readable_dist, template_questions, template_answers
+        self, A, B, human_readable_dist, template_questions, template_answers
     ):
         A_desc, B_desc = A[0].lower(), B[0].lower()
 
@@ -500,7 +500,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def vertical_distance_data(A, B):
+    def vertical_distance_data(self, A, B):
         template_questions = vertical_distance_questions
         template_answers = vertical_distance_answers
 
@@ -509,12 +509,12 @@ class PromptGenerator():
         vertical_distance = abs(A_center[1] - B_center[1])
         human_readable_dist = self.human_like_distance(vertical_distance)
 
-        return generate_spatial_reasoning_data(
+        return self.generate_spatial_reasoning_data(
             A, B, human_readable_dist, template_questions, template_answers
         )
 
 
-    def horizontal_distance_data(A, B):
+    def horizontal_distance_data(self, A, B):
         template_questions = horizontal_distance_questions
         template_answers = horizontal_distance_answers
 
@@ -525,12 +525,12 @@ class PromptGenerator():
         )
 
         human_readable_dist = self.human_like_distance(horizontal_distance)
-        return generate_spatial_reasoning_data(
+        return self.generate_spatial_reasoning_data(
             A, B, human_readable_dist, template_questions, template_answers
         )
 
 
-    def width_data(A, B=None):
+    def width_data(self, A, B=None):
         A_desc = A[0].lower()
 
         template_questions = width_questions
@@ -547,7 +547,7 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-    def height_data(A, B=None):
+    def height_data(self, A, B=None):
         A_desc = A[0].lower()
 
         template_questions = height_questions
@@ -565,7 +565,7 @@ class PromptGenerator():
         return question + " Answer: " + answer
 
 
-    def evaluate_predicates_on_pairs(pairs, is_canonicalized):
+    def evaluate_predicates_on_pairs(self, pairs, is_canonicalized):
         all_prompt_variants = [
             self.left_predicate,
             self.right_predicate,
@@ -610,7 +610,7 @@ class PromptGenerator():
             distance = self.spatial_scene_constructor.calculate_distances_between_point_clouds(A[1], B[1])
             distance = self.human_like_distance(distance)
             pair_results.append(
-                generate_spatial_reasoning_data(
+                self.generate_spatial_reasoning_data(
                     A,
                     B,
                     distance,

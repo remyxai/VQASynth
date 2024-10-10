@@ -12,7 +12,6 @@ huggingface-hub==0.24.7
 onnx==1.13.1
 onnxruntime==1.14.1
 onnxsim==0.4.35
-llama-cpp-python
 scipy==1.12.0
 openai==1.12.0
 litellm==1.25.2
