@@ -37,7 +37,6 @@ RUN pip install --upgrade torch==2.4.0+cu118 torchvision==0.19.0 torchaudio==2.4
 RUN pip uninstall -y flash_attn
 RUN pip install git+https://github.com/Dao-AILab/flash-attention.git@v2.6.0
 
-
 WORKDIR /app/VQASynth
 COPY . /app/VQASynth
 RUN pip install .
