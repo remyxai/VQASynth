@@ -6,7 +6,7 @@ from PIL import Image
 from vqasynth.datasets import Dataloader
 from vqasynth.embeddings import EmbeddingGenerator
 
-def main(output_dir, source_repo_id, image_col):
+def main(output_dir, source_repo_id, images):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -16,7 +16,7 @@ def main(output_dir, source_repo_id, image_col):
     dataset = dataloader.load_dataset(source_repo_id)
 
     def process_row(example):
-        embedding = embedding_generator.run(example[image_col])
+        embedding = embedding_generator.run(example[images])
         example['embedding'] = embedding
         return example
 
@@ -40,10 +40,10 @@ if __name__ == "__main__":
         help="Source huggingface dataset repo id",
     )
     parser.add_argument(
-        "--image_col",
+        "--images",
         type=str,
         required=True,
         help="Column containing PIL.Image images",
     )
     args = parser.parse_args()
-    main(args.output_dir, args.source_repo_id, args.image_col)
+    main(args.output_dir, args.source_repo_id, args.images)

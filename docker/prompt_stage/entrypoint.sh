@@ -6,7 +6,7 @@ CONFIG_FILE=/app/config/config.yaml
 OUTPUT_DIR=$(yq e '.directories.output_dir' $CONFIG_FILE)
 SOURCE_REPO_ID=$(yq e '.arguments.source_repo_id' $CONFIG_FILE)
 TARGET_REPO_ID=$(yq e '.arguments.target_repo_id' $CONFIG_FILE)
-IMAGE_COL=$(yq e '.arguments.image_col' $CONFIG_FILE)
+IMAGES=$(yq e '.arguments.images' $CONFIG_FILE)
 
 # Export these values as environment variables
 export OUTPUT_DIR
@@ -24,7 +24,7 @@ python3 process_prompts.py \
     --output_dir="${OUTPUT_DIR}" \
     --source_repo_id="${SOURCE_REPO_ID}" \
     --target_repo_id="${TARGET_REPO_ID}" \
-    --image_col="${IMAGE_COL}"
+    --images="${IMAGES}"
 
 rm "${OUTPUT_DIR}/scene_fusion_done.txt" 
 touch "${OUTPUT_DIR}/data_processing_done.txt"

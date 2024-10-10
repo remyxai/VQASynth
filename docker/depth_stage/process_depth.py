@@ -8,14 +8,14 @@ from vqasynth.datasets import Dataloader
 from vqasynth.depth import DepthEstimator
 
 
-def main(output_dir, source_repo_id, image_col):
+def main(output_dir, source_repo_id, images):
     dataloader = Dataloader(output_dir)
     depth = DepthEstimator()
 
     dataset = dataloader.load_dataset(source_repo_id)
 
     def process_row(example):
-        depth_map, focallength = depth.run(example[image_col])
+        depth_map, focallength = depth.run(example[images])
         example['depth_map'] = depth_map
         example['focallength'] = focallength
         return example
@@ -42,11 +42,11 @@ if __name__ == "__main__":
         help="Source huggingface dataset repo id",
     )
     parser.add_argument(
-        "--image_col",
+        "--images",
         type=str,
         required=True,
         help="Column containing PIL.Image images",
     )
     args = parser.parse_args()
 
-    main(args.output_dir, args.source_repo_id, args.image_col)
+    main(args.output_dir, args.source_repo_id, args.images)

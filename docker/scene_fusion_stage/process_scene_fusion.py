@@ -6,7 +6,7 @@ from vqasynth.datasets import Dataloader
 from vqasynth.scene_fusion import SpatialSceneConstructor
 
 
-def main(output_dir, source_repo_id, image_col):
+def main(output_dir, source_repo_id, images):
     spatial_scene_constructor = SpatialSceneConstructor()
     dataloader = Dataloader(output_dir)
 
@@ -20,7 +20,7 @@ def main(output_dir, source_repo_id, image_col):
         # Run spatial scene constructor and get point cloud data and canonicalization flag
         pcd_data, canonicalized = spatial_scene_constructor.run(
             str(idx), 
-            example[image_col],
+            example[images],
             example["depth_map"],
             example["focallength"],
             example["masks"],
@@ -50,11 +50,11 @@ if __name__ == "__main__":
         help="Source huggingface dataset repo id",
     )
     parser.add_argument(
-        "--image_col",
+        "--images",
         type=str,
         required=True,
         help="Column containing PIL.Image images",
     )
     args = parser.parse_args()
 
-    main(args.output_dir, args.source_repo_id, args.image_col)
+    main(args.output_dir, args.source_repo_id, args.images)

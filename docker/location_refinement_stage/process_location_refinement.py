@@ -8,14 +8,14 @@ from vqasynth.datasets import Dataloader
 from vqasynth.localize import Localizer
 
 
-def main(output_dir, source_repo_id, image_col):
+def main(output_dir, source_repo_id, images):
     dataloader = Dataloader(output_dir)
     localizer = Localizer()
 
     dataset = dataloader.load_dataset(source_repo_id)
 
     def process_row(example):
-        masks, bboxes, captions = localizer.run(example[image_col])
+        masks, bboxes, captions = localizer.run(example[images])
         example['masks'] = masks
         example['bboxes'] = bboxes
         example['captions'] = captions
@@ -43,11 +43,11 @@ if __name__ == "__main__":
         help="Source huggingface dataset repo id",
     )
     parser.add_argument(
-        "--image_col",
+        "--images",
         type=str,
         required=True,
         help="Column containing PIL.Image images",
     )
     args = parser.parse_args()
 
-    main(args.output_dir, args.source_repo_id, args.image_col)
+    main(args.output_dir, args.source_repo_id, args.images)

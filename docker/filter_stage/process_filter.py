@@ -20,15 +20,15 @@ def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_thre
         example['tag'] = tag_filter.get_best_matching_tag(
             example['embedding'], include_tags + exclude_tags
         )
-        example['keep'] = tag_filter.filter_by_tag(
-            example['tag'], include_tags, exclude_tags
-        )
         return example
 
     dataset = dataset.map(process_row)
 
-    dataset_filtered = dataset.filter(lambda example: example['keep'])
-    dataset_filtered = dataset_filtered.remove_columns(['keep'])
+    dataset_filtered = dataset.filter(
+        lambda example: tag_filter.filter_by_tag(
+            example['tag'], include_tags, exclude_tags
+        )
+    )
 
     dataloader.save_to_disk(dataset_filtered)
 

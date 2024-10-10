@@ -10,7 +10,7 @@ import pandas as pd
 from vqasynth.datasets import Dataloader
 from vqasynth.prompts import PromptGenerator
 
-def main(output_dir, source_repo_id, target_repo_id, image_col):
+def main(output_dir, source_repo_id, target_repo_id, images):
     prompt_generator = PromptGenerator()
     dataloader = Dataloader(output_dir)
 
@@ -54,7 +54,7 @@ def main(output_dir, source_repo_id, target_repo_id, image_col):
         return example
 
     dataset = dataset.map(process_row)
-    final_dataset = dataset.select_columns([image_col, "messages"])
+    final_dataset = dataset.select_columns([images, "messages"])
 
     dataloader.save_to_disk(final_dataset)
     dataloader.push_to_hub(final_dataset, target_repo_id)
@@ -83,11 +83,11 @@ if __name__ == "__main__":
         help="Target huggingface dataset repo id",
     )
     parser.add_argument(
-        "--image_col",
+        "--images",
         type=str,
         required=True,
         help="Column containing PIL.Image images",
     )
     args = parser.parse_args()
 
-    main(args.output_dir, args.source_repo_id, args.target_repo_id, args.image_col)
+    main(args.output_dir, args.source_repo_id, args.target_repo_id, args.images)

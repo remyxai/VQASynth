@@ -45,9 +45,10 @@ class Dataloader:
 
         card.push_to_hub(repo_id)
 
-    def push_to_hub(self, dataset, repo_id):
+    def push_to_hub(self, dataset, repo_name):
         """Push the final dataset to Hugging Face Hub."""
         try:
+            repo_id = f"{self.api.whoami()['name']}/{repo_name}"
             dataset.push_to_hub(repo_id)
             self._tag_dateset(repo_id)
         except Exception as e:
