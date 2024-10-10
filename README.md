@@ -1,18 +1,31 @@
 # VQASynth
 
-Enhance the reasoning of multimodal models with pipelines to synthesize VQA datasets.
+Augment image datasets from the Huggingface Hub with scene understanding pipelines. 
 
 ## Background
-Inspired by SpatialVLM, this repo uses ZoeDepth to adapt Vision Langauge Models for spatial reasoning.
-The demos feature pipelines using LLaVA for object captioning and SAM for segmentation. 
-One uses CLIPSeg for region proposal, while the other uses GroundingDINO. 
+VQASynth supports an open-source reproduction of [SpatialVLM](https://arxiv.org/abs/2401.12168).
+Fusing semantic and metric data into templated VQA chat, Vision Language Models can be instruction-tuned with low-rank adapters to enhance their baseline spatial reasoning capabilities. 
+
+SpatialVLM describes a 3D scene reconstruction pipeline and templates to enhance the spatial reasoning abilities of VLMs including:
+
+* Semantic filtering with [CLIP](https://github.com/openai/CLIP) to normalize the image distribution and attributes
+* Metric Depth Estimation with [ZoeDepth](https://github.com/isl-org/ZoeDepth) to lift the 2D image to 3D
+* Object-level captioning with [FlexCap](https://flex-cap.github.io/) for precise 2D region proposal
+* Plane-fitting with RANSAC for a consistent reference frame in 3D
+
+The first open-sourced implementation used LLaVA for object-level captioning and compared caption and tag base region proposal with models like [groundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [CLIPSeg](https://github.com/timojl/clipseg).
 
 ![VQASynth-diagram.png](https://github.com/remyxai/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
+
+Currently, the faster, lighter [Florence-2](https://arxiv.org/abs/2311.06242) is used both for detailed image captions and for generating regions of interest grounded on text captions.
+
+For improved metric depth estimation, we're running [DepthPro](https://github.com/apple/ml-depth-pro) instead of ZoeDepth and [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
+
 
 ### Environment
 
 Before running the demo scripts, ensure you have the following installed:
-- Python 3.9 or later
+- Python 3.10 or later
 - [Docker](https://docs.docker.com/engine/install/), [Docker Compose V2](https://docs.docker.com/compose/migrate/)
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
