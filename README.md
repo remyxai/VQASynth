@@ -83,15 +83,21 @@ unzip vqasynth_warehouse_spaces.zip
 
 Once completed, you can follow this resource on [fine-tuning LLaVa](https://github.com/haotian-liu/LLaVA/blob/5d8f1760c08b7dfba3ae97b71cbd4c6f17d12dbd/docs/Finetune_Custom_Data.md#L4).
 
-## Models
+## Datasets from VQASynth
 
-Check out our LLaVA 1.5 LoRA [SpaceLLaVA](https://huggingface.co/remyxai/SpaceLLaVA)
-and MobileVLM-based [SpaceLLaVA-lite](https://huggingface.co/remyxai/SpaceLLaVA-lite)
+* [vqasynth_spacellava](https://huggingface.co/datasets/remyxai/vqasynth_spacellava)
 
+## Models tuned on VQASynth
+
+* [SpaceLLaVA - 13B](https://huggingface.co/remyxai/SpaceLLaVA)
+* [SpaceMantis - 8B](https://huggingface.co/remyxai/SpaceMantis)
+* [SpaceFlorence-2 - <1B](https://huggingface.co/remyxai/SpaceFlorence-2)
+* [SpaceVLMs Collection](https://huggingface.co/collections/remyxai/spacevlms-66a3dbb924756d98e7aec678)
+
+Try SpaceMantis in the [HF Space](https://huggingface.co/spaces/remyxai/SpaceMantis)
 Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
 
 ![image](https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef)
-
 
 
 ## Notebooks
