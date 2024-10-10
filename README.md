@@ -15,7 +15,7 @@ VQASynth provides an open-source reproduction of [SpatialVLM](https://arxiv.org/
 * Object-level captioning with [FlexCap](https://flex-cap.github.io/) for precise 2D region proposal
 * Plane-fitting with RANSAC for a consistent reference frame in 3D
 
-Initial VQASynth experiments prompted [LLaVA](https://github.com/haotian-liu/LLaVA) for detailed object-level captioning in JSON or tagging with [RAM](https://github.com/xinyu1205/recognize-anything). These experiments also compared caption and tag based region proposal using models like [groundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [CLIPSeg](https://github.com/timojl/clipseg).
+Initial VQASynth experiments prompted [LLaVA](https://github.com/haotian-liu/LLaVA) for detailed object-level captioning in JSON or tagging with [RAM](https://github.com/xinyu1205/recognize-anything). These experiments also compared caption and tag based region proposal using publicly available models like [groundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [CLIPSeg](https://github.com/timojl/clipseg).
 
 ![VQASynth-diagram.png](https://github.com/remyxai/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
 
