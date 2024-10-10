@@ -1,4 +1,4 @@
-# VQASynth
+# VQASynth 🎹
 
 Spatial Reasoning is fundamental for embodied AI applications like robotics, but examples of the ideal reasoning traces to train a model are largely absent in web-scraped data sources.
 Don't let the limitations of zero-shot learning stop you, augment any image dataset from the Huggingface Hub using scene understanding tools.
