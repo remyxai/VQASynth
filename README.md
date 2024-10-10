@@ -3,17 +3,17 @@
 Augment image datasets from the Huggingface Hub with scene understanding pipelines. 
 
 ## Background
-VQASynth supports an open-source reproduction of [SpatialVLM](https://arxiv.org/abs/2401.12168).
+Spatial Reasoning is crucial for embodied AI applications like robotics, but these reasoning traces are not common in web-scraped data sources.
 Fusing semantic and metric data into templated VQA chat, Vision Language Models can be instruction-tuned with low-rank adapters to enhance their baseline spatial reasoning capabilities. 
 
-SpatialVLM describes a 3D scene reconstruction pipeline and templates to enhance the spatial reasoning abilities of VLMs including:
+VQASynth provides an open-source reproduction of [SpatialVLM](https://arxiv.org/abs/2401.12168), which describes a 3D scene reconstruction pipeline and templates to enhance the spatial reasoning abilities of VLMs including:
 
 * Semantic filtering with [CLIP](https://github.com/openai/CLIP) to normalize the image distribution and attributes
 * Metric Depth Estimation with [ZoeDepth](https://github.com/isl-org/ZoeDepth) to lift the 2D image to 3D
 * Object-level captioning with [FlexCap](https://flex-cap.github.io/) for precise 2D region proposal
 * Plane-fitting with RANSAC for a consistent reference frame in 3D
 
-The first open-sourced implementation used LLaVA for object-level captioning and compared caption and tag base region proposal with models like [groundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [CLIPSeg](https://github.com/timojl/clipseg).
+Early VQASynth experiments used LLaVA for object-level captioning and compared caption and tag base region proposal with models like [groundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [CLIPSeg](https://github.com/timojl/clipseg).
 
 ![VQASynth-diagram.png](https://github.com/remyxai/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
 
