@@ -9,7 +9,7 @@ VLMs trained using VQASynth can:
 * estimate distances between objects in a 3D scene
 * describe distances colloquially, convert between common units
 * answer queries about the spatial relationships and orientations between objects
-* ground responses on a consistent reference like the floor
+* base responses on consistent references like floors and surfaces
 
 ## Description
 
