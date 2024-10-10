@@ -1,7 +1,7 @@
 # VQASynth
 
-Spatial Reasoning is crucial for embodied AI applications like robotics, but these reasoning traces are not common in web-scraped data sources.
-Augment image datasets from the Huggingface Hub with scene understanding pipelines. 
+Spatial Reasoning is fundamental for embodied AI applications like robotics, but the necessary reasoning traces to train model with are largely absent in web-scraped data sources.
+Augment any image dataset from the Huggingface Hub using scene understanding tools.
 
 ## Description
 
