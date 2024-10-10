@@ -11,17 +11,15 @@ export IMAGE_DIR
 export OUTPUT_DIR
 
 echo "Using output directory: $OUTPUT_DIR"
+echo "Waiting for depth processing to complete..."
 
-echo "Waiting for pointcloud processing to complete..."
-
-while [ ! -f "${OUTPUT_DIR}/pointcloud_done.txt" ]; do
+while [ ! -f "${OUTPUT_DIR}/depth_done.txt" ]; do
   sleep 10
 done
 
-echo "Starting prompt processing..."
-python3 process_prompts.py \
-    --image_dir="${IMAGE_DIR}" \
+echo "Starting location refinement processing..."
+python3 process_location_refinement.py \
     --output_dir="${OUTPUT_DIR}"
 
-rm "${OUTPUT_DIR}/pointcloud_done.txt" 
-touch "${OUTPUT_DIR}/data_processing_done.txt"
+rm "${OUTPUT_DIR}/depth_done.txt" 
+touch "${OUTPUT_DIR}/location_refinement_done.txt"

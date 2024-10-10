@@ -1,11 +1,12 @@
 import torch
 import numpy as np
+import random
 
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoModelForCausalLM, AutoProcessor
 
 
-class Florence2:
+class CaptionLocalizer:
     def __init__(self, model_name="microsoft/Florence-2-large", device="cuda"):
         self.device = device
         self.torch_dtype = torch.float16
@@ -16,8 +17,18 @@ class Florence2:
             model_name, torch_dtype=self.torch_dtype, trust_remote_code=True
         ).to(self.device)
 
-    def run_inference(self, image):
-        final_answers = []
+    def run(self, image):
+        """
+        Extract captioned bounding boxes of objects found in the scene.
+
+        Args:
+            image: A PIL Image
+
+        Returns:
+            list: A list of dicitonaries containing bounding boxes and captions for objects found
+
+        """
+        captioned_bboxes = []
         task = "<MORE_DETAILED_CAPTION>"
         prompt = f"{task}"
         inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(
@@ -60,19 +71,29 @@ class Florence2:
                 parsed_answer = self.processor.post_process_generation(
                     generated_text, task=task, image_size=(image.width, image.height)
                 )
-                final_answers.append(parsed_answer[task])
+                captioned_bboxes.append(parsed_answer[task])
 
-        return final_answers
+        return captioned_bboxes
 
 
-class SAM2:
+class LocationRefiner:
     def __init__(self, model_name="facebook/sam2-hiera-large", device="cuda"):
         self.device = device
         self.sam2_model = SAM2ImagePredictor.from_pretrained(
             model_name, trust_remote_code=True, device=self.device
         )
 
-    def run_inference(self, image, input_box):
+    def run(self, image, input_box):
+        """
+        Extract and refine object segmentation masks.
+
+        Args:
+            image: A PIL Image
+
+        Returns:
+            numpy.ndarray: A boolean NumPy array representing produced segmentation masks for objects found.
+
+        """
         input_box = np.array(list(map(int, input_box)))
         self.sam2_model.set_image(image)
         masks, scores, _ = self.sam2_model.predict(
@@ -81,60 +102,50 @@ class SAM2:
         return masks.astype(bool)
 
 
-def find_medoid_and_closest_points(points, num_closest=5):
-    """
-    Find the medoid from a collection of points and the closest points to the medoid.
+class Localizer:
+    def __init__(self):
+        self.caption_localizer = CaptionLocalizer()
+        self.location_refiner = LocationRefiner()
 
-    Parameters:
-    points (np.array): A numpy array of shape (N, D) where N is the number of points and D is the dimensionality.
-    num_closest (int): Number of closest points to return.
+    def run(self, image):
+        """
+        Produce object location masks, bboxes, and captions
 
-    Returns:
-    np.array: The medoid point.
-    np.array: The closest points to the medoid.
-    """
-    distances = np.sqrt(
-        ((points[:, np.newaxis, :] - points[np.newaxis, :, :]) ** 2).sum(axis=-1)
-    )
-    distance_sums = distances.sum(axis=1)
-    medoid_idx = np.argmin(distance_sums)
-    medoid = points[medoid_idx]
-    sorted_indices = np.argsort(distances[medoid_idx])
-    closest_indices = sorted_indices[1 : num_closest + 1]
-    return medoid, points[closest_indices]
+        Args:
+            image: A PIL Image
 
+        Returns:
+            tuple: list of  boolean NumPy arrays representing produced segmentation masks for objects found, a list of bounding boxes, a list of captions
 
-def sample_points_from_heatmap(heatmap, original_size, num_points=5, percentile=0.95):
-    """
-    Sample points from the given heatmap, focusing on areas with higher values.
-    """
-    width, height = original_size
-    threshold = np.percentile(heatmap.numpy(), percentile)
-    masked_heatmap = torch.where(heatmap > threshold, heatmap, torch.tensor(0.0))
-    probabilities = torch.softmax(masked_heatmap.flatten(), dim=0)
+        """
 
-    attn = torch.sigmoid(heatmap)
-    w = attn.shape[0]
-    sampled_indices = torch.multinomial(
-        torch.tensor(probabilities.ravel()), num_points, replacement=True
-    )
+        try:
+            preds = self.caption_localizer.run(image)
+            sam_masks = []
+            final_bboxes = []
+            final_captions = []
 
-    sampled_coords = np.array(np.unravel_index(sampled_indices, attn.shape)).T
-    medoid, sampled_coords = find_medoid_and_closest_points(sampled_coords)
-    pts = []
-    for pt in sampled_coords.tolist():
-        x, y = pt
-        x = height * x / w
-        y = width * y / w
-        pts.append([y, x])
-    return pts
+            original_size = image.size
 
+            object_counter = 1
+            for pred in preds:
+                bboxes = pred.get("bboxes", [])
+                captions = pred.get("labels", [])
 
-def apply_mask_to_image(image, mask):
-    """
-    Apply a binary mask to an image. The mask should be a binary array where the regions to keep are True.
-    """
-    masked_image = image.copy()
-    for c in range(masked_image.shape[2]):
-        masked_image[:, :, c] = masked_image[:, :, c] * mask
-    return masked_image
+                if bboxes and captions and len(bboxes) == len(captions):
+                    random_index = random.randint(0, len(bboxes) - 1)
+                    selected_bbox = bboxes[random_index]
+                    selected_caption = captions[random_index]
+
+                    mask_tensor = self.location_refiner.run(image, selected_bbox)
+                    mask = mask_tensor[0]
+                    mask_uint8 = (mask.astype(np.uint8)) * 255
+                    sam_masks.append(mask_uint8)
+
+                    final_bboxes.append(selected_bbox)
+                    final_captions.append(selected_caption)
+
+            return sam_masks, final_bboxes, final_captions
+        except Exception as e:
+            print(f"Error during localization: {str(e)}")
+            return [], [], []

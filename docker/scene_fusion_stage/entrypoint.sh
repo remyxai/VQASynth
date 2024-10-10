@@ -12,16 +12,16 @@ export OUTPUT_DIR
 
 echo "Using output directory: $OUTPUT_DIR"
 
-echo "Waiting for segment processing to complete..."
+echo "Waiting for location refinement processing to complete..."
 
-while [ ! -f "${OUTPUT_DIR}/segment_done.txt" ]; do
+while [ ! -f "${OUTPUT_DIR}/location_refinement_done.txt" ]; do
   sleep 10
 done
 
-echo "Starting pointcloud processing..."
-python3 process_pointcloud.py \
+echo "Starting scene_fusion processing..."
+python3 process_scene_fusion.py \
     --output_dir="${OUTPUT_DIR}"
 
-rm "${OUTPUT_DIR}/segment_done.txt" 
-touch "${OUTPUT_DIR}/pointcloud_done.txt"
+rm "${OUTPUT_DIR}/location_refinement_done.txt" 
+touch "${OUTPUT_DIR}/scene_fusion_done.txt"
 

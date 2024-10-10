@@ -1,8 +1,8 @@
-FROM smellslikeml/vqasynth:base
+FROM vqasynth:base
 WORKDIR /app
 
-COPY docker/prompt_processor/process_prompts.py /app
-COPY docker/prompt_processor/entrypoint.sh /app
+COPY docker/prompt_stage/process_prompts.py /app
+COPY docker/prompt_stage/entrypoint.sh /app
 COPY config/config.yaml /app/config/config.yaml
 
 RUN pip install pandas

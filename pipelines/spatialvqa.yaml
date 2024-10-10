@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  embeddings_processor:
+  embeddings_stage:
     build:
       context: ../
-      dockerfile: docker/embeddings_processor/Dockerfile
+      dockerfile: docker/embeddings_stage/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
@@ -16,15 +16,15 @@ services:
           devices:
           - capabilities: ["gpu"]
 
-  filter_processor:
+  filter_stage:
     build:
       context: ../
-      dockerfile: docker/filter_processor/Dockerfile
+      dockerfile: docker/filter_stage/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - embeddings_processor
+      - embeddings_stage
     environment:
       NVIDIA_VISIBLE_DEVICES: all
     deploy:
@@ -33,15 +33,15 @@ services:
           devices:
           - capabilities: ["gpu"]
 
-  depth_processor:
+  depth_stage:
     build:
       context: ../
-      dockerfile: docker/depth_processor/Dockerfile
+      dockerfile: docker/depth_stage/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - filter_processor
+      - filter_stage
     environment:
       NVIDIA_VISIBLE_DEVICES: all
     deploy:
@@ -50,45 +50,45 @@ services:
           devices:
           - capabilities: ["gpu"]
 
-  segment_processor:
+  location_refinement_stage:
     build:
       context: ../
-      dockerfile: docker/segment_processor/Dockerfile
+      dockerfile: docker/location_refinement_stage/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - caption_processor
+      - caption_stage
     deploy:
       resources:
         reservations:
           devices:
           - capabilities: ["gpu"]
 
-  pointcloud_processor:
+  scene_fusion_stage:
     build:
       context: ../
-      dockerfile: docker/pointcloud_processor/Dockerfile
+      dockerfile: docker/scene_fusion_stage/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - segment_processor
+      - location_refinement_stage
     deploy:
       resources:
         reservations:
           devices:
           - capabilities: ["gpu"]
 
-  prompt_processor:
+  prompt_stage:
     build:
       context: ../
-      dockerfile: docker/prompt_processor/Dockerfile
+      dockerfile: docker/prompt_stage/Dockerfile
     volumes:
       - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - pointcloud_processor
+      - scene_fusion_stage
     deploy:
       resources:
         reservations:

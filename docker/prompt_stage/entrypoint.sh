@@ -11,15 +11,17 @@ export IMAGE_DIR
 export OUTPUT_DIR
 
 echo "Using output directory: $OUTPUT_DIR"
-echo "Waiting for depth processing to complete..."
 
-while [ ! -f "${OUTPUT_DIR}/depth_done.txt" ]; do
+echo "Waiting for scene fusion processing to complete..."
+
+while [ ! -f "${OUTPUT_DIR}/scene_fusion_done.txt" ]; do
   sleep 10
 done
 
-echo "Starting segmentation processing..."
-python3 process_segment.py \
+echo "Starting prompt processing..."
+python3 process_prompts.py \
+    --image_dir="${IMAGE_DIR}" \
     --output_dir="${OUTPUT_DIR}"
 
-rm "${OUTPUT_DIR}/depth_done.txt" 
-touch "${OUTPUT_DIR}/segment_done.txt"
+rm "${OUTPUT_DIR}/scene_fusion_done.txt" 
+touch "${OUTPUT_DIR}/data_processing_done.txt"

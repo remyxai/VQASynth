@@ -25,20 +25,21 @@ RUN apt-get install --no-install-recommends wget ffmpeg=7:* \
 RUN wget https://github.com/mikefarah/yq/releases/download/v4.30.8/yq_linux_amd64 -O /usr/bin/yq \
     && chmod +x /usr/bin/yq
 
-WORKDIR /app/models
-RUN wget https://huggingface.co/cjpais/llava-v1.6-34B-gguf/resolve/main/mmproj-model-f16.gguf
-RUN wget https://huggingface.co/cjpais/llava-v1.6-34B-gguf/resolve/main/llava-v1.6-34b.Q4_K_M.gguf
+RUN pip install git+https://github.com/apple/ml-depth-pro.git
 
 RUN pip install 'git+https://github.com/facebookresearch/sam2.git'
-RUN pip uninstall -y torch torchvision torchaudio && pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+RUN pip install git+https://github.com/openai/CLIP.git
+
+# Install PyTorch for CUDA 11.8 and other dependencies
+RUN pip install --upgrade torch==2.4.0+cu118 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu118
+
+# Install flash_attn compatible with CUDA 11.8, order is important
+RUN pip uninstall -y flash_attn
+RUN pip install git+https://github.com/Dao-AILab/flash-attention.git@v2.6.0
+
 
 WORKDIR /app/VQASynth
 COPY . /app/VQASynth
 RUN pip install .
-RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python==0.2.45 --force-reinstall --no-cache-dir
-
-# Reinstalling to avoid numpy>2 upgrade
-RUN pip install git+https://github.com/openai/CLIP.git
-RUN pip uninstall -y numpy && pip install numpy==1.26.4
 
 WORKDIR /app
