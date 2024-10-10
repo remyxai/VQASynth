@@ -3,7 +3,12 @@
 ![GIF Description](./assets/vqasynth-example.gif)
 
 Spatial Reasoning is fundamental for embodied AI applications like robotics, but examples of the ideal reasoning traces to train a model are largely absent in web-scraped data sources.
-Don't let the limitations of zero-shot learning stop you, augment any image dataset from the Huggingface Hub using scene understanding tools.
+Don't let the limitations of zero-shot learning stop you, augment any image dataset from the Huggingface Hub using scene understanding tools. 
+VLMs trained using VQASynth can:
+* estimate distances between objects in a 3D scene
+* describe distances colloquially, convert between common units
+* answer queries about the spatial relationships and orientations between objects
+* ground responses on a consistent reference like the floor
 
 ## Description
 
