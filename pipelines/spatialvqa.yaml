@@ -6,10 +6,10 @@ services:
       context: ../
       dockerfile: docker/embeddings_stage/Dockerfile
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     environment:
       NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
     deploy:
       resources:
         reservations:
@@ -21,12 +21,12 @@ services:
       context: ../
       dockerfile: docker/filter_stage/Dockerfile
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - embeddings_stage
     environment:
       NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
     deploy:
       resources:
         reservations:
@@ -38,12 +38,12 @@ services:
       context: ../
       dockerfile: docker/depth_stage/Dockerfile
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - filter_stage
     environment:
       NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
     deploy:
       resources:
         reservations:
@@ -55,10 +55,12 @@ services:
       context: ../
       dockerfile: docker/location_refinement_stage/Dockerfile
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - caption_stage
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
     deploy:
       resources:
         reservations:
@@ -70,10 +72,12 @@ services:
       context: ../
       dockerfile: docker/scene_fusion_stage/Dockerfile
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - location_refinement_stage
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
     deploy:
       resources:
         reservations:
@@ -85,10 +89,12 @@ services:
       context: ../
       dockerfile: docker/prompt_stage/Dockerfile
     volumes:
-      - ${IMAGE_DIR}:${IMAGE_DIR}
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
       - scene_fusion_stage
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
     deploy:
       resources:
         reservations:

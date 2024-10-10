@@ -7,58 +7,87 @@ import itertools
 import argparse
 import numpy as np
 import pandas as pd
+from vqasynth.datasets import Dataloader
 from vqasynth.prompts import PromptGenerator
 
-def main(image_dir, output_dir):
+def main(output_dir, source_repo_id, target_repo_id, image_col):
     prompt_generator = PromptGenerator()
-    final_samples = []
-    for filename in os.listdir(output_dir):
-        if filename.endswith('.pkl'):
-            pkl_path = os.path.join(output_dir, filename)
-            df = pd.read_pickle(pkl_path)
+    dataloader = Dataloader(output_dir)
 
-            df['prompts'] = df.apply(lambda row: prompt_generator.run(row["image_filename"], row["captions"], row["pointclouds"], row["is_canonicalized"]), axis=1)
+    dataset = dataloader.load_dataset(source_repo_id)
 
-            df.to_pickle(pkl_path)
-            print(f"Processed and updated {filename}")
+    # Process each row in the Hugging Face dataset by applying the prompt generator logic
+    def process_row(example):
+        example['prompts'] = prompt_generator.run(
+            example["captions"],
+            example["pointclouds"],
+            example["is_canonicalized"]
+        )
 
-            for index, row in df.iterrows():
-                if row['prompts'] and any(row['prompts']):
-                    image_filename = row['image_filename']
-                    conversations = []
-                    first_prompt = True
-                    for prompt in row['prompts']:
-                        if 'Answer: ' in prompt:
-                            question, answer = prompt.split('Answer: ', 1)
-                            human_value = f"<image>\n{question}" if first_prompt else question
-                            conversations.append({
-                                "from": "human",
-                                "value": human_value
-                            })
-                            conversations.append({
-                                "from": "gpt",
-                                "value": answer
-                            })
-                            first_prompt = False
+        messages = []
+        first_prompt = True
 
-                    if conversations:  # Ensure we have valid conversation data
-                        sample = {
-                            "id": image_filename,
-                            "image": os.path.join(image_dir, image_filename),
-                            "conversations": conversations
-                        }
-                        final_samples.append(sample)
+        for prompt in example['prompts']:
+            if 'Answer: ' in prompt:
+                question, answer = prompt.split('Answer: ', 1)
 
-    output_json = os.path.join(output_dir, "processed_dataset.json")
-    with open(output_json, "w") as json_file:
-        json.dump(final_samples, json_file, indent=4)
+                # For the first prompt, include the image tag
+                if first_prompt:
+                    messages.append({
+                        "content": [{"index": 0, "text": None, "type": "image"}, {"index": None, "text": question.strip(), "type": "text"}],
+                        "role": "user"
+                    })
+                else:
+                    messages.append({
+                        "content": [{"index": None, "text": question.strip(), "type": "text"}],
+                        "role": "user"
+                    })
 
+                # Add assistant response
+                messages.append({
+                    "content": [{"index": None, "text": answer.strip(), "type": "text"}],
+                    "role": "assistant"
+                })
+                first_prompt = False
+
+        example['messages'] = messages
+        return example
+
+    dataset = dataset.map(process_row)
+    final_dataset = dataset.select_columns([image_col, "messages"])
+
+    dataloader.save_to_disk(final_dataset)
+    dataloader.push_to_hub(final_dataset, target_repo_id)
+
+    print(f"Processed and updated dataset with formatted messages.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process images from .pkl files", add_help=True)
-    parser.add_argument("--image_dir", type=str, required=True, help="path to image directory")
-    parser.add_argument("--output_dir", type=str, required=True, help="path to directory containing .pkl files")
+    parser = argparse.ArgumentParser(description="Extract prompts from metadata", add_help=True)
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        required=True,
+        help="Path to local dataset cache",
+    )
+    parser.add_argument(
+        "--source_repo_id",
+        type=str,
+        required=True,
+        help="Source huggingface dataset repo id",
+    )
+    parser.add_argument(
+        "--target_repo_id",
+        type=str,
+        required=True,
+        help="Target huggingface dataset repo id",
+    )
+    parser.add_argument(
+        "--image_col",
+        type=str,
+        required=True,
+        help="Column containing PIL.Image images",
+    )
     args = parser.parse_args()
 
-    main(args.image_dir, args.output_dir)
+    main(args.output_dir, args.source_repo_id, args.target_repo_id, args.image_col)

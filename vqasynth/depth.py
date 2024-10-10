@@ -1,8 +1,15 @@
 import cv2
+import tempfile
 import numpy as np
 from PIL import Image
 
 import depth_pro
+
+def create_temp_image(pillow_image):
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+        pillow_image.save(temp_file, format='PNG')
+        temp_file_name = temp_file.name
+    return temp_file_name
 
 class DepthEstimator:
     def __init__(self):
@@ -10,18 +17,19 @@ class DepthEstimator:
         self.model, self.transform = depth_pro.create_model_and_transforms()
         self.model.eval()
 
-    def run(self, image_path):
+    def run(self, image):
         """
         Returns a depth map and formatted focal length from an image
 
         Args:
-            image_path: path to image
+            image: A PIL.Image image
 
         Returns:
             tuple: depth in meters, focal length in pixels
         """
 
         try:
+            image_path = create_temp_image(image)
             image, _, f_px = depth_pro.load_rgb(image_path)
             image_tensor = self.transform(image)
             prediction = self.model.infer(image_tensor, f_px=f_px)
