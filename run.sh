@@ -2,16 +2,16 @@
 
 CONFIG_FILE=./config/config.yaml
 
-IMAGE_DIR=$(yq e '.directories.image_dir' $CONFIG_FILE)
 OUTPUT_DIR=$(yq e '.directories.output_dir' $CONFIG_FILE)
+HF_TOKEN=$(cat ~/.cache/huggingface/token)
 
-if [ ! -d "$IMAGE_DIR" ] || [ ! -d "$OUTPUT_DIR" ]; then
-    echo "Error: One or both directories specified in config.yaml do not exist."
+if [ ! -d "$OUTPUT_DIR" ]; then
+    echo "Error: Local output directory specified in config.yaml does not exist."
     exit 1
 fi
 
-export IMAGE_DIR="$IMAGE_DIR"
 export OUTPUT_DIR="$OUTPUT_DIR"
+export HF_TOKEN="$HF_TOKEN"
 
 echo "Building base image..."
 docker build -f docker/base_image/Dockerfile -t vqasynth:base .

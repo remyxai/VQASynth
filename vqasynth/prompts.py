@@ -622,10 +622,8 @@ class PromptGenerator():
             results.extend(pair_results)
         return results
 
-    def run(self, image_filename, captions, pointclouds, is_canonicalized):
-        image_file = image_filename
+    def run(self, captions, pointclouds, is_canonicalized):
         pointclouds = self.spatial_scene_constructor.restore_pointclouds(pointclouds)
-
         try:
             objects = list(zip(captions, pointclouds))
             all_pairs = [(i, j) for i in range(len(objects)) for j in range(len(objects)) if i != j]

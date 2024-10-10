@@ -2,41 +2,60 @@ import os
 import pickle
 import argparse
 import pandas as pd
+from vqasynth.datasets import Dataloader
 from vqasynth.scene_fusion import SpatialSceneConstructor
 
 
-def main(output_dir):
+def main(output_dir, source_repo_id, images):
     spatial_scene_constructor = SpatialSceneConstructor()
+    dataloader = Dataloader(output_dir)
+
+    dataset = dataloader.load_dataset(source_repo_id)
 
     point_cloud_dir = os.path.join(output_dir, "pointclouds")
     if not os.path.exists(point_cloud_dir):
         os.makedirs(point_cloud_dir)
 
-    for filename in os.listdir(output_dir):
-        if filename.endswith('.pkl'):
-            pkl_path = os.path.join(output_dir, filename)
-            df = pd.read_pickle(pkl_path)
+    def process_row(example, idx):
+        # Run spatial scene constructor and get point cloud data and canonicalization flag
+        pcd_data, canonicalized = spatial_scene_constructor.run(
+            str(idx), 
+            example[images],
+            example["depth_map"],
+            example["focallength"],
+            example["masks"],
+            output_dir
+        )
+        # Add point cloud data and canonicalization flag to the example
+        example["pointclouds"] = pcd_data
+        example["is_canonicalized"] = canonicalized
+        return example
 
-            # Initialize empty lists to hold the pointclouds and canonicalization flags
-            pointclouds = []
-            is_canonicalized = []
+    dataset = dataset.map(process_row, with_indices=True)
+    dataloader.save_to_disk(dataset)
+    print("Scene fusion complete")
 
-            # Update to process each row and append results to lists
-            for index, row in df.iterrows():
-                pcd_data, canonicalized = spatial_scene_constructor.run(row["image_filename"], row["image"], row["depth_map"], row["focallength"], row["masks"], output_dir)
-                pointclouds.append(pcd_data)
-                is_canonicalized.append(canonicalized)
-
-            # Assign lists to new DataFrame columns
-            df['pointclouds'] = pointclouds
-            df['is_canonicalized'] = is_canonicalized
-
-            df.to_pickle(pkl_path)
-            print(f"Processed and updated {filename}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process images from .pkl files", add_help=True)
-    parser.add_argument("--output_dir", type=str, required=True, help="path to directory containing .pkl files")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        required=True,
+        help="Path to local dataset cache",
+    )
+    parser.add_argument(
+        "--source_repo_id",
+        type=str,
+        required=True,
+        help="Source huggingface dataset repo id",
+    )
+    parser.add_argument(
+        "--images",
+        type=str,
+        required=True,
+        help="Column containing PIL.Image images",
+    )
     args = parser.parse_args()
 
-    main(args.output_dir)
+    main(args.output_dir, args.source_repo_id, args.images)

@@ -18,3 +18,4 @@ litellm==1.25.2
 pycocotools==2.0.6
 pandas
 html5lib
+datasets
