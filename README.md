@@ -35,13 +35,17 @@ The scripts will produce 3D point clouds, segmented images, labels, and prompt e
 
 ## Run a Pipeline on Your Images
 
-The main pipeline uses Docker Compose to process a directory of images into a VQA dataset including spatial relations between objects. The dataset follows conventions for training models like [LLaVA](https://llava-vl.github.io/). We recommend using an A10 GPU or larger for processing.
+The main pipeline uses Docker Compose to process a Hugging Face dataset into a VQA dataset including spatial relations between objects. The dataset follows conventions for training models like [LLaVA](https://llava-vl.github.io/). We recommend using an A10 GPU or larger for processing.
 
-Make sure to update the [config.yaml](config/config.yaml) file with the full path to your image directory and output directory. You can also optionally add `include_tags` and/or `exclude_tags` as comma-separated lists in the config file for filtering the dataset based on tags. If no tags are provided, the filtering will not be applied.
+Make sure to update the [config.yaml](config/config.yaml) file by adding the following details: an output directory path, the repository ID for the dataset to be processed, and a dataset name to store the results to the hub. You can also optionally add `include_tags` and/or `exclude_tags` as comma-separated lists in the config file for filtering the dataset based on tags. If no tags are provided, the filtering will not be applied.
 
 Then launch the pipeline with:
 
 ```bash
+# Authenticate to push to hub
+huggingface-cli login
+
+# Run the pipeline
 cd /path/to/VQASynth
 bash run.sh
 ```
