@@ -192,7 +192,10 @@ class SpatialSceneConstructor:
         )
 
         for i, mask in enumerate(masks):
-            mask_binary = mask > 0
+            if isinstance(mask, list):
+                mask = np.array(mask)
+
+            mask_binary = mask.astype(bool)
 
             masked_rgb = self.apply_mask_to_image(original_image_cv, mask_binary)
             masked_depth = self.apply_mask_to_image(depth_image_cv, mask_binary)

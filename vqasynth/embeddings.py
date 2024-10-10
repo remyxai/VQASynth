@@ -18,7 +18,7 @@ class EmbeddingGenerator(MultiModalEmbeddingModel):
             image (PIL.Image.Image): The input image for which embeddings are generated.
 
         Returns:
-            torch.Tensor: Normalized CLIP embeddings for the image.
+            np.ndarray: Normalized CLIP embeddings for the image.
         """
         image_input = self.preprocess(image).unsqueeze(0).to(self.device)
         with torch.no_grad():
@@ -43,7 +43,7 @@ class TagFilter(MultiModalEmbeddingModel):
             text_features = self.model.encode_text(text_inputs)
         text_features /= text_features.norm(dim=-1, keepdim=True)
 
-        image_embeddings_tensor = torch.from_numpy(image_embeddings).to(self.device)
+        image_embeddings_tensor = torch.from_numpy(np.array(image_embeddings)).to(self.device)
         similarity = (100.0 * image_embeddings_tensor @ text_features.T).softmax(dim=-1)
 
         best_index = similarity.argmax().item()

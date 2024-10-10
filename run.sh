@@ -3,7 +3,7 @@
 CONFIG_FILE=./config/config.yaml
 
 OUTPUT_DIR=$(yq e '.directories.output_dir' $CONFIG_FILE)
-HF_TOKEN=$(cat ~/.huggingface/token)
+HF_TOKEN=$(cat ~/.cache/huggingface/token)
 
 if [ ! -d "$OUTPUT_DIR" ]; then
     echo "Error: Local output directory specified in config.yaml does not exist."

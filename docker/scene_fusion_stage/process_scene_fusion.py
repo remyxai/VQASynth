@@ -38,6 +38,7 @@ def main(output_dir, source_repo_id, images):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process images from .pkl files", add_help=True)
+    parser.add_argument(
         "--output_dir",
         type=str,
         required=True,

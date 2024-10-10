@@ -10,7 +10,7 @@ import pandas as pd
 from vqasynth.datasets import Dataloader
 from vqasynth.prompts import PromptGenerator
 
-def main(output_dir, source_repo_id, target_repo_id, images):
+def main(output_dir, source_repo_id, target_repo_name, images):
     prompt_generator = PromptGenerator()
     dataloader = Dataloader(output_dir)
 
@@ -57,7 +57,7 @@ def main(output_dir, source_repo_id, target_repo_id, images):
     final_dataset = dataset.select_columns([images, "messages"])
 
     dataloader.save_to_disk(final_dataset)
-    dataloader.push_to_hub(final_dataset, target_repo_id)
+    dataloader.push_to_hub(final_dataset, target_repo_name)
 
     print(f"Processed and updated dataset with formatted messages.")
 
@@ -77,7 +77,7 @@ if __name__ == "__main__":
         help="Source huggingface dataset repo id",
     )
     parser.add_argument(
-        "--target_repo_id",
+        "--target_repo_name",
         type=str,
         required=True,
         help="Target huggingface dataset repo id",
@@ -90,4 +90,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    main(args.output_dir, args.source_repo_id, args.target_repo_id, args.images)
+    main(args.output_dir, args.source_repo_id, args.target_repo_name, args.images)

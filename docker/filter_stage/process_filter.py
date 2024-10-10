@@ -32,7 +32,7 @@ def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_thre
 
     dataloader.save_to_disk(dataset_filtered)
 
-    print(f"Processed and updated {filename}, filtered out {len(df) - len(df_filtered)} rows.")
+    print(f"Dataset filtering complete")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Filter dataset by tags", add_help=True)
