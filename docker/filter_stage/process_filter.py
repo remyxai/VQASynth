@@ -16,13 +16,7 @@ def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_thre
     include_tags = include_tags.strip().split(",")
     exclude_tags = exclude_tags.strip().split(",")
 
-    def process_row(example):
-        example['tag'] = tag_filter.get_best_matching_tag(
-            example['embedding'], include_tags + exclude_tags
-        )
-        return example
-
-    dataset = dataset.map(process_row)
+    dataset = dataset.map(lambda example: tag_filter.apply_transform(example, include_tags + exclude_tags))
 
     dataset_filtered = dataset.filter(
         lambda example: tag_filter.filter_by_tag(

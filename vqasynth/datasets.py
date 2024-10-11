@@ -11,7 +11,7 @@ class Dataloader:
         self.dataset_name = None
         self.dataset_path = None
 
-    def load_dataset(self, repo_id):
+    def load_dataset(self, repo_id, trust_remote_code=True):
         """Load dataset from cache or fetch it from Hugging Face Hub."""
         self.dataset_name = repo_id.split("/")[-1]
         self.dataset_path = os.path.join(self.cache_dir, self.dataset_name)
@@ -19,7 +19,7 @@ class Dataloader:
         if os.path.exists(self.dataset_path):
             dataset = load_from_disk(self.dataset_path)
         else:
-            dataset = load_dataset(repo_id, cache_dir=self.cache_dir)
+            dataset = load_dataset(repo_id, cache_dir=self.cache_dir, trust_remote_code=trust_remote_code)
             dataset.save_to_disk(self.dataset_path)
 
         return dataset

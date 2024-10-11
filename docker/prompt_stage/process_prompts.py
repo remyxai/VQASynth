@@ -17,43 +17,7 @@ def main(output_dir, source_repo_id, target_repo_name, images):
     dataset = dataloader.load_dataset(source_repo_id)
 
     # Process each row in the Hugging Face dataset by applying the prompt generator logic
-    def process_row(example):
-        example['prompts'] = prompt_generator.run(
-            example["captions"],
-            example["pointclouds"],
-            example["is_canonicalized"]
-        )
-
-        messages = []
-        first_prompt = True
-
-        for prompt in example['prompts']:
-            if 'Answer: ' in prompt:
-                question, answer = prompt.split('Answer: ', 1)
-
-                # For the first prompt, include the image tag
-                if first_prompt:
-                    messages.append({
-                        "content": [{"index": 0, "text": None, "type": "image"}, {"index": None, "text": question.strip(), "type": "text"}],
-                        "role": "user"
-                    })
-                else:
-                    messages.append({
-                        "content": [{"index": None, "text": question.strip(), "type": "text"}],
-                        "role": "user"
-                    })
-
-                # Add assistant response
-                messages.append({
-                    "content": [{"index": None, "text": answer.strip(), "type": "text"}],
-                    "role": "assistant"
-                })
-                first_prompt = False
-
-        example['messages'] = messages
-        return example
-
-    dataset = dataset.map(process_row)
+    dataset = dataset.map(lambda example: prompt_generator.apply_transform(example))
     final_dataset = dataset.select_columns([images, "messages"])
 
     dataloader.save_to_disk(final_dataset)
