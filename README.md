@@ -25,13 +25,13 @@ Initial VQASynth 🎹 experiments prompted [LLaVA](https://github.com/haotian-li
 
 ![VQASynth-diagram.png](https://github.com/remyxai/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
 
-## What's New 👀
+## What's New 👀 in VQASynth 🎹
 
-VQASynth 🎹 is faster & lighter using [Florence-2](https://arxiv.org/abs/2311.06242) for **both** detailed image captions and for region proposal grounded on text captions.
+🪶 Faster & lighter using [Florence-2](https://arxiv.org/abs/2311.06242) for **both** detailed image captions and for region proposal grounded on text captions.
 
-Additionally, VQASynth 🎹 improves metric depth estimation speed & accuracy by replacing ZoeDepth with [DepthPro](https://github.com/apple/ml-depth-pro).
+⚡ Improves metric depth estimation speed & accuracy by replacing ZoeDepth with [DepthPro](https://github.com/apple/ml-depth-pro).
 
-Finally, [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
+🎓 [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
 
 
 ### Environment
