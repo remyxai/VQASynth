@@ -16,22 +16,8 @@ def main(output_dir, source_repo_id, images):
     if not os.path.exists(point_cloud_dir):
         os.makedirs(point_cloud_dir)
 
-    def process_row(example, idx):
-        # Run spatial scene constructor and get point cloud data and canonicalization flag
-        pcd_data, canonicalized = spatial_scene_constructor.run(
-            str(idx), 
-            example[images],
-            example["depth_map"],
-            example["focallength"],
-            example["masks"],
-            output_dir
-        )
-        # Add point cloud data and canonicalization flag to the example
-        example["pointclouds"] = pcd_data
-        example["is_canonicalized"] = canonicalized
-        return example
+    dataset = dataset.map(lambda example, idx: spatial_scene_constructor.apply_transform(example, idx, output_dir, images), with_indices=True)
 
-    dataset = dataset.map(process_row, with_indices=True)
     dataloader.save_to_disk(dataset)
     print("Scene fusion complete")
 

@@ -7,8 +7,8 @@ from transformers import AutoModelForCausalLM, AutoProcessor
 
 
 class CaptionLocalizer:
-    def __init__(self, model_name="microsoft/Florence-2-large", device="cuda"):
-        self.device = device
+    def __init__(self, model_name="microsoft/Florence-2-large"):
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.torch_dtype = torch.float16
         self.processor = AutoProcessor.from_pretrained(
             model_name, trust_remote_code=True
@@ -77,8 +77,8 @@ class CaptionLocalizer:
 
 
 class LocationRefiner:
-    def __init__(self, model_name="facebook/sam2-hiera-large", device="cuda"):
-        self.device = device
+    def __init__(self, model_name="facebook/sam2-hiera-large"):
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.sam2_model = SAM2ImagePredictor.from_pretrained(
             model_name, trust_remote_code=True, device=self.device
         )
@@ -149,3 +149,19 @@ class Localizer:
         except Exception as e:
             print(f"Error during localization: {str(e)}")
             return [], [], []
+
+    def apply_transform(self, example, images):
+        """
+        Process a single row in the dataset, adding masks, bboxes, and captions.
+
+        Args:
+            example: A single example from the dataset.
+            images: The column in the dataset containing the images.
+
+        Returns:
+            Updated example with masks, bboxes, and captions.
+        """
+        depth_map, focallength = self.run(example[images])
+        example['depth_map'] = depth_map
+        example['focallength'] = focallength
+        return example

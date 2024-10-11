@@ -14,15 +14,9 @@ def main(output_dir, source_repo_id, images):
     embedding_generator = EmbeddingGenerator()
 
     dataset = dataloader.load_dataset(source_repo_id)
+    dataset = dataset.map(lambda example: embedding_generator.apply_transform(example, images))
 
-    def process_row(example):
-        embedding = embedding_generator.run(example[images])
-        example['embedding'] = embedding
-        return example
-
-    dataset = dataset.map(process_row)
     dataloader.save_to_disk(dataset)
-
     print("Embedding extraction complete.")
 
 if __name__ == "__main__":

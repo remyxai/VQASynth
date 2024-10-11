@@ -220,3 +220,30 @@ class SpatialSceneConstructor:
 
         # Now, return both point_cloud_data and the canonicalized flag
         return point_cloud_data, canonicalized
+
+    def apply_transform(self, example, idx, output_dir, image):
+        """
+        Process a single row of the dataset to generate point clouds and canonicalization status.
+
+        Args:
+            example (dict): A single example from the dataset.
+            idx (int): The index of the current example.
+            output_dir (str): The directory where the output point clouds will be saved.
+            images (str): The column containing image data.
+
+        Returns:
+            dict: Updated example with point clouds and canonicalization status.
+        """
+        # Run spatial scene constructor and get point cloud data and canonicalization flag
+        pcd_data, canonicalized = self.run(
+            str(idx),  # Use the index as image filename
+            example[images],  # Get image from the specified column
+            example["depth_map"],
+            example["focallength"],
+            example["masks"],
+            output_dir
+        )
+        # Add point cloud data and canonicalization flag to the example
+        example["pointclouds"] = pcd_data
+        example["is_canonicalized"] = canonicalized
+        return example

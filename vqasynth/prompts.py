@@ -634,3 +634,49 @@ class PromptGenerator():
         except:
             prompts = []
         return prompts
+
+    def apply_transform(self, example):
+        """
+        Process a single row in the dataset, adding depth map and focal length.
+
+        Args:
+            example: A single example from the dataset.
+            images: The column in the dataset containing the images.
+
+        Returns:
+            Updated example with depth map and focal length.
+        """
+        example['prompts'] = self.run(
+            example["captions"],
+            example["pointclouds"],
+            example["is_canonicalized"]
+        )
+
+        messages = []
+        first_prompt = True
+
+        for prompt in example['prompts']:
+            if 'Answer: ' in prompt:
+                question, answer = prompt.split('Answer: ', 1)
+
+                # For the first prompt, include the image tag
+                if first_prompt:
+                    messages.append({
+                        "content": [{"index": 0, "text": None, "type": "image"}, {"index": None, "text": question.strip(), "type": "text"}],
+                        "role": "user"
+                    })
+                else:
+                    messages.append({
+                        "content": [{"index": None, "text": question.strip(), "type": "text"}],
+                        "role": "user"
+                    })
+
+                # Add assistant response
+                messages.append({
+                    "content": [{"index": None, "text": answer.strip(), "type": "text"}],
+                    "role": "assistant"
+                })
+                first_prompt = False
+
+        example['messages'] = messages
+        return example

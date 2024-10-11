@@ -26,6 +26,21 @@ class EmbeddingGenerator(MultiModalEmbeddingModel):
         image_features /= image_features.norm(dim=-1, keepdim=True)
         return image_features.cpu().numpy()
 
+    def apply_transform(self, example, images):
+        """
+        Process a single row in the dataset, adding embeddings from images.
+
+        Args:
+            example: A single example from the dataset.
+            images: Column name for image column.
+
+        Returns:
+            Updated example with image embeddings.
+        """
+        embedding = self.run(example[images])
+        example['embedding'] = embedding
+        return example
+
 class TagFilter(MultiModalEmbeddingModel):
     def get_best_matching_tag(self, image_embeddings: np.ndarray, tags: list):
         """
@@ -70,3 +85,19 @@ class TagFilter(MultiModalEmbeddingModel):
             return False
 
         return True
+
+    def apply_transform(self, example, tags=[]):
+        """
+        Process a single row in the dataset, adding embeddings from images.
+
+        Args:
+            example: A single example from the dataset.
+            images: Column name for image column.
+
+        Returns:
+            Updated example with image embeddings.
+        """
+        example['tag'] = self.get_best_matching_tag(
+            example['embedding'], include_tags + exclude_tags
+        )
+        return example

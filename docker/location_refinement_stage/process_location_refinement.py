@@ -13,15 +13,8 @@ def main(output_dir, source_repo_id, images):
     localizer = Localizer()
 
     dataset = dataloader.load_dataset(source_repo_id)
+    dataset = dataset.map(lambda example: localizer.apply_transform(example, images))
 
-    def process_row(example):
-        masks, bboxes, captions = localizer.run(example[images])
-        example['masks'] = masks
-        example['bboxes'] = bboxes
-        example['captions'] = captions
-        return example
-
-    dataset = dataset.map(process_row)
     dataloader.save_to_disk(dataset)
     print("Localization complete")
 

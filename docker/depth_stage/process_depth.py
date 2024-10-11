@@ -13,14 +13,8 @@ def main(output_dir, source_repo_id, images):
     depth = DepthEstimator()
 
     dataset = dataloader.load_dataset(source_repo_id)
+    dataset = dataset.map(lambda example: depth.apply_transform(example, images))
 
-    def process_row(example):
-        depth_map, focallength = depth.run(example[images])
-        example['depth_map'] = depth_map
-        example['focallength'] = focallength
-        return example
-
-    dataset = dataset.map(process_row)
     dataloader.save_to_disk(dataset)
     print("Depth extraction complete")
 
