@@ -8,7 +8,7 @@ Don't be limited by what your model can do out-of-the-box, curate any image data
 VLMs trained using VQASynth 🎹 can:
 * estimate 3D distances between objects in an image
 * describe distances colloquially, convert between common units
-* answer queries about the spatial relationships and orientations between objects
+* answer queries about the orientation and spatial relationships between objects
 * base responses on consistent references like floors and surfaces
 
 ## Description
