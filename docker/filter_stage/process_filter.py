@@ -16,7 +16,7 @@ def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_thre
     include_tags = include_tags.strip().split(",")
     exclude_tags = exclude_tags.strip().split(",")
 
-    dataset = dataset.map(lambda example: tag_filter.apply_transform(example, include_tags_list + exclude_tags_list))
+    dataset = dataset.map(lambda example: tag_filter.apply_transform(example, include_tags + exclude_tags))
 
     dataset_filtered = dataset.filter(
         lambda example: tag_filter.filter_by_tag(

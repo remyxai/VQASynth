@@ -19,11 +19,7 @@ setuptools.setup(
     url="https://github.com/remyxai/VQASynth",
     packages=setuptools.find_packages(),
     include_package_data=True,
-    install_requires=read_requirements() + [
-        "git+https://github.com/apple/ml-depth-pro.git",
-        "git+https://github.com/facebookresearch/sam2.git",
-        "git+https://github.com/openai/CLIP.git"
-    ],
+    install_requires=read_requirements(),
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

@@ -1,11 +1,12 @@
 import os
 import cv2
+import torch
 import tempfile
+import subprocess
 import numpy as np
 from PIL import Image
 
 import depth_pro
-from depth_pro import DepthProConfig
 
 def create_temp_image(pillow_image):
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
@@ -21,7 +22,7 @@ def ensure_weights_exist(cache_location, checkpoint_url):
     checkpoint_path = os.path.join(cache_location, "depth_pro.pt")
     if not os.path.exists(checkpoint_path):
         print(f"Checkpoint not found at {checkpoint_path}. Downloading weights...")
-        subprocess.run(["wget", "-O", checkpoint_path, checkpoint_url], check=True)
+        subprocess.run(["wget", "-q", "-O", checkpoint_path, checkpoint_url], check=True)
 
     return checkpoint_path
 
@@ -37,7 +38,7 @@ class DepthEstimator:
 
         # Prepare the configuration for the model
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        DEFAULT_MONODEPTH_CONFIG_DICT = DepthProConfig(
+        DEFAULT_MONODEPTH_CONFIG_DICT = depth_pro.depth_pro.DepthProConfig(
             patch_encoder_preset="dinov2l16_384",
             image_encoder_preset="dinov2l16_384",
             checkpoint_uri=checkpoint_path,
@@ -66,7 +67,7 @@ class DepthEstimator:
             image, _, f_px = depth_pro.load_rgb(image_path)
             image_tensor = self.transform(image)
             prediction = self.model.infer(image_tensor, f_px=f_px)
-            depth = prediction["depth"]
+            depth = prediction["depth"].detach().cpu().numpy()
             depth_map = cv2.normalize(np.array(depth), None, 255, 0, cv2.NORM_MINMAX, cv2.CV_8U)
             focallength_px = prediction["focallength_px"] 
             focallength_px = focallength_px.item()

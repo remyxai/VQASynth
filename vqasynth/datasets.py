@@ -17,7 +17,7 @@ class Dataloader:
         self.dataset_path = os.path.join(self.cache_dir, self.dataset_name)
 
         if os.path.exists(self.dataset_path):
-            dataset = load_from_disk(self.dataset_path, trust_remote_code=trust_remote_code)
+            dataset = load_from_disk(self.dataset_path)
         else:
             dataset = load_dataset(repo_id, cache_dir=self.cache_dir, trust_remote_code=trust_remote_code)
             dataset.save_to_disk(self.dataset_path)

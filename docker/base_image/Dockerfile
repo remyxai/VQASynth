@@ -25,6 +25,11 @@ RUN apt-get install --no-install-recommends wget ffmpeg=7:* \
 RUN wget https://github.com/mikefarah/yq/releases/download/v4.30.8/yq_linux_amd64 -O /usr/bin/yq \
     && chmod +x /usr/bin/yq
 
+RUN pip install git+https://github.com/apple/ml-depth-pro.git
+
+RUN pip install 'git+https://github.com/facebookresearch/sam2.git'
+RUN pip install git+https://github.com/openai/CLIP.git
+
 # Install PyTorch for CUDA 11.8 and other dependencies
 RUN pip install --upgrade torch==2.4.0+cu118 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu118
 

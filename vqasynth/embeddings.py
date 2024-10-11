@@ -98,6 +98,6 @@ class TagFilter(MultiModalEmbeddingModel):
             Updated example with image embeddings.
         """
         example['tag'] = self.get_best_matching_tag(
-            example['embedding'], include_tags + exclude_tags
+            example['embedding'], tags
         )
         return example

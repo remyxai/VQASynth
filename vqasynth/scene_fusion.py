@@ -221,7 +221,7 @@ class SpatialSceneConstructor:
         # Now, return both point_cloud_data and the canonicalized flag
         return point_cloud_data, canonicalized
 
-    def apply_transform(self, example, idx, output_dir, image):
+    def apply_transform(self, example, idx, output_dir, images):
         """
         Process a single row of the dataset to generate point clouds and canonicalization status.
 
