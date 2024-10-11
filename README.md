@@ -14,7 +14,7 @@ VLMs trained using VQASynth 🎹
 ## Description
 
 Fusing semantic and metric data into templated VQA chat, Vision Language Models can be instruction-tuned with low-rank adapters to enhance their baseline spatial reasoning capabilities. 
-VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://arxiv.org/abs/2401.12168), which describes a 3D scene reconstruction pipeline and templates to enhance the spatial reasoning abilities of VLMs including:
+VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://arxiv.org/abs/2401.12168), which describes a 3D scene reconstruction pipeline and prompt templates for enhancing the spatial reasoning abilities of VLMs including:
 
 * Semantic filtering with [CLIP](https://github.com/openai/CLIP) to normalize the image distribution and attributes
 * Metric Depth Estimation with [ZoeDepth](https://github.com/isl-org/ZoeDepth) to lift the 2D image to 3D point cloud
