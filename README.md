@@ -6,7 +6,7 @@
 Don't let the limitations of zero-shot learning stop you, augment any image dataset from the Huggingface Hub using scene understanding tools. 
 
 VLMs trained using VQASynth 🎹 can:
-* estimate distances between objects in a 3D scene
+* estimate 3D distances between objects in an image
 * describe distances colloquially, convert between common units
 * answer queries about the spatial relationships and orientations between objects
 * base responses on consistent references like floors and surfaces
@@ -17,9 +17,9 @@ Fusing semantic and metric data into templated VQA chat, Vision Language Models 
 VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://arxiv.org/abs/2401.12168), which describes a 3D scene reconstruction pipeline and templates to enhance the spatial reasoning abilities of VLMs including:
 
 * Semantic filtering with [CLIP](https://github.com/openai/CLIP) to normalize the image distribution and attributes
-* Metric Depth Estimation with [ZoeDepth](https://github.com/isl-org/ZoeDepth) to lift the 2D image to 3D
+* Metric Depth Estimation with [ZoeDepth](https://github.com/isl-org/ZoeDepth) to lift the 2D image to 3D point cloud
 * Object-level captioning with [FlexCap](https://flex-cap.github.io/) for precise 2D region proposal
-* Plane-fitting with RANSAC for a consistent reference frame in 3D
+* Plane-fitting with RANSAC for consistent 3D reference coordinates
 
 Initial VQASynth 🎹 experiments prompted [LLaVA](https://github.com/haotian-liu/LLaVA) for detailed object-level captioning in JSON or tagging with [RAM](https://github.com/xinyu1205/recognize-anything). These experiments also compared caption and tag based region proposal using publicly available models like [groundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [CLIPSeg](https://github.com/timojl/clipseg).
 
