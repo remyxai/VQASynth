@@ -2,7 +2,7 @@
 
 ![GIF Description](./assets/vqasynth-example.gif)
 
-**Spatial Reasoning** is fundamental to navigating and interacting in a physical environment for embodied AI applications like robotics. However, the ideal reasoning samples for training a model are largely absent from web-scraped data sources.
+**Spatial Reasoning** is fundamental to navigating and interacting in a physical environment for embodied AI applications like robotics. However, data samples suitable for learning these capabilities are rare in AI pretraining datasets.
 Don't be limited by what your base model can do out-of-the-box, curate any image dataset from the Huggingface Hub for Spatial VQA with tools for scene understanding. 
 
 VLMs trained using VQASynth 🎹 can:
