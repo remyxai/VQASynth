@@ -29,7 +29,7 @@ Initial VQASynth 🎹 experiments prompted [LLaVA](https://github.com/haotian-li
 
 🪶 Faster & lighter using [Florence-2](https://arxiv.org/abs/2311.06242) for detailed image captions **and** region proposal grounded on text captions.
 
-⚡ Improves metric depth estimation speed & accuracy by replacing ZoeDepth with [DepthPro](https://github.com/apple/ml-depth-pro).
+📐 Improves metric depth estimation speed & accuracy by replacing ZoeDepth with [DepthPro](https://github.com/apple/ml-depth-pro).
 
 🎓 [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
 
