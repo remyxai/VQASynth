@@ -98,7 +98,8 @@ Once completed, you can follow this resource on [fine-tuning LLaVa](https://gith
 ## Datasets from VQASynth 🎹
 
 * [vqasynth_spacellava](https://huggingface.co/datasets/remyxai/vqasynth_spacellava)
-
+* [colmap_camera_specs](https://huggingface.co/datasets/salma-remyx/colmap_camera_specs)
+  
 ## Models tuned on VQASynth 🎹
 
 * [SpaceLLaVA - 13B](https://huggingface.co/remyxai/SpaceLLaVA)
