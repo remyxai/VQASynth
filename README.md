@@ -27,7 +27,7 @@ Initial VQASynth 🎹 experiments prompted [LLaVA](https://github.com/haotian-li
 
 ## What's New 👀 in VQASynth 🎹
 
-🪶 Faster & lighter using [Florence-2](https://arxiv.org/abs/2311.06242) for **both** detailed image captions and for region proposal grounded on text captions.
+🪶 Faster & lighter using [Florence-2](https://arxiv.org/abs/2311.06242) for detailed image captions **and** region proposal grounded on text captions.
 
 ⚡ Improves metric depth estimation speed & accuracy by replacing ZoeDepth with [DepthPro](https://github.com/apple/ml-depth-pro).
 
