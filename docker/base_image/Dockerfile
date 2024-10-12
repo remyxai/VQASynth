@@ -44,7 +44,7 @@ WORKDIR /app/VQASynth
 COPY . /app/VQASynth
 RUN pip install .
 
-# Install flash_attn and onnxruntime compatible with CUDA 11.8, order is important
+# Install flash_attn compatible with CUDA 11.8, order is important
 RUN pip uninstall -y flash_attn
 RUN pip install git+https://github.com/Dao-AILab/flash-attention.git@v2.6.0
 
