@@ -45,11 +45,11 @@ Before running the demo scripts, ensure you have the following installed:
 
 ## Run a Pipeline on Your Images
 
-The main pipeline uses Docker Compose to process a Hugging Face dataset into a VQA dataset including spatial relations between objects. The dataset follows conventions for training models like [LLaVA](https://llava-vl.github.io/). The pipeline can be accelerated with GPU but will also run on CPU.
+Use Docker Compose to transform Image datasets from Huggingface Hub into VQA datasets describing spatial relations between objects. Alternatively, you can run the colab notebook using CPU and free tier resources or GPU acceleration.
 
-Make sure to update the [config.yaml](config/config.yaml) file by adding the following details: an output directory path, the repository ID for the dataset to be processed, and a dataset name to store the results to the hub. You can also optionally add `include_tags` and/or `exclude_tags` as comma-separated lists in the config file for filtering the dataset based on tags. If no tags are provided, the filtering will not be applied.
+You can process different datasets after updating the [config.yaml](config/config.yaml).
 
-Then launch the full pipeline with:
+Then run the spatial VQA pipeline locally with Docker:
 
 ```bash
 # Authenticate to push to hub
@@ -59,7 +59,7 @@ huggingface-cli login
 cd /path/to/VQASynth
 bash run.sh
 ```
-or you can compose your own pipeline with components:
+or you can customize your own pipeline:
 ```python
 from vqasynth.datasets import Dataloader
 from vqasynth.embeddings import EmbeddingGenerator
@@ -88,7 +88,7 @@ dataset_filtered = dataset.filter(
     )
 ```
 
-In your designed cache directory, you'll find the results stored as a huggingface dataset. You can also push your dataset to hub with:
+The resulting Huggingface dataset is in the cache directory and you can push to hub with:
 ```python
 dataloader.push_to_hub(final_dataset, target_repo_name)
 ```
@@ -122,7 +122,7 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 
 | Notebook | Description | Launch |
 |----------|-------------|--------|
-| VQASynth Pipeline | Run the full VQASynth spatialvqa pipeline on a Huggingface dataset | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sJUsJ5-UR-3Bydgg-thJ59KSNxRG8Q30?usp=sharing) |
+| Generate Spatial VQA Dataset | Augment an HF Image Dataset with Spatial VQA | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sJUsJ5-UR-3Bydgg-thJ59KSNxRG8Q30?usp=sharing) |
 | Spatial Reasoning with Point Clouds | Visualize point clouds and evaluate spatial relationships | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1f3rr-y233GvxWVzPE7_mK-DY52pG0fsm?usp=sharing) |
 
 ## References
