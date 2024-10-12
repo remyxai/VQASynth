@@ -61,9 +61,7 @@ bash run.sh
 You can run the colab notebook using free-tier CPU or GPU acceleration or customize your own pipeline:
 ```python
 from vqasynth.datasets import Dataloader
-from vqasynth.embeddings import EmbeddingGenerator
-from vqasynth.embeddings import TagFilter
-
+from vqasynth.embeddings import EmbeddingGenerator, TagFilter
 
 dataloader = Dataloader(cache_dir)
 dataset = dataloader.load_dataset(dataset_name)
