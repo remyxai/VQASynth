@@ -1,4 +1,5 @@
-# VQASynth 🎹
+# VQASynth 🎹 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sJUsJ5-UR-3Bydgg-thJ59KSNxRG8Q30?usp=sharing)
 
 ![GIF Description](./assets/vqasynth-example.gif)
 
@@ -41,30 +42,14 @@ Before running the demo scripts, ensure you have the following installed:
 - [Docker](https://docs.docker.com/engine/install/), [Docker Compose V2](https://docs.docker.com/compose/migrate/)
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
-CLIPSeg-based SpatialVLM data processing (recommended):
-```bash
-cd tests/data_processing/
-docker build -f clipseg_data_processing.dockerfile -t vqasynth:clipseg-dataproc-test .
-docker run --gpus all -v /path/to/output/:/path/to/output vqasynth:clipseg-dataproc-test --input_image="warehouse_rgb.jpg" --output_dir "/path/to/output" 
-```
-
-GroundingDINO-based SpatialVLM data processing:
-```bash
-cd tests/data_processing/
-docker build -f groundingDino_data_processing.dockerfile -t vqasynth:dino-dataproc-test .
-docker run --gpus all -v /path/to/output/:/path/to/output vqasynth:dino-dataproc-test --input_image="warehouse_rgb.jpg" --output_dir "/path/to/output" 
-```
-
-The scripts will produce 3D point clouds, segmented images, labels, and prompt examples for a test image.
-
 
 ## Run a Pipeline on Your Images
 
-The main pipeline uses Docker Compose to process a Hugging Face dataset into a VQA dataset including spatial relations between objects. The dataset follows conventions for training models like [LLaVA](https://llava-vl.github.io/). We recommend using an A10 GPU or larger for processing.
+The main pipeline uses Docker Compose to process a Hugging Face dataset into a VQA dataset including spatial relations between objects. The dataset follows conventions for training models like [LLaVA](https://llava-vl.github.io/). The pipeline can be accelerated with GPU but will also run on CPU.
 
 Make sure to update the [config.yaml](config/config.yaml) file by adding the following details: an output directory path, the repository ID for the dataset to be processed, and a dataset name to store the results to the hub. You can also optionally add `include_tags` and/or `exclude_tags` as comma-separated lists in the config file for filtering the dataset based on tags. If no tags are provided, the filtering will not be applied.
 
-Then launch the pipeline with:
+Then launch the full pipeline with:
 
 ```bash
 # Authenticate to push to hub
@@ -74,8 +59,39 @@ huggingface-cli login
 cd /path/to/VQASynth
 bash run.sh
 ```
+or you can compose your own pipeline with components:
+```python
+from vqasynth.datasets import Dataloader
+from vqasynth.embeddings import EmbeddingGenerator
+from vqasynth.embeddings import TagFilter
 
-In your designated output directory, you'll find a json file `processed_dataset.json` containing the formatted dataset.
+
+dataloader = Dataloader(cache_dir)
+dataset = dataloader.load_dataset(dataset_name)
+embedding_generator = EmbeddingGenerator()
+tag_filter = TagFilter()
+
+include_tags = include_tags.strip().split(",")
+exclude_tags = exclude_tags.strip().split(",")
+
+# Extract embeddings
+dataset = dataset.map(lambda example: embedding_generator.apply_transform(example, images))
+
+# Extract tags
+dataset = dataset.map(lambda example: tag_filter.apply_transform(example, include_tags + exclude_tags))
+
+# Filter by tags
+dataset_filtered = dataset.filter(
+    lambda example: tag_filter.filter_by_tag(
+        example['tag'], include_tags, exclude_tags
+        )
+    )
+```
+
+In your designed cache directory, you'll find the results stored as a huggingface dataset. You can also push your dataset to hub with:
+```python
+dataloader.push_to_hub(final_dataset, target_repo_name)
+```
 
 Here are some examples:
 
@@ -83,17 +99,6 @@ Here are some examples:
 |----------|-------------|--------|
 | Does the red forklift in warehouse appear on the left side of the brown cardboard boxes stacked? | How close is the man in red hat walking from the wooden pallet with boxes? | Does the man in blue shirt working have a greater height compared to the wooden pallet with boxes on floor? |
 | Incorrect, the red forklift in warehouse is not on the left side of the brown cardboard boxes stacked. | The man in red hat walking is 60.13 centimeters from the wooden pallet with boxes. | Indeed, the man in blue shirt working is taller compared to the wooden pallet with boxes on floor. |
-
-Here's a sample of warehouse images captioned with spatial relationships similar to the table above. 
-
-```bash
-wget https://remyx.ai/assets/vqasynth/vqasynth_warehouse_spaces.zip
-
-# Data is formatted for LLaVA fine-tuning
-unzip vqasynth_warehouse_spaces.zip 
-```
-
-Once completed, you can follow this resource on [fine-tuning LLaVa](https://github.com/haotian-liu/LLaVA/blob/5d8f1760c08b7dfba3ae97b71cbd4c6f17d12dbd/docs/Finetune_Custom_Data.md#L4).
 
 ## Datasets from VQASynth 🎹
 
@@ -117,6 +122,7 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 
 | Notebook | Description | Launch |
 |----------|-------------|--------|
+| VQASynth Pipeline | Run the full VQASynth spatialvqa pipeline on a Huggingface dataset | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sJUsJ5-UR-3Bydgg-thJ59KSNxRG8Q30?usp=sharing) |
 | Spatial Reasoning with Point Clouds | Visualize point clouds and evaluate spatial relationships | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1f3rr-y233GvxWVzPE7_mK-DY52pG0fsm?usp=sharing) |
 
 ## References
