@@ -6,10 +6,17 @@ ENV CUDA_HOME /usr/local/cuda-11.8/
 RUN apt-get update && apt-get install -y software-properties-common wget && \
     add-apt-repository ppa:deadsnakes/ppa && \
     apt-get update && \
+    apt-get install -y build-essential git wget curl && \
     apt-get install -y python3.10 python3.10-dev python3.10-distutils python3-venv && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
     update-alternatives --set python3 /usr/bin/python3.10 && \
     apt-get install -y zlib1g-dev libexpat1-dev
+
+# Install CMake 3.26 or higher
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.26.4/cmake-3.26.4-linux-x86_64.sh && \
+    chmod +x cmake-3.26.4-linux-x86_64.sh && \
+    ./cmake-3.26.4-linux-x86_64.sh --skip-license --prefix=/usr/local && \
+    rm cmake-3.26.4-linux-x86_64.sh
 
 RUN wget https://bootstrap.pypa.io/get-pip.py && \
     python3 get-pip.py && \
