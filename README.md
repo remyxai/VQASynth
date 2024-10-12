@@ -92,6 +92,11 @@ The resulting Huggingface dataset is in the cache directory and you can push to 
 dataloader.push_to_hub(final_dataset, target_repo_name)
 ```
 
+## Datasets from VQASynth 🎹
+
+* [vqasynth_spacellava](https://huggingface.co/datasets/remyxai/vqasynth_spacellava)
+* [colmap_camera_specs](https://huggingface.co/datasets/salma-remyx/colmap_camera_specs)
+  
 Here are some examples:
 
 | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_1.jpeg?raw=true"  alt="sample_1" style="max-height: 350px;" > | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_2.jpeg?raw=true"  alt="sample_2" style="max-height: 350px;"> | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_3.jpeg?raw=true" alt="sample_3" style="max-height: 350px;"> |
@@ -99,10 +104,6 @@ Here are some examples:
 | Does the red forklift in warehouse appear on the left side of the brown cardboard boxes stacked? | How close is the man in red hat walking from the wooden pallet with boxes? | Does the man in blue shirt working have a greater height compared to the wooden pallet with boxes on floor? |
 | Incorrect, the red forklift in warehouse is not on the left side of the brown cardboard boxes stacked. | The man in red hat walking is 60.13 centimeters from the wooden pallet with boxes. | Indeed, the man in blue shirt working is taller compared to the wooden pallet with boxes on floor. |
 
-## Datasets from VQASynth 🎹
-
-* [vqasynth_spacellava](https://huggingface.co/datasets/remyxai/vqasynth_spacellava)
-* [colmap_camera_specs](https://huggingface.co/datasets/salma-remyx/colmap_camera_specs)
   
 ## Models tuned on VQASynth 🎹
 
