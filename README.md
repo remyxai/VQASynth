@@ -45,8 +45,7 @@ Before running the demo scripts, ensure you have the following installed:
 
 ## Run a Pipeline on Your Images
 
-Use Docker Compose to transform Image datasets from Huggingface Hub into VQA datasets describing spatial relations between objects. Alternatively, you can run the colab notebook using CPU and free tier resources or GPU acceleration.
-
+Use Docker Compose to transform Image datasets from Huggingface Hub into VQA datasets describing spatial relations between objects. 
 You can process different datasets after updating the [config.yaml](config/config.yaml).
 
 Then run the spatial VQA pipeline locally with Docker:
@@ -59,7 +58,7 @@ huggingface-cli login
 cd /path/to/VQASynth
 bash run.sh
 ```
-or you can customize your own pipeline:
+You can run the colab notebook using free-tier CPU or GPU acceleration or customize your own pipeline:
 ```python
 from vqasynth.datasets import Dataloader
 from vqasynth.embeddings import EmbeddingGenerator
