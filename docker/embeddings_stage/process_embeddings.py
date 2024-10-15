@@ -15,6 +15,8 @@ def main(output_dir, source_repo_id, images):
 
     dataset = dataloader.load_dataset(source_repo_id)
     dataset = dataset.map(lambda example: embedding_generator.apply_transform(example, images))
+    # filter nulls
+    dataset = dataset.filter(lambda example: all(value is not None for value in example.values()))
 
     dataloader.save_to_disk(dataset)
     print("Embedding extraction complete.")

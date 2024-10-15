@@ -37,7 +37,11 @@ class EmbeddingGenerator(MultiModalEmbeddingModel):
         Returns:
             Updated example with image embeddings.
         """
-        embedding = self.run(example[images])
+        if isinstance(example[images], list):
+            image = example[images][0]
+        else:
+            image = example[images]
+        embedding = self.run(image)
         example['embedding'] = embedding
         return example
 
@@ -97,7 +101,11 @@ class TagFilter(MultiModalEmbeddingModel):
         Returns:
             Updated example with image embeddings.
         """
-        example['tag'] = self.get_best_matching_tag(
-            example['embedding'], tags
-        )
+        try:
+            example['tag'] = self.get_best_matching_tag(
+                example['embedding'], tags
+            )
+        except Exception as e:
+            print(f"Error processing image, skipping: {e}")
+            example['tag'] = None
         return example

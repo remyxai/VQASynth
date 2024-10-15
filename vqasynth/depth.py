@@ -145,9 +145,25 @@ class DepthEstimator:
             images: The column in the dataset containing the images.
 
         Returns:
-            Updated example with depth map and focal length.
+            Updated example with depth map and focal length, or empty values on failure.
         """
-        depth_map, focallength = self.run(example[images])
-        example['depth_map'] = depth_map
-        example['focallength'] = focallength
+        try:
+            if isinstance(example[images], list):
+                image = example[images][0]
+            else:
+                image = example[images]
+
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+
+            depth_map, focallength = self.run(image)
+
+            example['depth_map'] = depth_map
+            example['focallength'] = focallength
+        except Exception as e:
+            print(f"Error processing image, skipping: {e}")
+            example['depth_map'] = None
+            example['focallength'] = None
+
         return example
+

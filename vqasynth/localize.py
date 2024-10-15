@@ -107,6 +107,58 @@ class Localizer:
         self.caption_localizer = CaptionLocalizer()
         self.location_refiner = LocationRefiner()
 
+    def calculate_iou(self, bbox1, bbox2):
+        # Extract coordinates
+        x1_min, y1_min, x1_max, y1_max = bbox1
+        x2_min, y2_min, x2_max, y2_max = bbox2
+
+        # Calculate intersection
+        inter_x_min = max(x1_min, x2_min)
+        inter_y_min = max(y1_min, y2_min)
+        inter_x_max = min(x1_max, x2_max)
+        inter_y_max = min(y1_max, y2_max)
+
+        inter_area = max(0, inter_x_max - inter_x_min) * max(0, inter_y_max - inter_y_min)
+
+        # Calculate union
+        bbox1_area = (x1_max - x1_min) * (y1_max - y1_min)
+        bbox2_area = (x2_max - x2_min) * (y2_max - y2_min)
+
+        union_area = bbox1_area + bbox2_area - inter_area
+
+        # Avoid division by zero
+        if union_area == 0:
+            return 0.0
+
+        return inter_area / union_area
+
+    def filter_most_separated_objects(self, masks, bboxes, captions, top_k=3):
+        num_objects = len(bboxes)
+
+        # Return all objects if there are less than or equal to top_k objects
+        if num_objects <= top_k:
+            return masks, bboxes, captions
+
+        # Calculate pairwise IoU for all bounding boxes
+        iou_matrix = np.zeros((num_objects, num_objects))
+        for i in range(num_objects):
+            for j in range(i + 1, num_objects):
+                iou_matrix[i, j] = self.calculate_iou(bboxes[i], bboxes[j])
+                iou_matrix[j, i] = iou_matrix[i, j]  # IoU is symmetric
+
+        # Get sum of IoU for each object (lower sum indicates more separated)
+        iou_sums = iou_matrix.sum(axis=1)
+
+        # Select top_k objects with the lowest IoU sums (most separated objects)
+        selected_indices = np.argsort(iou_sums)[:top_k]
+
+        # Filter masks, bboxes, and captions based on selected indices
+        filtered_masks = [masks[i] for i in selected_indices]
+        filtered_bboxes = [bboxes[i] for i in selected_indices]
+        filtered_captions = [captions[i] for i in selected_indices]
+
+        return filtered_masks, filtered_bboxes, filtered_captions
+
     def run(self, image):
         """
         Produce object location masks, bboxes, and captions
@@ -145,6 +197,7 @@ class Localizer:
                     final_bboxes.append(selected_bbox)
                     final_captions.append(selected_caption)
 
+            sam_masks, final_bboxes, final_captions = self.filter_most_separated_objects(sam_masks, final_bboxes, final_captions)
             return sam_masks, final_bboxes, final_captions
         except Exception as e:
             print(f"Error during localization: {str(e)}")
@@ -161,8 +214,18 @@ class Localizer:
         Returns:
             Updated example with masks, bboxes, and captions.
         """
-        masks, bboxes, captions = self.run(example[images])
-        example['masks'] = masks
-        example['bboxes'] = bboxes
-        example['captions'] = captions
+        try:
+            if isinstance(example[images], list):
+                image = example[images][0]
+            else:
+                image = example[images]
+            masks, bboxes, captions = self.run(image)
+            example['masks'] = masks
+            example['bboxes'] = bboxes
+            example['captions'] = captions
+        except Exception as e:
+            print(f"Error processing image, skipping: {e}")
+            example['masks'] = None
+            example['bboxes'] = None
+            example['captions'] = None
         return example
