@@ -18,9 +18,12 @@ def main(output_dir, source_repo_id, target_repo_name, images):
 
     # Process each row in the Hugging Face dataset by applying the prompt generator logic
     dataset = dataset.map(lambda example: prompt_generator.apply_transform(example))
-    final_dataset = dataset.select_columns([images, "messages"])
+    # filter nulls
+    dataset = dataset.filter(lambda example: all(value is not None for value in example.values()))
+    dataloader.save_to_disk(dataset)
+    dataloader.push_to_hub(dataset, target_repo_name + "_full")
 
-    dataloader.save_to_disk(final_dataset)
+    final_dataset = dataset.select_columns([images, "messages"])
     dataloader.push_to_hub(final_dataset, target_repo_name)
 
     print(f"Processed and updated dataset with formatted messages.")

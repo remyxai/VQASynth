@@ -235,15 +235,24 @@ class SpatialSceneConstructor:
             dict: Updated example with point clouds and canonicalization status.
         """
         # Run spatial scene constructor and get point cloud data and canonicalization flag
-        pcd_data, canonicalized = self.run(
-            str(idx),  # Use the index as image filename
-            example[images],  # Get image from the specified column
-            example["depth_map"],
-            example["focallength"],
-            example["masks"],
-            output_dir
-        )
-        # Add point cloud data and canonicalization flag to the example
-        example["pointclouds"] = pcd_data
-        example["is_canonicalized"] = canonicalized
+        try:
+            if isinstance(example[images], list):
+                image = example[images][0]
+            else:
+                image = example[images]
+            pcd_data, canonicalized = self.run(
+                str(idx),  
+                image,  
+                example["depth_map"],
+                example["focallength"],
+                example["masks"],
+                output_dir
+            )
+            # Add point cloud data and canonicalization flag to the example
+            example["pointclouds"] = pcd_data
+            example["is_canonicalized"] = canonicalized
+        except Exception as e:
+            print(f"Error processing image, skipping: {e}")
+            example["pointclouds"] = None
+            example["is_canonicalized"] = None
         return example

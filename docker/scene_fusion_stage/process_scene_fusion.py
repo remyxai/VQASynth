@@ -17,6 +17,8 @@ def main(output_dir, source_repo_id, images):
         os.makedirs(point_cloud_dir)
 
     dataset = dataset.map(lambda example, idx: spatial_scene_constructor.apply_transform(example, idx, output_dir, images), with_indices=True)
+    # filter nulls
+    dataset = dataset.filter(lambda example: all(value is not None for value in example.values()))
 
     dataloader.save_to_disk(dataset)
     print("Scene fusion complete")

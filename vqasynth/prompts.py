@@ -646,37 +646,42 @@ class PromptGenerator():
         Returns:
             Updated example with depth map and focal length.
         """
-        example['prompts'] = self.run(
-            example["captions"],
-            example["pointclouds"],
-            example["is_canonicalized"]
-        )
+        try:
+            example['prompts'] = self.run(
+                example["captions"],
+                example["pointclouds"],
+                example["is_canonicalized"]
+            )
 
-        messages = []
-        first_prompt = True
+            messages = []
+            first_prompt = True
 
-        for prompt in example['prompts']:
-            if 'Answer: ' in prompt:
-                question, answer = prompt.split('Answer: ', 1)
+            for prompt in example['prompts']:
+                if 'Answer: ' in prompt:
+                    question, answer = prompt.split('Answer: ', 1)
 
-                # For the first prompt, include the image tag
-                if first_prompt:
+                    # For the first prompt, include the image tag
+                    if first_prompt:
+                        messages.append({
+                            "content": [{"index": 0, "text": None, "type": "image"}, {"index": None, "text": question.strip(), "type": "text"}],
+                            "role": "user"
+                        })
+                    else:
+                        messages.append({
+                            "content": [{"index": None, "text": question.strip(), "type": "text"}],
+                            "role": "user"
+                        })
+
+                    # Add assistant response
                     messages.append({
-                        "content": [{"index": 0, "text": None, "type": "image"}, {"index": None, "text": question.strip(), "type": "text"}],
-                        "role": "user"
+                        "content": [{"index": None, "text": answer.strip(), "type": "text"}],
+                        "role": "assistant"
                     })
-                else:
-                    messages.append({
-                        "content": [{"index": None, "text": question.strip(), "type": "text"}],
-                        "role": "user"
-                    })
+                    first_prompt = False
 
-                # Add assistant response
-                messages.append({
-                    "content": [{"index": None, "text": answer.strip(), "type": "text"}],
-                    "role": "assistant"
-                })
-                first_prompt = False
-
-        example['messages'] = messages
+            example['messages'] = messages
+        except Exception as e:
+            print(f"Error processing image, skipping: {e}")
+            example['prompts'] = None
+            example['messages'] = None
         return example
