@@ -110,13 +110,15 @@ class DepthEstimator:
         max_depth = predicted_depth.max()
         normalized_depth = (predicted_depth - min_depth) / (max_depth - min_depth)
 
-        depth_map_resized = cv2.resize(normalized_depth, original_size, interpolation=cv2.INTER_LINEAR)
+        # Invert the normalized depth to correct the light/dark inversion
+        inverted_depth = 1 - normalized_depth
+
+        depth_map_resized = cv2.resize(inverted_depth, original_size, interpolation=cv2.INTER_LINEAR)
 
         depth_map_uint16 = (depth_map_resized * 65535).astype(np.uint16)
         depth_image_pil = Image.fromarray(depth_map_uint16, mode='I;16')
 
         return depth_image_pil, focallength_px
-
 
     def _run_pytorch(self, image):
         """
