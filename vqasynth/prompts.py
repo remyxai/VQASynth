@@ -567,37 +567,40 @@ class PromptGenerator():
 
     def evaluate_predicates_on_pairs(self, pairs, is_canonicalized):
         all_prompt_variants = [
-            self.left_predicate,
-            self.right_predicate,
-            self.wide_predicate,
-            self.big_predicate,
-            self.thin_predicate,
-            self.small_predicate,
-            self.behind_predicate,
-            self.front_predicate,
-            self.left_choice,
-            self.right_choice,
+            (self.left_predicate, 1),
+            (self.right_predicate, 1),
+            (self.wide_predicate, 2),
+            (self.big_predicate, 1),
+            (self.thin_predicate, 2),
+            (self.small_predicate, 1),
+            (self.behind_predicate, 1),
+            (self.front_predicate, 1),
+            (self.left_choice, 1),
+            (self.right_choice, 1),
         ]
 
+        # Canonicalized functions, with distance metric-related functions given higher weight
         add_canonicalized = [
-                self.tall_choice,
-                self.above_predicate,
-                self.below_predicate,
-                self.short_choice,
-                self.below_choice,
-                self.tall_predicate,
-                self.short_predicate,
-                self.above_choice,
-                self.vertical_distance_data,
-                self.horizontal_distance_data,
-                self.width_data,
-                self.height_data,
-            ]
+            (self.tall_choice, 2),  # Higher weight for distance metrics
+            (self.above_predicate, 1),
+            (self.below_predicate, 1),
+            (self.short_choice, 2),  # Higher weight for distance metrics
+            (self.below_choice, 1),
+            (self.tall_predicate, 2),  # Higher weight for distance metrics
+            (self.short_predicate, 2),  # Higher weight for distance metrics
+            (self.above_choice, 1),
+            (self.vertical_distance_data, 3),  # Very high weight for direct distance metrics
+            (self.horizontal_distance_data, 3),  # Very high weight for direct distance metrics
+            (self.width_data, 3),  # Very high weight for direct distance metrics
+            (self.height_data, 3),  # Very high weight for direct distance metrics
+        ]
 
         if is_canonicalized:
             all_prompt_variants += add_canonicalized
 
-        selected_predicates_choices = random.sample(all_prompt_variants, 10)
+        functions, weights = zip(*all_prompt_variants)
+
+        selected_predicates_choices = random.choices(functions, weights=weights, k=10)
 
         results = []
 
