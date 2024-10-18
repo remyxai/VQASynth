@@ -276,33 +276,31 @@ class Localizer:
 
         """
 
-        #try:
-        preds = self.caption_localizer.run(image)
-        sam_masks = []
-        original_size = image.size
-        all_bboxes = []
-        all_captions = []
+        try:
+            preds = self.caption_localizer.run(image)
+            sam_masks = []
+            original_size = image.size
+            all_bboxes = []
+            all_captions = []
 
 
-        object_counter = 1
-        for pred in preds:
-            bboxes = pred.get("bboxes", [])
-            captions = pred.get("caption", [])
+            object_counter = 1
+            for pred in preds:
+                bbox = pred.get("bboxes", [])
+                caption = pred.get("caption", [])
 
-            if bboxes and captions and len(bboxes) == len(captions):
-                for bbox in bboxes:
-                    mask_tensor = self.location_refiner.run(image, bbox)
-                    mask = mask_tensor[0]
-                    mask_uint8 = (mask.astype(np.uint8)) * 255
-                    sam_masks.append(mask_uint8)
+                mask_tensor = self.location_refiner.run(image, bbox)
+                mask = mask_tensor[0]
+                mask_uint8 = (mask.astype(np.uint8)) * 255
+                sam_masks.append(mask_uint8)
 
-                all_bboxes.extend(bboxes)
-                all_captions.extend(captions)
+                all_bboxes.append(bbox)
+                all_captions.append(caption)
 
-        return sam_masks, all_bboxes, all_captions
-        #except Exception as e:
-        #    print(f"Error during localization: {str(e)}")
-        #    return [], [], []
+            return sam_masks, all_bboxes, all_captions
+        except Exception as e:
+            print(f"Error during localization: {str(e)}")
+            return [], [], []
 
     def apply_transform(self, example, images):
         """
@@ -315,18 +313,18 @@ class Localizer:
         Returns:
             Updated example with masks, bboxes, and captions.
         """
-        #try:
-        if isinstance(example[images], list):
-            image = example[images][0]
-        else:
-            image = example[images]
-        masks, bboxes, captions = self.run(image)
-        example['masks'] = masks
-        example['bboxes'] = bboxes
-        example['captions'] = captions
-        #except Exception as e:
-        #    print(f"Error processing image, skipping: {e}")
-        #    example['masks'] = None
-        #    example['bboxes'] = None
-        #    example['captions'] = None
+        try:
+            if isinstance(example[images], list):
+                image = example[images][0]
+            else:
+                image = example[images]
+            masks, bboxes, captions = self.run(image)
+            example['masks'] = masks
+            example['bboxes'] = bboxes
+            example['captions'] = captions
+        except Exception as e:
+            print(f"Error processing image, skipping: {e}")
+            example['masks'] = None
+            example['bboxes'] = None
+            example['captions'] = None
         return example
