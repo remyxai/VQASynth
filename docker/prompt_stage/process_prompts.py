@@ -20,6 +20,7 @@ def main(output_dir, source_repo_id, target_repo_name, images):
     dataset = dataset.map(lambda example: prompt_generator.apply_transform(example))
     # filter nulls
     dataset = dataset.filter(lambda example: all(value is not None for value in example.values()))
+    dataset["train"].to_csv(os.path.join(output_dir, target_repo_name + "_full.csv")) 
     dataloader.save_to_disk(dataset)
     dataloader.push_to_hub(dataset, target_repo_name + "_full")
 

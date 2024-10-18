@@ -1,9 +1,13 @@
 import torch
 import numpy as np
 import random
+import spacy
 
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoModelForCausalLM, AutoProcessor
+
+
+nlp = spacy.load("en_core_web_sm")
 
 
 class CaptionLocalizer:
@@ -16,6 +20,78 @@ class CaptionLocalizer:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=self.torch_dtype, trust_remote_code=True
         ).to(self.device)
+
+    def find_subject(self, doc):
+        for token in doc:
+            if "subj" in token.dep_:
+                return token.text, token.head
+        return None, None
+
+    def extract_descriptions(self, doc, head):
+        descriptions = []
+        for chunk in doc.noun_chunks:
+            if chunk.root.head == head or chunk.root.dep_ == 'attr':
+                descriptions.append(chunk.text.lower())
+        return descriptions
+
+    def caption_refiner(self, caption):
+        doc = nlp(caption)
+        subject, action_verb = self.find_subject(doc)
+        if action_verb:
+            descriptions = self.extract_descriptions(doc, action_verb)
+            return ', '.join(descriptions)
+        else:
+            return caption
+
+    def compute_iou(self, box1, box2):
+        # Extract the coordinates
+        x1_min, y1_min, x1_max, y1_max = box1
+        x2_min, y2_min, x2_max, y2_max = box2
+
+        # Compute the intersection rectangle
+        x_inter_min = max(x1_min, x2_min)
+        y_inter_min = max(y1_min, y2_min)
+        x_inter_max = min(x1_max, x2_max)
+        y_inter_max = min(y1_max, y2_max)
+
+        # Intersection width and height
+        inter_width = max(0, x_inter_max - x_inter_min)
+        inter_height = max(0, y_inter_max - y_inter_min)
+
+        # Intersection area
+        inter_area = inter_width * inter_height
+
+        # Boxes areas
+        box1_area = (x1_max - x1_min) * (y1_max - y1_min)
+        box2_area = (x2_max - x2_min) * (y2_max - y2_min)
+
+        # Union area
+        union_area = box1_area + box2_area - inter_area
+
+        # Intersection over Union
+        iou = inter_area / union_area if union_area != 0 else 0
+
+        return iou
+
+    def filter_objects(self, data, iou_threshold=0.5):
+        filtered_bboxes = []
+        filtered_labels = []
+
+        for i in range(len(data['bboxes'])):
+            current_box = data['bboxes'][i]
+            current_label = data['labels'][i]
+            is_duplicate = False
+
+            for j in range(len(filtered_bboxes)):
+                if current_label == filtered_labels[j] and self.compute_iou(current_box, filtered_bboxes[j]) > iou_threshold:
+                    is_duplicate = True
+                    break
+
+            if not is_duplicate:
+                filtered_bboxes.append(current_box)
+                filtered_labels.append(current_label)
+
+        return {'bboxes': filtered_bboxes, 'labels': filtered_labels, 'caption': data['caption']}
 
     def run(self, image):
         """
@@ -71,7 +147,35 @@ class CaptionLocalizer:
                 parsed_answer = self.processor.post_process_generation(
                     generated_text, task=task, image_size=(image.width, image.height)
                 )
-                captioned_bboxes.append(parsed_answer[task])
+                caption_bbox = parsed_answer[task]
+                caption_bbox["caption"] = self.caption_refiner(caption)
+                caption_bbox = self.filter_objects(caption_bbox)
+
+                if len(caption_bbox['bboxes']) > 1:
+                    flip = random.choice(['heads', 'tails'])
+                    if flip == 'heads':
+                        idx = random.randint(1, len(caption_bbox['bboxes']) - 1)
+                    else:
+                        idx = 0
+                    if idx > 0: 
+                        caption_bbox['caption'] = caption_bbox['labels'][idx].lower() + ' with ' + caption_bbox['labels'][0].lower()
+                    caption_bbox['bboxes'] = [caption_bbox['bboxes'][idx]]
+                    caption_bbox['labels'] = [caption_bbox['labels'][idx]]
+
+                captioned_bboxes.append(caption_bbox)
+
+        # Final filtering based on bbox distances
+        bboxes = [item['bboxes'][0] for item in captioned_bboxes]
+        n = len(bboxes)
+        distance_matrix = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                if i != j:
+                    distance_matrix[i][j] = 1 - self.compute_iou(bboxes[i], bboxes[j])
+
+        scores = np.sum(distance_matrix, axis=1)
+        selected_indices = np.argsort(scores)[-3:]
+        captioned_bboxes = [{"bboxes" : captioned_bboxes[i]['bboxes'][0], "caption": captioned_bboxes[i]['caption']} for i in selected_indices]
 
         return captioned_bboxes
 
@@ -132,6 +236,7 @@ class Localizer:
 
         return inter_area / union_area
 
+
     def filter_most_separated_objects(self, masks, bboxes, captions, top_k=3):
         num_objects = len(bboxes)
 
@@ -171,37 +276,33 @@ class Localizer:
 
         """
 
-        try:
-            preds = self.caption_localizer.run(image)
-            sam_masks = []
-            final_bboxes = []
-            final_captions = []
+        #try:
+        preds = self.caption_localizer.run(image)
+        sam_masks = []
+        original_size = image.size
+        all_bboxes = []
+        all_captions = []
 
-            original_size = image.size
 
-            object_counter = 1
-            for pred in preds:
-                bboxes = pred.get("bboxes", [])
-                captions = pred.get("labels", [])
+        object_counter = 1
+        for pred in preds:
+            bboxes = pred.get("bboxes", [])
+            captions = pred.get("caption", [])
 
-                if bboxes and captions and len(bboxes) == len(captions):
-                    random_index = random.randint(0, len(bboxes) - 1)
-                    selected_bbox = bboxes[random_index]
-                    selected_caption = captions[random_index]
-
-                    mask_tensor = self.location_refiner.run(image, selected_bbox)
+            if bboxes and captions and len(bboxes) == len(captions):
+                for bbox in bboxes:
+                    mask_tensor = self.location_refiner.run(image, bbox)
                     mask = mask_tensor[0]
                     mask_uint8 = (mask.astype(np.uint8)) * 255
                     sam_masks.append(mask_uint8)
 
-                    final_bboxes.append(selected_bbox)
-                    final_captions.append(selected_caption)
+                all_bboxes.extend(bboxes)
+                all_captions.extend(captions)
 
-            sam_masks, final_bboxes, final_captions = self.filter_most_separated_objects(sam_masks, final_bboxes, final_captions)
-            return sam_masks, final_bboxes, final_captions
-        except Exception as e:
-            print(f"Error during localization: {str(e)}")
-            return [], [], []
+        return sam_masks, all_bboxes, all_captions
+        #except Exception as e:
+        #    print(f"Error during localization: {str(e)}")
+        #    return [], [], []
 
     def apply_transform(self, example, images):
         """
@@ -214,18 +315,18 @@ class Localizer:
         Returns:
             Updated example with masks, bboxes, and captions.
         """
-        try:
-            if isinstance(example[images], list):
-                image = example[images][0]
-            else:
-                image = example[images]
-            masks, bboxes, captions = self.run(image)
-            example['masks'] = masks
-            example['bboxes'] = bboxes
-            example['captions'] = captions
-        except Exception as e:
-            print(f"Error processing image, skipping: {e}")
-            example['masks'] = None
-            example['bboxes'] = None
-            example['captions'] = None
+        #try:
+        if isinstance(example[images], list):
+            image = example[images][0]
+        else:
+            image = example[images]
+        masks, bboxes, captions = self.run(image)
+        example['masks'] = masks
+        example['bboxes'] = bboxes
+        example['captions'] = captions
+        #except Exception as e:
+        #    print(f"Error processing image, skipping: {e}")
+        #    example['masks'] = None
+        #    example['bboxes'] = None
+        #    example['captions'] = None
         return example

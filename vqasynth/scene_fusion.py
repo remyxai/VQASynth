@@ -38,8 +38,8 @@ class SpatialSceneConstructor:
         rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
             o3d.geometry.Image(rgb_image),
             o3d.geometry.Image(depth_image),
-            depth_scale=1.0,
-            depth_trunc=10.0,
+            depth_scale=10.0,
+            depth_trunc=100.0,
             convert_rgb_to_intensity=False,
         )
         intrinsic = o3d.camera.PinholeCameraIntrinsic()
@@ -176,49 +176,43 @@ class SpatialSceneConstructor:
             "width": width,
             "height": height,
             "fx": focallength,
-            "fy": focallength,
+            "fy": focallength * height / width,
             "cx": width / 2,
             "cy": height / 2,
         }
 
-        point_clouds = []
+        original_pcd = self.create_point_cloud_from_rgbd(original_image_cv, depth_image_cv, intrinsic_parameters)
+
+        pcd, canonicalized, transformation = self.canonicalize_point_cloud(original_pcd, canonicalize_threshold=0.3)
+
+        output_pointcloud_dir = os.path.join(output_dir, "pointclouds")
+        Path(output_pointcloud_dir).mkdir(parents=True, exist_ok=True)
+
         point_cloud_data = []
 
-        original_pcd = self.create_point_cloud_from_rgbd(
-            original_image_cv, depth_image_cv, intrinsic_parameters
-        )
-        pcd, canonicalized, transformation = self.canonicalize_point_cloud(
-            original_pcd, canonicalize_threshold=0.3
-        )
-
-        for i, mask in enumerate(masks):
+        for idx, mask in enumerate(masks):
             if isinstance(mask, list):
                 mask = np.array(mask)
 
             mask_binary = mask.astype(bool)
 
-            masked_rgb = self.apply_mask_to_image(original_image_cv, mask_binary)
-            masked_depth = self.apply_mask_to_image(depth_image_cv, mask_binary)
+            # Apply the mask to the full point cloud by zeroing out points that don't match the mask
+            mask_indices = np.argwhere(mask_binary)
+            masked_pcd = original_pcd.select_by_index(mask_indices.flatten(), invert=False)
 
-            pcd = self.create_point_cloud_from_rgbd(
-                masked_rgb, masked_depth, intrinsic_parameters
-            )
-            point_clouds.append(pcd)
+            cl, ind = masked_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+            inlier_cloud = masked_pcd.select_by_index(ind)
 
-        for idx, pcd in enumerate(point_clouds):
-            cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-            inlier_cloud = pcd.select_by_index(ind)
             if canonicalized:
-                pcd.transform(transformation)
+                inlier_cloud.transform(transformation)
+
             pointcloud_filepath = os.path.join(
-                output_dir,
-                "pointclouds",
-                f"pointcloud_{Path(image_filename).stem}_{idx}.pcd",
+                output_pointcloud_dir,
+                f"pointcloud_{Path(image_filename).stem}_{idx}.pcd"
             )
             self.save_pointcloud(inlier_cloud, pointcloud_filepath)
             point_cloud_data.append(pointcloud_filepath)
 
-        # Now, return both point_cloud_data and the canonicalized flag
         return point_cloud_data, canonicalized
 
     def apply_transform(self, example, idx, output_dir, images):

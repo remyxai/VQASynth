@@ -57,7 +57,7 @@ services:
     volumes:
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - caption_stage
+      - depth_stage
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       HF_TOKEN: ${HF_TOKEN}

@@ -8,8 +8,9 @@ class PromptGenerator():
     def __init__(self):
         self.spatial_scene_constructor = SpatialSceneConstructor()
 
-    def human_like_distance(self, distance_meters):
+    def human_like_distance(self, distance_meters, scaling_factor=100):
         # Define the choices with units included, focusing on the 0.1 to 10 meters range
+        distance_meters *= scaling_factor
         if distance_meters < 1:  # For distances less than 1 meter
             choices = [
                 (
@@ -18,7 +19,7 @@ class PromptGenerator():
                     0.2,
                 ),  # Centimeters for very small distances
                 (
-                    round(distance_meters * 39.3701, 2),
+                    round(distance_meters, 2),
                     "inches",
                     0.8,
                 ),  # Inches for the majority of cases under 1 meter
@@ -27,7 +28,7 @@ class PromptGenerator():
             choices = [
                 (round(distance_meters, 2), "meters", 0.5),
                 (
-                    round(distance_meters * 3.28084, 2),
+                    round(distance_meters, 2),
                     "feet",
                     0.5,
                 ),  # Feet as a common unit within indoor spaces
@@ -40,12 +41,11 @@ class PromptGenerator():
                     0.7,
                 ),  # Meters for clarity and international understanding
                 (
-                    round(distance_meters * 3.28084, 2),
+                    round(distance_meters, 2),
                     "feet",
                     0.3,
                 ),  # Feet for additional context
             ]
-
         # Normalize probabilities and make a selection
         total_probability = sum(prob for _, _, prob in choices)
         cumulative_distribution = []
