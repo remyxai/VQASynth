@@ -8,7 +8,7 @@ class PromptGenerator():
     def __init__(self):
         self.spatial_scene_constructor = SpatialSceneConstructor()
 
-    def human_like_distance(self, distance_meters, scaling_factor=100):
+    def human_like_distance(self, distance_meters, scaling_factor=50):
         # Define the choices with units included, focusing on the 0.1 to 10 meters range
         distance_meters *= scaling_factor
         if distance_meters < 1:  # For distances less than 1 meter
@@ -567,37 +567,38 @@ class PromptGenerator():
 
     def evaluate_predicates_on_pairs(self, pairs, is_canonicalized):
         all_prompt_variants = [
-            self.left_predicate,
-            self.right_predicate,
-            self.wide_predicate,
-            self.big_predicate,
-            self.thin_predicate,
-            self.small_predicate,
-            self.behind_predicate,
-            self.front_predicate,
-            self.left_choice,
-            self.right_choice,
+            (self.left_predicate, 1),
+            (self.right_predicate, 1),
+            (self.wide_predicate, 2),
+            (self.big_predicate, 1),
+            (self.thin_predicate, 2),
+            (self.small_predicate, 1),
+            (self.behind_predicate, 1),
+            (self.front_predicate, 1),
+            (self.left_choice, 1),
+            (self.right_choice, 1),
         ]
 
         add_canonicalized = [
-                self.tall_choice,
-                self.above_predicate,
-                self.below_predicate,
-                self.short_choice,
-                self.below_choice,
-                self.tall_predicate,
-                self.short_predicate,
-                self.above_choice,
-                self.vertical_distance_data,
-                self.horizontal_distance_data,
-                self.width_data,
-                self.height_data,
+                (self.tall_choice, 2), 
+                (self.above_predicate, 1),
+                (self.below_predicate, 1),
+                (self.short_choice, 2), 
+                (self.below_choice, 1),
+                (self.tall_predicate, 2),
+                (self.short_predicate, 2),
+                (self.above_choice, 1),
+                (self.vertical_distance_data, 3),
+                (self.horizontal_distance_data, 3),
+                (self.width_data, 3),
+                (self.height_data, 3),
             ]
 
         if is_canonicalized:
             all_prompt_variants += add_canonicalized
 
-        selected_predicates_choices = random.sample(all_prompt_variants, 10)
+        functions, weights = zip(*all_prompt_variants)
+        selected_predicates_choices = random.choices(functions, weights=weights, k=10)
 
         results = []
 
