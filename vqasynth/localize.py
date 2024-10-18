@@ -11,7 +11,7 @@ nlp = spacy.load("en_core_web_sm")
 
 
 class CaptionLocalizer:
-    def __init__(self, model_name="microsoft/Florence-2-large", device=None):
+    def __init__(self, model_name="microsoft/Florence-2-base", device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.torch_dtype = torch.float16
         self.processor = AutoProcessor.from_pretrained(
@@ -181,7 +181,7 @@ class CaptionLocalizer:
 
 
 class LocationRefiner:
-    def __init__(self, model_name="facebook/sam2-hiera-large", device=None):
+    def __init__(self, model_name="facebook/sam2-hiera-small", device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.sam2_model = SAM2ImagePredictor.from_pretrained(
             model_name, trust_remote_code=True, device=self.device
