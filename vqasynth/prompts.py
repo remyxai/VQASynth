@@ -8,7 +8,7 @@ class PromptGenerator():
     def __init__(self):
         self.spatial_scene_constructor = SpatialSceneConstructor()
 
-    def human_like_distance(self, distance_meters, scaling_factor=50):
+    def human_like_distance(self, distance_meters, scaling_factor=10):
         # Define the choices with units included, focusing on the 0.1 to 10 meters range
         distance_meters *= scaling_factor
         if distance_meters < 1:  # For distances less than 1 meter
