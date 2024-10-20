@@ -5,6 +5,7 @@ import pandas as pd
 from PIL import Image
 from vqasynth.datasets import Dataloader
 from vqasynth.embeddings import TagFilter
+from vqasynth.utils import filter_null
 
 
 def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_threshold=0.7):
@@ -13,18 +14,30 @@ def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_thre
 
     dataset = dataloader.load_dataset(source_repo_id)
 
-    include_tags = include_tags.strip().split(",")
-    exclude_tags = exclude_tags.strip().split(",")
+    include_tags = [tag.strip() for tag in include_tags.split(",")]
+    exclude_tags = [tag.strip() for tag in exclude_tags.split(",")]
 
-    dataset = dataset.map(lambda example: tag_filter.apply_transform(example, include_tags + exclude_tags))
-    # filter nulls
-    dataset = dataset.filter(lambda example: all(value is not None for value in example.values()))
+    def process_and_filter(example):
+        """
+        Apply the tag filtering and ensure no null values in the example.
+        Works for both single and batched examples.
+        """
+        if isinstance(next(iter(example.values())), list):
+            # Batched input: process each row in the batch
+            return [
+                tag_filter.filter_by_tag(tag, include_tags, exclude_tags) and
+                all(value is not None for value in row)
+                for tag, row in zip(example['tag'], zip(*example.values()))
+            ]
+        else:
+            # Single example: process directly
+            return tag_filter.filter_by_tag(example['tag'], include_tags, exclude_tags) and \
+                   all(value is not None for value in example.values())
 
-    dataset_filtered = dataset.filter(
-        lambda example: tag_filter.filter_by_tag(
-            example['tag'], include_tags, exclude_tags
-        )
-    )
+    dataset = dataset.map(tag_filter.apply_transform, fn_kwargs={'tags': include_tags + exclude_tags}, batched=True, batch_size=32)
+
+    # Filter out examples in a single pass (nulls and tag filtering combined)
+    dataset_filtered = dataset.filter(process_and_filter, batched=True, batch_size=32)
 
     dataloader.save_to_disk(dataset_filtered)
 

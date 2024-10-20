@@ -28,22 +28,60 @@ class EmbeddingGenerator(MultiModalEmbeddingModel):
 
     def apply_transform(self, example, images):
         """
-        Process a single row in the dataset, adding embeddings from images.
+        Process one or more rows in the dataset, adding embeddings from images.
 
         Args:
-            example: A single example from the dataset.
+            example: A single example or a batch of examples from the dataset.
             images: Column name for image column.
 
         Returns:
-            Updated example with image embeddings.
+            Updated example(s) with image embeddings.
         """
-        if isinstance(example[images], list):
-            image = example[images][0]
-        else:
-            image = example[images]
-        embedding = self.run(image)
-        example['embedding'] = embedding
+        is_batched = isinstance(example[images], list) and isinstance(example[images][0], (list, Image.Image))
+
+        try:
+            if is_batched:
+                embeddings = []
+                for img_list in example[images]:
+                    # Handle the case where img_list could be a list of images
+                    image = img_list[0] if isinstance(img_list, list) else img_list
+
+                    # Ensure that image is a valid PIL image
+                    if not isinstance(image, Image.Image):
+                        raise ValueError(f"Expected a PIL image but got {type(image)}")
+
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+
+                    # Run embedding generation on the valid image
+                    embedding = self.run(image)
+                    embeddings.append(embedding)
+
+                example['embedding'] = embeddings
+
+            else:
+                image = example[images][0] if isinstance(example[images], list) else example[images]
+
+                # Ensure that image is a valid PIL image
+                if not isinstance(image, Image.Image):
+                    raise ValueError(f"Expected a PIL image but got {type(image)}")
+
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+
+                # Run embedding generation on the valid image
+                embedding = self.run(image)
+                example['embedding'] = embedding
+
+        except Exception as e:
+            print(f"Error processing image, skipping: {e}")
+            if is_batched:
+                example['embedding'] = [None] * len(example[images])
+            else:
+                example['embedding'] = None
+
         return example
+
 
 class TagFilter(MultiModalEmbeddingModel):
     def get_best_matching_tag(self, image_embeddings: np.ndarray, tags: list):
@@ -92,20 +130,44 @@ class TagFilter(MultiModalEmbeddingModel):
 
     def apply_transform(self, example, tags=[]):
         """
-        Process a single row in the dataset, adding embeddings from images.
+        Process one or more rows in the dataset, adding best matching tags from embeddings.
 
         Args:
-            example: A single example from the dataset.
-            images: Column name for image column.
+            example: A single example or a batch of examples from the dataset.
+            tags: A list of tags to match the embeddings with.
 
         Returns:
-            Updated example with image embeddings.
+            Updated example(s) with best matching tag(s).
         """
+        # Detect if input is batched by checking if the first element of 'embedding' is a list
+        is_batched = isinstance(example['embedding'], list) and isinstance(example['embedding'][0], list)
+
         try:
-            example['tag'] = self.get_best_matching_tag(
-                example['embedding'], tags
-            )
+            if is_batched:
+                best_tags = []
+                for embedding in example['embedding']:
+                    # Ensure the embedding is valid
+                    if embedding is None:
+                        best_tag = None
+                    else:
+                        best_tag = self.get_best_matching_tag(embedding, tags)
+                    best_tags.append(best_tag)
+                example['tag'] = best_tags
+
+            else:
+                embedding = example['embedding']
+                # Ensure the embedding is valid
+                if embedding is None:
+                    example['tag'] = None
+                else:
+                    example['tag'] = self.get_best_matching_tag(embedding, tags)
+
         except Exception as e:
-            print(f"Error processing image, skipping: {e}")
-            example['tag'] = None
+            print(f"Error processing embedding, skipping: {e}")
+            if is_batched:
+                example['tag'] = [None] * len(example['embedding'])
+            else:
+                example['tag'] = None
+
         return example
+

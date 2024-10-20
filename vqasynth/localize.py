@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import random
 import spacy
+from PIL import Image
 
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoModelForCausalLM, AutoProcessor
@@ -73,7 +74,7 @@ class CaptionLocalizer:
 
         return iou
 
-    def filter_objects(self, data, iou_threshold=0.5):
+    def bbox_dedupe(self, data, iou_threshold=0.5):
         filtered_bboxes = []
         filtered_labels = []
 
@@ -83,7 +84,7 @@ class CaptionLocalizer:
             is_duplicate = False
 
             for j in range(len(filtered_bboxes)):
-                if current_label == filtered_labels[j] and self.compute_iou(current_box, filtered_bboxes[j]) > iou_threshold:
+                if current_label == filtered_labels[j]: 
                     is_duplicate = True
                     break
 
@@ -149,7 +150,7 @@ class CaptionLocalizer:
                 )
                 caption_bbox = parsed_answer[task]
                 caption_bbox["caption"] = self.caption_refiner(caption)
-                caption_bbox = self.filter_objects(caption_bbox)
+                caption_bbox = self.bbox_dedupe(caption_bbox)
 
                 if len(caption_bbox['bboxes']) > 1:
                     flip = random.choice(['heads', 'tails'])
@@ -304,27 +305,73 @@ class Localizer:
 
     def apply_transform(self, example, images):
         """
-        Process a single row in the dataset, adding masks, bboxes, and captions.
+        Process one or more rows in the dataset, adding masks, bboxes, and captions.
 
         Args:
-            example: A single example from the dataset.
+            example: A single example or a batch of examples from the dataset.
             images: The column in the dataset containing the images.
 
         Returns:
-            Updated example with masks, bboxes, and captions.
+            Updated example(s) with masks, bboxes, and captions.
         """
+        is_batched = isinstance(example[images], list) and isinstance(example[images][0], (list, Image.Image))
+
         try:
-            if isinstance(example[images], list):
-                image = example[images][0]
+            if is_batched:
+                # Batch processing
+                all_masks = []
+                all_bboxes = []
+                all_captions = []
+
+                for img_list in example[images]:
+                    # Handle cases where img_list could be a list of images
+                    image = img_list[0] if isinstance(img_list, list) else img_list
+
+                    if not isinstance(image, Image.Image):
+                        raise ValueError(f"Expected a PIL image but got {type(image)}")
+
+                    # Ensure image is RGB
+                    if image.mode != 'RGB':
+                        image = image.convert('RGB')
+
+                    # Run mask, bbox, and caption extraction
+                    masks, bboxes, captions = self.run(image)
+                    all_masks.append(masks)
+                    all_bboxes.append(bboxes)
+                    all_captions.append(captions)
+
+                # Update the example with lists of results for batch processing
+                example['masks'] = all_masks
+                example['bboxes'] = all_bboxes
+                example['captions'] = all_captions
+
             else:
-                image = example[images]
-            masks, bboxes, captions = self.run(image)
-            example['masks'] = masks
-            example['bboxes'] = bboxes
-            example['captions'] = captions
+                # Single example processing
+                image = example[images][0] if isinstance(example[images], list) else example[images]
+
+                if not isinstance(image, Image.Image):
+                    raise ValueError(f"Expected a PIL image but got {type(image)}")
+
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+
+                # Run mask, bbox, and caption extraction for a single image
+                masks, bboxes, captions = self.run(image)
+                example['masks'] = masks
+                example['bboxes'] = bboxes
+                example['captions'] = captions
+
         except Exception as e:
             print(f"Error processing image, skipping: {e}")
-            example['masks'] = None
-            example['bboxes'] = None
-            example['captions'] = None
+            if is_batched:
+                # Handle batch case errors by returning lists of None
+                example['masks'] = [None] * len(example[images])
+                example['bboxes'] = [None] * len(example[images])
+                example['captions'] = [None] * len(example[images])
+            else:
+                # Handle single example case errors by returning None
+                example['masks'] = None
+                example['bboxes'] = None
+                example['captions'] = None
+
         return example

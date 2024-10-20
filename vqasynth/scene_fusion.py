@@ -5,6 +5,7 @@ import random
 import numpy as np
 import open3d as o3d
 from pathlib import Path
+from PIL import Image
 
 
 class SpatialSceneConstructor:
@@ -100,13 +101,6 @@ class SpatialSceneConstructor:
             return pcd, canonicalized, transformation
         else:
             return pcd, canonicalized, None
-
-    def calculate_distances_between_point_clouds(self, A, B):
-        dist_pcd1_to_pcd2 = np.asarray(A.compute_point_cloud_distance(B))
-        dist_pcd2_to_pcd1 = np.asarray(B.compute_point_cloud_distance(A))
-        combined_distances = np.concatenate((dist_pcd1_to_pcd2, dist_pcd2_to_pcd1))
-        avg_dist = np.mean(combined_distances)
-        return avg_dist
 
     def calculate_centroid(self, pcd):
         """Calculate the centroid of a point cloud."""
@@ -217,36 +211,85 @@ class SpatialSceneConstructor:
 
     def apply_transform(self, example, idx, output_dir, images):
         """
-        Process a single row of the dataset to generate point clouds and canonicalization status.
+        Process one or more rows of the dataset to generate point clouds and canonicalization status.
 
         Args:
-            example (dict): A single example from the dataset.
-            idx (int): The index of the current example.
+            example (dict): A single example or a batch of examples from the dataset.
+            idx (int or list): The index or indices of the current example(s).
             output_dir (str): The directory where the output point clouds will be saved.
             images (str): The column containing image data.
 
         Returns:
-            dict: Updated example with point clouds and canonicalization status.
+            dict: Updated example(s) with point clouds and canonicalization status.
         """
-        # Run spatial scene constructor and get point cloud data and canonicalization flag
+        is_batched = isinstance(example[images], list) and isinstance(example[images][0], (list, Image.Image))
+
         try:
-            if isinstance(example[images], list):
-                image = example[images][0]
+            if is_batched:
+                pointclouds = []
+                canonicalization_status = []
+
+                for i, img_list in enumerate(example[images]):
+                    # Handle cases where img_list might be a list itself or a single image
+                    if isinstance(img_list, list):
+                        image = img_list[0] if isinstance(img_list[0], Image.Image) else img_list
+                    else:
+                        image = img_list
+
+                    # Ensure image is a valid PIL image and convert to RGB if needed
+                    if not isinstance(image, Image.Image):
+                        raise ValueError(f"Expected a PIL image but got {type(image)} at index {i}")
+                    if image.mode != 'RGB':
+                        image = image.convert('RGB')
+
+                    # Call the run function with the valid image
+                    pcd_data, canonicalized = self.run(
+                        str(idx[i]),
+                        image,
+                        example["depth_map"][i],
+                        example["focallength"][i],
+                        example["masks"][i],
+                        output_dir
+                    )
+                    pointclouds.append(pcd_data)
+                    canonicalization_status.append(canonicalized)
+
+                example["pointclouds"] = pointclouds
+                example["is_canonicalized"] = canonicalization_status
+
             else:
-                image = example[images]
-            pcd_data, canonicalized = self.run(
-                str(idx),  
-                image,  
-                example["depth_map"],
-                example["focallength"],
-                example["masks"],
-                output_dir
-            )
-            # Add point cloud data and canonicalization flag to the example
-            example["pointclouds"] = pcd_data
-            example["is_canonicalized"] = canonicalized
+                # Single-image case
+                image = example[images][0] if isinstance(example[images], list) else example[images]
+
+                # Ensure image is a valid PIL image and convert to RGB if needed
+                if not isinstance(image, Image.Image):
+                    raise ValueError("The image is not a valid PIL image.")
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+
+                # Call the run function with the valid image
+                pcd_data, canonicalized = self.run(
+                    str(idx),
+                    image,
+                    example["depth_map"],
+                    example["focallength"],
+                    example["masks"],
+                    output_dir
+                )
+
+                # Ensure the output is a list, even for single examples
+                example["pointclouds"] = [pcd_data]
+                example["is_canonicalized"] = [canonicalized]
+
         except Exception as e:
             print(f"Error processing image, skipping: {e}")
-            example["pointclouds"] = None
-            example["is_canonicalized"] = None
+            # Set outputs to None for the failed cases
+            if is_batched:
+                example["pointclouds"] = [None] * len(example[images])
+                example["is_canonicalized"] = [None] * len(example[images])
+            else:
+                example["pointclouds"] = [None]
+                example["is_canonicalized"] = [None]
+
         return example
+

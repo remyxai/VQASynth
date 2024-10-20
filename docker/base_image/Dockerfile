@@ -21,8 +21,8 @@ RUN wget https://bootstrap.pypa.io/get-pip.py && \
     python3 get-pip.py && \
     rm get-pip.py
 
-RUN python3 -m pip install --upgrade pip && python3 -m pip install setuptools==65.0.1 wheel
-RUN pip install git+https://github.com/explosion/spaCy.git
+RUN python3 -m pip install --upgrade pip && python3 -m pip install setuptools==65.0.1 wheel spacy==3.7.5
+RUN python3 -m spacy download en_core_web_sm
 
 RUN python3 -m pip install numpy==1.21.0
 RUN python3 -m pip install scikit-learn==1.0.2 --prefer-binary
