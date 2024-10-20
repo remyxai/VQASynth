@@ -65,30 +65,24 @@ class SpatialSceneConstructor:
         if len(inliers) / len(pcd.points) > canonicalize_threshold:
             canonicalized = True
 
-            # Ensure the plane normal points upwards
             if np.dot(plane_model[:3], [0, 1, 0]) < 0:
                 plane_model = -plane_model
 
-            # Normalize the plane normal vector
             normal = plane_model[:3] / np.linalg.norm(plane_model[:3])
 
-            # Compute the new basis vectors
             new_y = normal
             new_x = np.cross(new_y, [0, 0, -1])
             new_x /= np.linalg.norm(new_x)
             new_z = np.cross(new_x, new_y)
 
-            # Create the transformation matrix
             transformation = np.identity(4)
             transformation[:3, :3] = np.vstack((new_x, new_y, new_z)).T
             transformation[:3, 3] = -np.dot(
                 transformation[:3, :3], pcd.points[inliers[0]]
             )
 
-            # Apply the transformation
             pcd.transform(transformation)
 
-            # Additional 180-degree rotation around the Z-axis
             rotation_z_180 = np.array(
                 [
                     [np.cos(np.pi), -np.sin(np.pi), 0],
@@ -139,7 +133,7 @@ class SpatialSceneConstructor:
         float: The height of the bounding box.
         """
         aabb = pcd.get_axis_aligned_bounding_box()
-        return aabb.get_extent()[1]  # Assuming the Y-axis is the up-direction
+        return aabb.get_extent()[1]
 
     def compare_bounding_box_height(self, pcd_i, pcd_j):
         """
@@ -190,7 +184,6 @@ class SpatialSceneConstructor:
 
             mask_binary = mask.astype(bool)
 
-            # Apply the mask to the full point cloud by zeroing out points that don't match the mask
             mask_indices = np.argwhere(mask_binary)
             masked_pcd = original_pcd.select_by_index(mask_indices.flatten(), invert=False)
 
@@ -230,19 +223,16 @@ class SpatialSceneConstructor:
                 canonicalization_status = []
 
                 for i, img_list in enumerate(example[images]):
-                    # Handle cases where img_list might be a list itself or a single image
                     if isinstance(img_list, list):
                         image = img_list[0] if isinstance(img_list[0], Image.Image) else img_list
                     else:
                         image = img_list
 
-                    # Ensure image is a valid PIL image and convert to RGB if needed
                     if not isinstance(image, Image.Image):
                         raise ValueError(f"Expected a PIL image but got {type(image)} at index {i}")
                     if image.mode != 'RGB':
                         image = image.convert('RGB')
 
-                    # Call the run function with the valid image
                     pcd_data, canonicalized = self.run(
                         str(idx[i]),
                         image,
@@ -258,16 +248,13 @@ class SpatialSceneConstructor:
                 example["is_canonicalized"] = canonicalization_status
 
             else:
-                # Single-image case
                 image = example[images][0] if isinstance(example[images], list) else example[images]
 
-                # Ensure image is a valid PIL image and convert to RGB if needed
                 if not isinstance(image, Image.Image):
                     raise ValueError("The image is not a valid PIL image.")
                 if image.mode != 'RGB':
                     image = image.convert('RGB')
 
-                # Call the run function with the valid image
                 pcd_data, canonicalized = self.run(
                     str(idx),
                     image,
@@ -277,13 +264,11 @@ class SpatialSceneConstructor:
                     output_dir
                 )
 
-                # Ensure the output is a list, even for single examples
                 example["pointclouds"] = [pcd_data]
                 example["is_canonicalized"] = [canonicalized]
 
         except Exception as e:
             print(f"Error processing image, skipping: {e}")
-            # Set outputs to None for the failed cases
             if is_batched:
                 example["pointclouds"] = [None] * len(example[images])
                 example["is_canonicalized"] = [None] * len(example[images])

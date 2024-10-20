@@ -21,21 +21,12 @@ class PromptGenerator():
         Returns:
             str: A string representation of the human-readable distance with units.
         """
-        # Adaptive scaling: reduce the scaling factor for very large distances
-        if distance_meters > 5:
-            scaling_factor = 5  # Reduce the scaling for large distances
-        elif distance_meters < 0.5:
-            scaling_factor = 50  # Increase scaling for small distances
-
-        # Apply the adaptive scaling factor
         distance_meters *= scaling_factor
 
-        # Handle extremely small distances
         if distance_meters < 0.01:  # Less than 1 cm
             return "less than a centimeter"
 
-        # Define the choices with units included
-        if distance_meters < 1:  # For distances less than 1 meter
+        if distance_meters < 1:
             choices = [
                 (
                     round(distance_meters * 100, 2),
@@ -43,12 +34,12 @@ class PromptGenerator():
                     0.6,
                 ),  # Centimeters for very small distances
                 (
-                    round(distance_meters * 39.37, 2),  # Convert to inches
+                    round(distance_meters * 39.37, 2),
                     "inches",
                     0.4,
                 ),  # Inches for small distances
             ]
-        elif distance_meters < 3:  # For distances less than 3 meters
+        elif distance_meters < 3:
             choices = [
                 (
                     round(distance_meters, 2),
@@ -56,12 +47,12 @@ class PromptGenerator():
                     0.6,
                 ),  # Meters for clarity
                 (
-                    round(distance_meters * 3.281, 2),  # Convert to feet
+                    round(distance_meters * 3.281, 2),
                     "feet",
                     0.4,
-                ),  # Feet for common indoor distances
+                ),
             ]
-        else:  # For distances greater than 3 meters
+        else:
             choices = [
                 (
                     round(distance_meters, 2),
@@ -75,15 +66,13 @@ class PromptGenerator():
                 ),  # Feet for additional context
             ]
 
-        # Normalize probabilities and select based on distribution
         total_probability = sum(prob for _, _, prob in choices)
         cumulative_distribution = []
         cumulative_sum = 0
         for value, unit, probability in choices:
-            cumulative_sum += probability / total_probability  # Normalize probabilities
+            cumulative_sum += probability / total_probability
             cumulative_distribution.append((cumulative_sum, value, unit))
 
-        # Randomly choose based on the cumulative distribution
         r = random.random()
         for cumulative_prob, value, unit in cumulative_distribution:
             if r < cumulative_prob:
@@ -91,11 +80,9 @@ class PromptGenerator():
                 selected_unit = unit
                 break
         else:
-            # Fallback to the last choice in case of any issues
             selected_value = choices[-1][0]
             selected_unit = choices[-1][1]
 
-        # Final guard check before returning: ensure no zero or NaN values
         if selected_value <= 0 or math.isnan(selected_value):
             return "less than a centimeter"
 
@@ -527,7 +514,6 @@ class PromptGenerator():
         question_template = random.choice(template_questions)
         answer_template = random.choice(template_answers)
 
-        # Replace placeholders with actual values
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = (
             answer_template.replace("[A]", A_desc)
@@ -535,7 +521,6 @@ class PromptGenerator():
             .replace("[X]", human_readable_dist)
         )
 
-        # Add to the dataset
         return question + " Answer: " + answer
 
 
@@ -646,7 +631,6 @@ class PromptGenerator():
             for prompt_func in selected_predicates_choices:
                 pair_results.append(prompt_func(A, B))
 
-            # Run each of the distance functions
             distance = np.asarray(A[1].compute_point_cloud_distance(B[1])).mean()
             distance = self.human_like_distance(distance)
             pair_results.append(
@@ -702,7 +686,6 @@ class PromptGenerator():
                     "role": "user"
                 })
 
-                # Add assistant response
                 messages.append({
                     "content": [{"index": None, "text": answer.strip(), "type": "text"}],
                     "role": "assistant"

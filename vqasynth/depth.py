@@ -110,7 +110,6 @@ class DepthEstimator:
         max_depth = predicted_depth.max()
         normalized_depth = (predicted_depth - min_depth) / (max_depth - min_depth)
 
-        # Invert the normalized depth to correct the light/dark inversion
         inverted_depth = 1 - normalized_depth
 
         depth_map_resized = cv2.resize(inverted_depth, original_size, interpolation=cv2.INTER_LINEAR)
@@ -153,23 +152,18 @@ class DepthEstimator:
 
         try:
             if is_batched:
-                # Batch processing
                 depth_maps = []
                 focallengths = []
 
                 for img_list in example[images]:
-                    # Handle cases where img_list could be a list of images
                     image = img_list[0] if isinstance(img_list, list) else img_list
 
-                    # Ensure that image is a valid PIL image
                     if not isinstance(image, Image.Image):
                         raise ValueError(f"Expected a PIL image but got {type(image)}")
 
-                    # Convert to RGB if needed
                     if image.mode != "RGB":
                         image = image.convert("RGB")
 
-                    # Run depth estimation and focal length calculation
                     depth_map, focallength = self.run(image)
                     depth_maps.append(depth_map)
                     focallengths.append(focallength)
@@ -178,18 +172,14 @@ class DepthEstimator:
                 example['focallength'] = focallengths
 
             else:
-                # Single example processing
                 image = example[images][0] if isinstance(example[images], list) else example[images]
 
-                # Ensure that image is a valid PIL image
                 if not isinstance(image, Image.Image):
                     raise ValueError(f"Expected a PIL image but got {type(image)}")
 
-                # Convert to RGB if needed
                 if image.mode != "RGB":
                     image = image.convert("RGB")
 
-                # Run depth estimation and focal length calculation
                 depth_map, focallength = self.run(image)
                 example['depth_map'] = depth_map
                 example['focallength'] = focallength
@@ -197,11 +187,9 @@ class DepthEstimator:
         except Exception as e:
             print(f"Error processing image, skipping: {e}")
             if is_batched:
-                # For batched inputs, return lists of None
                 example['depth_map'] = [None] * len(example[images])
                 example['focallength'] = [None] * len(example[images])
             else:
-                # For single inputs, return None
                 example['depth_map'] = None
                 example['focallength'] = None
 

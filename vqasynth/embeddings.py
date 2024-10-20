@@ -43,17 +43,14 @@ class EmbeddingGenerator(MultiModalEmbeddingModel):
             if is_batched:
                 embeddings = []
                 for img_list in example[images]:
-                    # Handle the case where img_list could be a list of images
                     image = img_list[0] if isinstance(img_list, list) else img_list
 
-                    # Ensure that image is a valid PIL image
                     if not isinstance(image, Image.Image):
                         raise ValueError(f"Expected a PIL image but got {type(image)}")
 
                     if image.mode != "RGB":
                         image = image.convert("RGB")
 
-                    # Run embedding generation on the valid image
                     embedding = self.run(image)
                     embeddings.append(embedding)
 
@@ -62,14 +59,12 @@ class EmbeddingGenerator(MultiModalEmbeddingModel):
             else:
                 image = example[images][0] if isinstance(example[images], list) else example[images]
 
-                # Ensure that image is a valid PIL image
                 if not isinstance(image, Image.Image):
                     raise ValueError(f"Expected a PIL image but got {type(image)}")
 
                 if image.mode != "RGB":
                     image = image.convert("RGB")
 
-                # Run embedding generation on the valid image
                 embedding = self.run(image)
                 example['embedding'] = embedding
 
@@ -139,14 +134,12 @@ class TagFilter(MultiModalEmbeddingModel):
         Returns:
             Updated example(s) with best matching tag(s).
         """
-        # Detect if input is batched by checking if the first element of 'embedding' is a list
         is_batched = isinstance(example['embedding'], list) and isinstance(example['embedding'][0], list)
 
         try:
             if is_batched:
                 best_tags = []
                 for embedding in example['embedding']:
-                    # Ensure the embedding is valid
                     if embedding is None:
                         best_tag = None
                     else:
@@ -156,7 +149,6 @@ class TagFilter(MultiModalEmbeddingModel):
 
             else:
                 embedding = example['embedding']
-                # Ensure the embedding is valid
                 if embedding is None:
                     example['tag'] = None
                 else:

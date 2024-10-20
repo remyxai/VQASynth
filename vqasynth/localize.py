@@ -8,9 +8,6 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoModelForCausalLM, AutoProcessor
 
 
-nlp = spacy.load("en_core_web_sm")
-
-
 class CaptionLocalizer:
     def __init__(self, model_name="microsoft/Florence-2-base", device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -21,6 +18,7 @@ class CaptionLocalizer:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=self.torch_dtype, trust_remote_code=True
         ).to(self.device)
+        self.nlp = spacy.load("en_core_web_sm")
 
     def find_subject(self, doc):
         for token in doc:
@@ -36,7 +34,7 @@ class CaptionLocalizer:
         return descriptions
 
     def caption_refiner(self, caption):
-        doc = nlp(caption)
+        doc = self.nlp(caption)
         subject, action_verb = self.find_subject(doc)
         if action_verb:
             descriptions = self.extract_descriptions(doc, action_verb)
@@ -45,31 +43,24 @@ class CaptionLocalizer:
             return caption
 
     def compute_iou(self, box1, box2):
-        # Extract the coordinates
         x1_min, y1_min, x1_max, y1_max = box1
         x2_min, y2_min, x2_max, y2_max = box2
 
-        # Compute the intersection rectangle
         x_inter_min = max(x1_min, x2_min)
         y_inter_min = max(y1_min, y2_min)
         x_inter_max = min(x1_max, x2_max)
         y_inter_max = min(y1_max, y2_max)
 
-        # Intersection width and height
         inter_width = max(0, x_inter_max - x_inter_min)
         inter_height = max(0, y_inter_max - y_inter_min)
 
-        # Intersection area
         inter_area = inter_width * inter_height
 
-        # Boxes areas
         box1_area = (x1_max - x1_min) * (y1_max - y1_min)
         box2_area = (x2_max - x2_min) * (y2_max - y2_min)
 
-        # Union area
         union_area = box1_area + box2_area - inter_area
 
-        # Intersection over Union
         iou = inter_area / union_area if union_area != 0 else 0
 
         return iou
@@ -165,7 +156,6 @@ class CaptionLocalizer:
 
                 captioned_bboxes.append(caption_bbox)
 
-        # Final filtering based on bbox distances
         bboxes = [item['bboxes'][0] for item in captioned_bboxes]
         n = len(bboxes)
         distance_matrix = np.zeros((n, n))
@@ -211,59 +201,6 @@ class Localizer:
     def __init__(self):
         self.caption_localizer = CaptionLocalizer()
         self.location_refiner = LocationRefiner()
-
-    def calculate_iou(self, bbox1, bbox2):
-        # Extract coordinates
-        x1_min, y1_min, x1_max, y1_max = bbox1
-        x2_min, y2_min, x2_max, y2_max = bbox2
-
-        # Calculate intersection
-        inter_x_min = max(x1_min, x2_min)
-        inter_y_min = max(y1_min, y2_min)
-        inter_x_max = min(x1_max, x2_max)
-        inter_y_max = min(y1_max, y2_max)
-
-        inter_area = max(0, inter_x_max - inter_x_min) * max(0, inter_y_max - inter_y_min)
-
-        # Calculate union
-        bbox1_area = (x1_max - x1_min) * (y1_max - y1_min)
-        bbox2_area = (x2_max - x2_min) * (y2_max - y2_min)
-
-        union_area = bbox1_area + bbox2_area - inter_area
-
-        # Avoid division by zero
-        if union_area == 0:
-            return 0.0
-
-        return inter_area / union_area
-
-
-    def filter_most_separated_objects(self, masks, bboxes, captions, top_k=3):
-        num_objects = len(bboxes)
-
-        # Return all objects if there are less than or equal to top_k objects
-        if num_objects <= top_k:
-            return masks, bboxes, captions
-
-        # Calculate pairwise IoU for all bounding boxes
-        iou_matrix = np.zeros((num_objects, num_objects))
-        for i in range(num_objects):
-            for j in range(i + 1, num_objects):
-                iou_matrix[i, j] = self.calculate_iou(bboxes[i], bboxes[j])
-                iou_matrix[j, i] = iou_matrix[i, j]  # IoU is symmetric
-
-        # Get sum of IoU for each object (lower sum indicates more separated)
-        iou_sums = iou_matrix.sum(axis=1)
-
-        # Select top_k objects with the lowest IoU sums (most separated objects)
-        selected_indices = np.argsort(iou_sums)[:top_k]
-
-        # Filter masks, bboxes, and captions based on selected indices
-        filtered_masks = [masks[i] for i in selected_indices]
-        filtered_bboxes = [bboxes[i] for i in selected_indices]
-        filtered_captions = [captions[i] for i in selected_indices]
-
-        return filtered_masks, filtered_bboxes, filtered_captions
 
     def run(self, image):
         """
@@ -318,35 +255,29 @@ class Localizer:
 
         try:
             if is_batched:
-                # Batch processing
                 all_masks = []
                 all_bboxes = []
                 all_captions = []
 
                 for img_list in example[images]:
-                    # Handle cases where img_list could be a list of images
                     image = img_list[0] if isinstance(img_list, list) else img_list
 
                     if not isinstance(image, Image.Image):
                         raise ValueError(f"Expected a PIL image but got {type(image)}")
 
-                    # Ensure image is RGB
                     if image.mode != 'RGB':
                         image = image.convert('RGB')
 
-                    # Run mask, bbox, and caption extraction
                     masks, bboxes, captions = self.run(image)
                     all_masks.append(masks)
                     all_bboxes.append(bboxes)
                     all_captions.append(captions)
 
-                # Update the example with lists of results for batch processing
                 example['masks'] = all_masks
                 example['bboxes'] = all_bboxes
                 example['captions'] = all_captions
 
             else:
-                # Single example processing
                 image = example[images][0] if isinstance(example[images], list) else example[images]
 
                 if not isinstance(image, Image.Image):
@@ -355,7 +286,6 @@ class Localizer:
                 if image.mode != 'RGB':
                     image = image.convert('RGB')
 
-                # Run mask, bbox, and caption extraction for a single image
                 masks, bboxes, captions = self.run(image)
                 example['masks'] = masks
                 example['bboxes'] = bboxes
@@ -364,12 +294,10 @@ class Localizer:
         except Exception as e:
             print(f"Error processing image, skipping: {e}")
             if is_batched:
-                # Handle batch case errors by returning lists of None
                 example['masks'] = [None] * len(example[images])
                 example['bboxes'] = [None] * len(example[images])
                 example['captions'] = [None] * len(example[images])
             else:
-                # Handle single example case errors by returning None
                 example['masks'] = None
                 example['bboxes'] = None
                 example['captions'] = None
