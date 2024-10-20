@@ -6,6 +6,17 @@ import numpy as np
 import matplotlib.cm
 from PIL import Image
 
+def filter_null(example):
+    """
+    Filter out rows with None values in any of the columns.
+    Works for both single examples and batched examples.
+    """
+    # If batched (values are lists), we process row-by-row
+    if isinstance(next(iter(example.values())), list):
+        return [all(value is not None for value in row) for row in zip(*example.values())]
+    # Single row case
+    return all(value is not None for value in example.values())
+
 def process_images_in_chunks(image_dir, chunk_size=100):
     """Generator function to yield chunks of images from the directory."""
     chunk = []

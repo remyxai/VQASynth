@@ -6,19 +6,30 @@ import numpy as np
 from PIL import Image
 from vqasynth.datasets import Dataloader
 from vqasynth.depth import DepthEstimator
+from vqasynth.utils import filter_null
 
 
 def main(output_dir, source_repo_id, images):
     dataloader = Dataloader(output_dir)
     depth = DepthEstimator()
 
+    # Load dataset
     dataset = dataloader.load_dataset(source_repo_id)
-    dataset = dataset.map(lambda example: depth.apply_transform(example, images))
 
-    # filter nulls
-    dataset = dataset.filter(lambda example: all(value is not None for value in example.values()))
+    # Apply the depth estimator transformation with batching
+    dataset = dataset.map(
+        depth.apply_transform,
+        fn_kwargs={'images': images},
+        batched=True,
+        batch_size=32
+    )
 
+    # Filter out nulls with the updated filter_null function
+    dataset = dataset.filter(filter_null, batched=True, batch_size=32)
+
+    # Save the processed dataset to disk
     dataloader.save_to_disk(dataset)
+
     print("Depth extraction complete")
 
 

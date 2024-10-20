@@ -1,3 +1,4 @@
+import math
 import random
 import numpy as np
 from itertools import combinations
@@ -8,60 +9,85 @@ class PromptGenerator():
     def __init__(self):
         self.spatial_scene_constructor = SpatialSceneConstructor()
 
-    def human_like_distance(self, distance_meters):
-        # Define the choices with units included, focusing on the 0.1 to 10 meters range
-        if distance_meters < 1:  # For distances less than 1 meter
+    def human_like_distance(self, distance_meters, scaling_factor=20):
+        """
+        Converts a distance in meters to a more human-readable format (e.g., centimeters, feet),
+        with an adaptive scaling factor.
+
+        Args:
+            distance_meters (float): The distance in meters.
+            scaling_factor (float): A base scaling factor (default is 20).
+
+        Returns:
+            str: A string representation of the human-readable distance with units.
+        """
+        distance_meters *= scaling_factor
+
+        if distance_meters < 0.01:  # Less than 1 cm
+            return "less than a centimeter"
+
+        if distance_meters < 1:
             choices = [
                 (
                     round(distance_meters * 100, 2),
                     "centimeters",
-                    0.2,
+                    0.6,
                 ),  # Centimeters for very small distances
                 (
-                    round(distance_meters * 39.3701, 2),
+                    round(distance_meters * 39.37, 2),
                     "inches",
-                    0.8,
-                ),  # Inches for the majority of cases under 1 meter
+                    0.4,
+                ),  # Inches for small distances
             ]
-        elif distance_meters < 3:  # For distances less than 3 meters
+        elif distance_meters < 3:
             choices = [
-                (round(distance_meters, 2), "meters", 0.5),
                 (
-                    round(distance_meters * 3.28084, 2),
+                    round(distance_meters, 2),
+                    "meters",
+                    0.6,
+                ),  # Meters for clarity
+                (
+                    round(distance_meters * 3.281, 2),
                     "feet",
-                    0.5,
-                ),  # Feet as a common unit within indoor spaces
+                    0.4,
+                ),
             ]
-        else:  # For distances from 3 up to 10 meters
+        else:
             choices = [
                 (
                     round(distance_meters, 2),
                     "meters",
                     0.7,
-                ),  # Meters for clarity and international understanding
+                ),  # Meters for larger distances
                 (
-                    round(distance_meters * 3.28084, 2),
+                    round(distance_meters * 3.281, 2),
                     "feet",
                     0.3,
                 ),  # Feet for additional context
             ]
 
-        # Normalize probabilities and make a selection
         total_probability = sum(prob for _, _, prob in choices)
         cumulative_distribution = []
         cumulative_sum = 0
         for value, unit, probability in choices:
-            cumulative_sum += probability / total_probability  # Normalize probabilities
+            cumulative_sum += probability / total_probability
             cumulative_distribution.append((cumulative_sum, value, unit))
 
-        # Randomly choose based on the cumulative distribution
         r = random.random()
         for cumulative_prob, value, unit in cumulative_distribution:
             if r < cumulative_prob:
-                return f"{value} {unit}"
+                selected_value = value
+                selected_unit = unit
+                break
+        else:
+            selected_value = choices[-1][0]
+            selected_unit = choices[-1][1]
 
-        # Fallback to the last choice if something goes wrong
-        return f"{choices[-1][0]} {choices[-1][1]}"
+        if selected_value <= 0 or math.isnan(selected_value):
+            return "less than a centimeter"
+
+        return f"{selected_value} {selected_unit}"
+
 
     def left_predicate(self, A, B):
         template_questions = left_predicate_questions
@@ -488,7 +514,6 @@ class PromptGenerator():
         question_template = random.choice(template_questions)
         answer_template = random.choice(template_answers)
 
-        # Replace placeholders with actual values
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = (
             answer_template.replace("[A]", A_desc)
@@ -496,7 +521,6 @@ class PromptGenerator():
             .replace("[X]", human_readable_dist)
         )
 
-        # Add to the dataset
         return question + " Answer: " + answer
 
 
@@ -567,37 +591,38 @@ class PromptGenerator():
 
     def evaluate_predicates_on_pairs(self, pairs, is_canonicalized):
         all_prompt_variants = [
-            self.left_predicate,
-            self.right_predicate,
-            self.wide_predicate,
-            self.big_predicate,
-            self.thin_predicate,
-            self.small_predicate,
-            self.behind_predicate,
-            self.front_predicate,
-            self.left_choice,
-            self.right_choice,
+            (self.left_predicate, 1),
+            (self.right_predicate, 1),
+            (self.wide_predicate, 2),
+            (self.big_predicate, 1),
+            (self.thin_predicate, 2),
+            (self.small_predicate, 1),
+            (self.behind_predicate, 1),
+            (self.front_predicate, 1),
+            (self.left_choice, 1),
+            (self.right_choice, 1),
         ]
 
         add_canonicalized = [
-                self.tall_choice,
-                self.above_predicate,
-                self.below_predicate,
-                self.short_choice,
-                self.below_choice,
-                self.tall_predicate,
-                self.short_predicate,
-                self.above_choice,
-                self.vertical_distance_data,
-                self.horizontal_distance_data,
-                self.width_data,
-                self.height_data,
+                (self.tall_choice, 2), 
+                (self.above_predicate, 1),
+                (self.below_predicate, 1),
+                (self.short_choice, 2), 
+                (self.below_choice, 1),
+                (self.tall_predicate, 2),
+                (self.short_predicate, 2),
+                (self.above_choice, 1),
+                (self.vertical_distance_data, 3),
+                (self.horizontal_distance_data, 3),
+                (self.width_data, 3),
+                (self.height_data, 3),
             ]
 
         if is_canonicalized:
             all_prompt_variants += add_canonicalized
 
-        selected_predicates_choices = random.sample(all_prompt_variants, 10)
+        functions, weights = zip(*all_prompt_variants)
+        selected_predicates_choices = random.choices(functions, weights=weights, k=10)
 
         results = []
 
@@ -606,8 +631,7 @@ class PromptGenerator():
             for prompt_func in selected_predicates_choices:
                 pair_results.append(prompt_func(A, B))
 
-            # Run each of the distance functions
-            distance = self.spatial_scene_constructor.calculate_distances_between_point_clouds(A[1], B[1])
+            distance = np.asarray(A[1].compute_point_cloud_distance(B[1])).mean()
             distance = self.human_like_distance(distance)
             pair_results.append(
                 self.generate_spatial_reasoning_data(
@@ -635,53 +659,85 @@ class PromptGenerator():
             prompts = []
         return prompts
 
-    def apply_transform(self, example):
+    def create_messages_from_prompts(self, prompts):
         """
-        Process a single row in the dataset, adding depth map and focal length.
+        Converts a list of prompts into structured messages for the dataset.
 
         Args:
-            example: A single example from the dataset.
-            images: The column in the dataset containing the images.
+            prompts (list): A list of prompt strings.
 
         Returns:
-            Updated example with depth map and focal length.
+            A list of message dictionaries formatted for user and assistant roles.
         """
+        messages = []
+        first_prompt = True
+
+        for prompt in prompts:
+            if 'Answer: ' in prompt:
+                question, answer = prompt.split('Answer: ', 1)
+
+                # Add user message (include image only for the first prompt)
+                content = [{"index": None, "text": question.strip(), "type": "text"}]
+                if first_prompt:
+                    content.insert(0, {"index": 0, "text": None, "type": "image"})
+
+                messages.append({
+                    "content": content,
+                    "role": "user"
+                })
+
+                messages.append({
+                    "content": [{"index": None, "text": answer.strip(), "type": "text"}],
+                    "role": "assistant"
+                })
+
+                first_prompt = False
+
+        return messages
+
+    def apply_transform(self, example):
+        """
+        Process one or more rows in the dataset, adding prompts and messages.
+
+        Args:
+            example: A single example or a batch of examples from the dataset.
+
+        Returns:
+            Updated example(s) with prompts and messages, or None values on failure.
+        """
+        is_batched = isinstance(example['captions'], list) and isinstance(example['captions'][0], list)
+
         try:
-            example['prompts'] = self.run(
-                example["captions"],
-                example["pointclouds"],
-                example["is_canonicalized"]
-            )
+            if is_batched:
+                prompts_list = []
+                messages_list = []
 
-            messages = []
-            first_prompt = True
+                for i, captions in enumerate(example['captions']):
+                    prompts = self.run(
+                        captions,
+                        example['pointclouds'][i],
+                        example['is_canonicalized'][i]
+                    )
+                    prompts_list.append(prompts)
+                    messages_list.append(self.create_messages_from_prompts(prompts))
 
-            for prompt in example['prompts']:
-                if 'Answer: ' in prompt:
-                    question, answer = prompt.split('Answer: ', 1)
+                example['prompts'] = prompts_list
+                example['messages'] = messages_list
+            else:
+                example['prompts'] = self.run(
+                    example["captions"],
+                    example["pointclouds"],
+                    example["is_canonicalized"]
+                )
+                example['messages'] = self.create_messages_from_prompts(example['prompts'])
 
-                    # For the first prompt, include the image tag
-                    if first_prompt:
-                        messages.append({
-                            "content": [{"index": 0, "text": None, "type": "image"}, {"index": None, "text": question.strip(), "type": "text"}],
-                            "role": "user"
-                        })
-                    else:
-                        messages.append({
-                            "content": [{"index": None, "text": question.strip(), "type": "text"}],
-                            "role": "user"
-                        })
-
-                    # Add assistant response
-                    messages.append({
-                        "content": [{"index": None, "text": answer.strip(), "type": "text"}],
-                        "role": "assistant"
-                    })
-                    first_prompt = False
-
-            example['messages'] = messages
         except Exception as e:
-            print(f"Error processing image, skipping: {e}")
-            example['prompts'] = None
-            example['messages'] = None
+            print(f"Error processing example, skipping: {e}")
+            if is_batched:
+                example['prompts'] = [None] * len(example['captions'])
+                example['messages'] = [None] * len(example['captions'])
+            else:
+                example['prompts'] = None
+                example['messages'] = None
+
         return example

@@ -5,6 +5,7 @@ import random
 import numpy as np
 import open3d as o3d
 from pathlib import Path
+from PIL import Image
 
 
 class SpatialSceneConstructor:
@@ -38,8 +39,8 @@ class SpatialSceneConstructor:
         rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
             o3d.geometry.Image(rgb_image),
             o3d.geometry.Image(depth_image),
-            depth_scale=1.0,
-            depth_trunc=10.0,
+            depth_scale=10.0,
+            depth_trunc=100.0,
             convert_rgb_to_intensity=False,
         )
         intrinsic = o3d.camera.PinholeCameraIntrinsic()
@@ -64,30 +65,24 @@ class SpatialSceneConstructor:
         if len(inliers) / len(pcd.points) > canonicalize_threshold:
             canonicalized = True
 
-            # Ensure the plane normal points upwards
             if np.dot(plane_model[:3], [0, 1, 0]) < 0:
                 plane_model = -plane_model
 
-            # Normalize the plane normal vector
             normal = plane_model[:3] / np.linalg.norm(plane_model[:3])
 
-            # Compute the new basis vectors
             new_y = normal
             new_x = np.cross(new_y, [0, 0, -1])
             new_x /= np.linalg.norm(new_x)
             new_z = np.cross(new_x, new_y)
 
-            # Create the transformation matrix
             transformation = np.identity(4)
             transformation[:3, :3] = np.vstack((new_x, new_y, new_z)).T
             transformation[:3, 3] = -np.dot(
                 transformation[:3, :3], pcd.points[inliers[0]]
             )
 
-            # Apply the transformation
             pcd.transform(transformation)
 
-            # Additional 180-degree rotation around the Z-axis
             rotation_z_180 = np.array(
                 [
                     [np.cos(np.pi), -np.sin(np.pi), 0],
@@ -100,13 +95,6 @@ class SpatialSceneConstructor:
             return pcd, canonicalized, transformation
         else:
             return pcd, canonicalized, None
-
-    def calculate_distances_between_point_clouds(self, A, B):
-        dist_pcd1_to_pcd2 = np.asarray(A.compute_point_cloud_distance(B))
-        dist_pcd2_to_pcd1 = np.asarray(B.compute_point_cloud_distance(A))
-        combined_distances = np.concatenate((dist_pcd1_to_pcd2, dist_pcd2_to_pcd1))
-        avg_dist = np.mean(combined_distances)
-        return avg_dist
 
     def calculate_centroid(self, pcd):
         """Calculate the centroid of a point cloud."""
@@ -145,7 +133,7 @@ class SpatialSceneConstructor:
         float: The height of the bounding box.
         """
         aabb = pcd.get_axis_aligned_bounding_box()
-        return aabb.get_extent()[1]  # Assuming the Y-axis is the up-direction
+        return aabb.get_extent()[1]
 
     def compare_bounding_box_height(self, pcd_i, pcd_j):
         """
@@ -176,83 +164,117 @@ class SpatialSceneConstructor:
             "width": width,
             "height": height,
             "fx": focallength,
-            "fy": focallength,
+            "fy": focallength * height / width,
             "cx": width / 2,
             "cy": height / 2,
         }
 
-        point_clouds = []
+        original_pcd = self.create_point_cloud_from_rgbd(original_image_cv, depth_image_cv, intrinsic_parameters)
+
+        pcd, canonicalized, transformation = self.canonicalize_point_cloud(original_pcd, canonicalize_threshold=0.3)
+
+        output_pointcloud_dir = os.path.join(output_dir, "pointclouds")
+        Path(output_pointcloud_dir).mkdir(parents=True, exist_ok=True)
+
         point_cloud_data = []
 
-        original_pcd = self.create_point_cloud_from_rgbd(
-            original_image_cv, depth_image_cv, intrinsic_parameters
-        )
-        pcd, canonicalized, transformation = self.canonicalize_point_cloud(
-            original_pcd, canonicalize_threshold=0.3
-        )
-
-        for i, mask in enumerate(masks):
+        for idx, mask in enumerate(masks):
             if isinstance(mask, list):
                 mask = np.array(mask)
 
             mask_binary = mask.astype(bool)
 
-            masked_rgb = self.apply_mask_to_image(original_image_cv, mask_binary)
-            masked_depth = self.apply_mask_to_image(depth_image_cv, mask_binary)
+            mask_indices = np.argwhere(mask_binary)
+            masked_pcd = original_pcd.select_by_index(mask_indices.flatten(), invert=False)
 
-            pcd = self.create_point_cloud_from_rgbd(
-                masked_rgb, masked_depth, intrinsic_parameters
-            )
-            point_clouds.append(pcd)
+            cl, ind = masked_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+            inlier_cloud = masked_pcd.select_by_index(ind)
 
-        for idx, pcd in enumerate(point_clouds):
-            cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-            inlier_cloud = pcd.select_by_index(ind)
             if canonicalized:
-                pcd.transform(transformation)
+                inlier_cloud.transform(transformation)
+
             pointcloud_filepath = os.path.join(
-                output_dir,
-                "pointclouds",
-                f"pointcloud_{Path(image_filename).stem}_{idx}.pcd",
+                output_pointcloud_dir,
+                f"pointcloud_{Path(image_filename).stem}_{idx}.pcd"
             )
             self.save_pointcloud(inlier_cloud, pointcloud_filepath)
             point_cloud_data.append(pointcloud_filepath)
 
-        # Now, return both point_cloud_data and the canonicalized flag
         return point_cloud_data, canonicalized
 
     def apply_transform(self, example, idx, output_dir, images):
         """
-        Process a single row of the dataset to generate point clouds and canonicalization status.
+        Process one or more rows of the dataset to generate point clouds and canonicalization status.
 
         Args:
-            example (dict): A single example from the dataset.
-            idx (int): The index of the current example.
+            example (dict): A single example or a batch of examples from the dataset.
+            idx (int or list): The index or indices of the current example(s).
             output_dir (str): The directory where the output point clouds will be saved.
             images (str): The column containing image data.
 
         Returns:
-            dict: Updated example with point clouds and canonicalization status.
+            dict: Updated example(s) with point clouds and canonicalization status.
         """
-        # Run spatial scene constructor and get point cloud data and canonicalization flag
+        is_batched = isinstance(example[images], list) and isinstance(example[images][0], (list, Image.Image))
+
         try:
-            if isinstance(example[images], list):
-                image = example[images][0]
+            if is_batched:
+                pointclouds = []
+                canonicalization_status = []
+
+                for i, img_list in enumerate(example[images]):
+                    if isinstance(img_list, list):
+                        image = img_list[0] if isinstance(img_list[0], Image.Image) else img_list
+                    else:
+                        image = img_list
+
+                    if not isinstance(image, Image.Image):
+                        raise ValueError(f"Expected a PIL image but got {type(image)} at index {i}")
+                    if image.mode != 'RGB':
+                        image = image.convert('RGB')
+
+                    pcd_data, canonicalized = self.run(
+                        str(idx[i]),
+                        image,
+                        example["depth_map"][i],
+                        example["focallength"][i],
+                        example["masks"][i],
+                        output_dir
+                    )
+                    pointclouds.append(pcd_data)
+                    canonicalization_status.append(canonicalized)
+
+                example["pointclouds"] = pointclouds
+                example["is_canonicalized"] = canonicalization_status
+
             else:
-                image = example[images]
-            pcd_data, canonicalized = self.run(
-                str(idx),  
-                image,  
-                example["depth_map"],
-                example["focallength"],
-                example["masks"],
-                output_dir
-            )
-            # Add point cloud data and canonicalization flag to the example
-            example["pointclouds"] = pcd_data
-            example["is_canonicalized"] = canonicalized
+                image = example[images][0] if isinstance(example[images], list) else example[images]
+
+                if not isinstance(image, Image.Image):
+                    raise ValueError("The image is not a valid PIL image.")
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+
+                pcd_data, canonicalized = self.run(
+                    str(idx),
+                    image,
+                    example["depth_map"],
+                    example["focallength"],
+                    example["masks"],
+                    output_dir
+                )
+
+                example["pointclouds"] = [pcd_data]
+                example["is_canonicalized"] = [canonicalized]
+
         except Exception as e:
             print(f"Error processing image, skipping: {e}")
-            example["pointclouds"] = None
-            example["is_canonicalized"] = None
+            if is_batched:
+                example["pointclouds"] = [None] * len(example[images])
+                example["is_canonicalized"] = [None] * len(example[images])
+            else:
+                example["pointclouds"] = [None]
+                example["is_canonicalized"] = [None]
+
         return example
+

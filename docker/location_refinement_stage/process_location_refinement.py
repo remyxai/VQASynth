@@ -6,18 +6,29 @@ import numpy as np
 import pandas as pd
 from vqasynth.datasets import Dataloader
 from vqasynth.localize import Localizer
-
+from vqasynth.utils import filter_null
 
 def main(output_dir, source_repo_id, images):
     dataloader = Dataloader(output_dir)
     localizer = Localizer()
 
+    # Load dataset
     dataset = dataloader.load_dataset(source_repo_id)
-    dataset = dataset.map(lambda example: localizer.apply_transform(example, images))
-    # filter nulls
-    dataset = dataset.filter(lambda example: all(value is not None for value in example.values()))
 
+    # Apply the localizer transformation with batching
+    dataset = dataset.map(
+        localizer.apply_transform,
+        fn_kwargs={'images': images},
+        batched=True,
+        batch_size=32
+    )
+
+    # Filter out nulls with the updated filter_null function
+    dataset = dataset.filter(filter_null, batched=True, batch_size=32)
+
+    # Save the processed dataset to disk
     dataloader.save_to_disk(dataset)
+
     print("Localization complete")
 
 

@@ -110,7 +110,6 @@ class DepthEstimator:
         max_depth = predicted_depth.max()
         normalized_depth = (predicted_depth - min_depth) / (max_depth - min_depth)
 
-        # Invert the normalized depth to correct the light/dark inversion
         inverted_depth = 1 - normalized_depth
 
         depth_map_resized = cv2.resize(inverted_depth, original_size, interpolation=cv2.INTER_LINEAR)
@@ -140,32 +139,58 @@ class DepthEstimator:
 
     def apply_transform(self, example, images):
         """
-        Process a single row in the dataset, adding depth map and focal length.
+        Process one or more rows in the dataset, adding depth map and focal length.
 
         Args:
-            example: A single example from the dataset.
+            example: A single example or a batch of examples from the dataset.
             images: The column in the dataset containing the images.
 
         Returns:
-            Updated example with depth map and focal length, or empty values on failure.
+            Updated example(s) with depth map and focal length, or empty values on failure.
         """
+        is_batched = isinstance(example[images], list) and isinstance(example[images][0], (list, Image.Image))
+
         try:
-            if isinstance(example[images], list):
-                image = example[images][0]
+            if is_batched:
+                depth_maps = []
+                focallengths = []
+
+                for img_list in example[images]:
+                    image = img_list[0] if isinstance(img_list, list) else img_list
+
+                    if not isinstance(image, Image.Image):
+                        raise ValueError(f"Expected a PIL image but got {type(image)}")
+
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+
+                    depth_map, focallength = self.run(image)
+                    depth_maps.append(depth_map)
+                    focallengths.append(focallength)
+
+                example['depth_map'] = depth_maps
+                example['focallength'] = focallengths
+
             else:
-                image = example[images]
+                image = example[images][0] if isinstance(example[images], list) else example[images]
 
-            if image.mode != "RGB":
-                image = image.convert("RGB")
+                if not isinstance(image, Image.Image):
+                    raise ValueError(f"Expected a PIL image but got {type(image)}")
 
-            depth_map, focallength = self.run(image)
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
 
-            example['depth_map'] = depth_map
-            example['focallength'] = focallength
+                depth_map, focallength = self.run(image)
+                example['depth_map'] = depth_map
+                example['focallength'] = focallength
+
         except Exception as e:
             print(f"Error processing image, skipping: {e}")
-            example['depth_map'] = None
-            example['focallength'] = None
+            if is_batched:
+                example['depth_map'] = [None] * len(example[images])
+                example['focallength'] = [None] * len(example[images])
+            else:
+                example['depth_map'] = None
+                example['focallength'] = None
 
         return example
-
