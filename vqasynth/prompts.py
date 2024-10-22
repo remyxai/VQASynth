@@ -1,3 +1,4 @@
+import re
 import math
 import random
 import numpy as np
@@ -22,9 +23,6 @@ class PromptGenerator():
             str: A string representation of the human-readable distance with units.
         """
         distance_meters *= scaling_factor
-
-        if distance_meters < 0.01:  # Less than 1 cm
-            return "less than a centimeter"
 
         if distance_meters < 1:
             choices = [
@@ -66,27 +64,71 @@ class PromptGenerator():
                 ),  # Feet for additional context
             ]
 
+        # Normalize probabilities and make a selection
         total_probability = sum(prob for _, _, prob in choices)
         cumulative_distribution = []
         cumulative_sum = 0
         for value, unit, probability in choices:
-            cumulative_sum += probability / total_probability
+            cumulative_sum += probability / total_probability  # Normalize probabilities
             cumulative_distribution.append((cumulative_sum, value, unit))
 
+        # Randomly choose based on the cumulative distribution
         r = random.random()
         for cumulative_prob, value, unit in cumulative_distribution:
             if r < cumulative_prob:
-                selected_value = value
-                selected_unit = unit
-                break
+                if math.isnan(value) or value == 0.0:
+                    return f"{value} {unit}"
+
+                rounding_precision = random.choice([0, 1, 2])
+                rounded_value = round(value, rounding_precision)
+                return f"{rounded_value} {unit}"
+
+        # Fallback to the last choice if something goes wrong
+        final_value = choices[-1][0]
+        final_choice_unit = choices[-1][1]
+
+        if math.isnan(final_value) or final_value == 0.0:
+            return f"{final_value} {final_choice_unit}"
+
+        rounding_precision = random.choice([0, 1, 2])
+        final_choice_value = round(final_value, rounding_precision)
+        return f"{final_choice_value} {final_choice_unit}"
+
+
+    def extract_distance_from_result(self, result):
+        """
+        Extracts the distance value from the result string in the form 'question + " Answer: " + answer'.
+        The answer part may contain descriptive text and the distance. We extract the numeric value from the answer.
+        """
+        # Split the result string into the question and answer parts
+        question_part, answer_part = result.split(" Answer: ", 1)
+
+        # Use regex to find the first occurrence of a floating point or integer number in the answer
+        match = re.search(r"(\d+\.\d+|\d+)", answer_part)
+        if match:
+            # Convert the matched numeric part to float and return
+            distance = float(match.group(0))
+            return distance
         else:
-            selected_value = choices[-1][0]
-            selected_unit = choices[-1][1]
+            # If no numeric part is found, return None
+            return None
 
-        if selected_value <= 0 or math.isnan(selected_value):
-            return "less than a centimeter"
+    def is_valid_result(self, result):
+        """
+        Checks if a result string contains a valid, non-NaN, non-zero distance.
+        """
+        distance = self.extract_distance_from_result(result)
 
-        return f"{selected_value} {selected_unit}"
+        # Return False if distance is None or is NaN
+        if distance is None or math.isnan(distance):
+            return False
+
+        # Filter exact zero distances
+        if distance == 0.0:
+            return False
+
+        return True
+
 
 
     def left_predicate(self, A, B):
@@ -588,43 +630,64 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-
     def evaluate_predicates_on_pairs(self, pairs, is_canonicalized):
+        """
+        Evaluate predicates on object pairs, ensuring a balance between distance-related predicates
+        and other types of predicates. If invalid distance results are found, they are replaced with
+        other types of predicates.
+
+        Args:
+            pairs: List of object pairs to evaluate.
+            is_canonicalized: Boolean indicating if canonicalized predicates should be included.
+
+        Returns:
+            List of results for each object pair.
+        """
         all_prompt_variants = [
-            (self.left_predicate, 1),
-            (self.right_predicate, 1),
-            (self.wide_predicate, 2),
-            (self.big_predicate, 1),
-            (self.thin_predicate, 2),
-            (self.small_predicate, 1),
-            (self.behind_predicate, 1),
-            (self.front_predicate, 1),
-            (self.left_choice, 1),
-            (self.right_choice, 1),
+            self.left_predicate,
+            self.right_predicate,
+            self.wide_predicate,
+            self.big_predicate,
+            self.thin_predicate,
+            self.small_predicate,
+            self.behind_predicate,
+            self.front_predicate,
+            self.left_choice,
+            self.right_choice,
         ]
 
         add_canonicalized = [
-                (self.tall_choice, 2), 
-                (self.above_predicate, 1),
-                (self.below_predicate, 1),
-                (self.short_choice, 2), 
-                (self.below_choice, 1),
-                (self.tall_predicate, 2),
-                (self.short_predicate, 2),
-                (self.above_choice, 1),
-                (self.vertical_distance_data, 3),
-                (self.horizontal_distance_data, 3),
-                (self.width_data, 3),
-                (self.height_data, 3),
-            ]
+            self.tall_choice,
+            self.above_predicate,
+            self.below_predicate,
+            self.short_choice,
+            self.below_choice,
+            self.tall_predicate,
+            self.short_predicate,
+            self.above_choice,
+            self.vertical_distance_data,
+            self.horizontal_distance_data,
+            self.width_data,
+            self.height_data,
+        ]
 
         if is_canonicalized:
             all_prompt_variants += add_canonicalized
 
-        functions, weights = zip(*all_prompt_variants)
-        selected_predicates_choices = random.choices(functions, weights=weights, k=10)
+        # Distance-related predicates
+        distance_related_predicates = [
+            self.vertical_distance_data,
+            self.horizontal_distance_data,
+            self.width_data,
+            self.height_data,
+        ]
+
+        selected_distance_predicates = distance_related_predicates
+        selected_other_predicates = random.sample(all_prompt_variants, k=2)
+        selected_predicates_choices = selected_distance_predicates + selected_other_predicates
 
         results = []
+        filtered_out_count = 0
 
         for A, B in pairs:
             pair_results = []
@@ -632,19 +695,39 @@ class PromptGenerator():
                 pair_results.append(prompt_func(A, B))
 
             distance = np.asarray(A[1].compute_point_cloud_distance(B[1])).mean()
-            distance = self.human_like_distance(distance)
-            pair_results.append(
-                self.generate_spatial_reasoning_data(
+            distance_str = self.human_like_distance(distance)
+
+            for _ in range(5):
+                reasoning_data = self.generate_spatial_reasoning_data(
                     A,
                     B,
-                    distance,
+                    distance_str,
                     distance_template_questions,
                     distance_template_answers,
                 )
-            )
+                pair_results.append(reasoning_data)
 
             results.extend(pair_results)
-        return results
+
+        # Filter out invalid results (nan or 0.0 distances)
+        valid_results = [result for result in results if self.is_valid_result(result)]
+        filtered_out_count = len(results) - len(valid_results)
+
+        # Replace them with non-distance-measuring prompts
+        if filtered_out_count > 0:
+            replacements = []
+            for A, B in pairs:
+                replacement_prompts = random.choices(selected_other_predicates, k=filtered_out_count)
+                for prompt_func in replacement_prompts:
+                    replacements.append(prompt_func(A, B))
+
+            valid_results.extend(replacements)
+
+        valid_results = list(set(valid_results))
+        random.shuffle(valid_results)
+
+        return valid_results
+
 
     def run(self, captions, pointclouds, is_canonicalized):
         pointclouds = self.spatial_scene_constructor.restore_pointclouds(pointclouds)
@@ -711,6 +794,7 @@ class PromptGenerator():
             if is_batched:
                 prompts_list = []
                 messages_list = []
+                truncated_list = []
 
                 for i, captions in enumerate(example['captions']):
                     prompts = self.run(
@@ -718,17 +802,32 @@ class PromptGenerator():
                         example['pointclouds'][i],
                         example['is_canonicalized'][i]
                     )
-                    prompts_list.append(prompts)
-                    messages_list.append(self.create_messages_from_prompts(prompts))
 
+                    prompts_list.append(prompts)
+
+                    truncated_prompts = prompts
+                    random.shuffle(truncated_prompts)
+                    truncated_prompts = truncated_prompts[:5]
+                    truncated_list.append(truncated_prompts)
+
+                    messages = self.create_messages_from_prompts(truncated_prompts)
+                    messages_list.append(messages)
+
+                # Assign both lists to the example dictionary
                 example['prompts'] = prompts_list
+                example['truncated_prompts'] = truncated_list
                 example['messages'] = messages_list
+
             else:
                 example['prompts'] = self.run(
                     example["captions"],
                     example["pointclouds"],
                     example["is_canonicalized"]
                 )
+                truncated_prompts = example['prompts']
+                random.shuffle(truncated_prompts)
+                truncated_prompts = truncated_prompts[:5]
+                example['truncated_prompts'] = truncated_prompts
                 example['messages'] = self.create_messages_from_prompts(example['prompts'])
 
         except Exception as e:
