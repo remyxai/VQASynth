@@ -43,30 +43,6 @@ def run_vqasynth_pipeline(dataset: DatasetDict):
     # Apply the resizing to your dataset
     dataset = dataset.map(lambda example: resize_image_keep_aspect_ratio(example, images_column=images))
 
-    embedding_generator = EmbeddingGenerator()
-
-    dataset = dataset.map(lambda example: embedding_generator.apply_transform(example, images))
-
-    tag_filter = TagFilter()
-
-
-    # @title Set tags for filtering
-    include_tags = 'Park,Street,Home,Office,Garden,Playground,Warehouse,Shop,Library,Classroom,Kitchen,Living Room,Bedroom,Bathroom,Garage,Balcony,Alley,Sidewalk,Field,Meadow,Tennis court,Driveway,Lobby,Workshop,Gym' #@param {type:"string"}
-    exclude_tags = 'Aerial Photography,Single Subject,Macro Photography,Microscopic Views,Drawings,Unrealistic CGI,Graphs,Charts,Icons,Logos,Text Overlays,Minimalist,Art,Portraits,Close-up shot,Flat Art,Abstract Paintings,Silhouettes,Monochrome Photography,Stock Photos' #@param {type:"string"}
-
-    include_tags = include_tags.strip().split(",")
-    exclude_tags = exclude_tags.strip().split(",")
-
-    # Extract tags
-    dataset = dataset.map(lambda example: tag_filter.apply_transform(example, include_tags + exclude_tags))
-
-    # Filter by tags
-    dataset_filtered = dataset.filter(
-        lambda example: tag_filter.filter_by_tag(
-            example['tag'], include_tags, exclude_tags
-            )
-        )
-
 
     depth = DepthEstimator()
 
