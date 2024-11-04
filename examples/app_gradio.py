@@ -18,6 +18,7 @@ import PIL
 cache_dir = './vqasynth_output'
 images = 'images'
 
+
 def resize_image_keep_aspect_ratio(example, images_column, max_width=500):
         # Get the original image
         image = example[images_column]
@@ -44,18 +45,16 @@ def run_vqasynth_pipeline(dataset: DatasetDict):
     dataset = dataset.map(lambda example: resize_image_keep_aspect_ratio(example, images_column=images))
 
 
-    depth = DepthEstimator()
-
     dataset = dataset.map(lambda example: depth.apply_transform(example, images))
 
     del embedding_generator
     del tag_filter
     del depth
 
-    localizer = Localizer()
+    
     dataset = dataset.map(lambda example: localizer.apply_transform(example, images))
 
-    spatial_scene_constructor = SpatialSceneConstructor()
+    
 
     # Storing pointclouds for viewing
     point_cloud_dir = os.path.join(cache_dir, "pointclouds")
@@ -99,6 +98,10 @@ iface = gr.Interface(
 )
 
 if __name__ == "__main__":
+    depth = DepthEstimator()
+    localizer = Localizer()
+    spatial_scene_constructor = SpatialSceneConstructor()
+    
     iface.launch(debug=True)
 
 
