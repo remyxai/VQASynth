@@ -73,7 +73,7 @@ def run(image: PIL.Image):
         ply_file = os.path.join(temp_dir, "output.ply")
         obj_file = os.path.join(temp_dir, "output.obj")
         pcd = o3d.io.read_point_cloud(ply_file)
-        
+
     o3d.io.write_point_cloud(ply_file, pcd)
 
     mesh = o3d.io.read_triangle_mesh(ply_file)
@@ -87,8 +87,8 @@ iface = gr.Interface(
     fn=run,
     inputs=gr.Image(type="pil", label="Upload an Image"),
     outputs=[gr.Model3D(label="3D Point Cloud"), gr.Text(label="Caption")],
-    title="3D Point Cloud Generator without Bounding Boxes",
-    description="Upload an image to generate and visualize a 3D point cloud of segmented regions without bounding boxes."
+    title="VQASynth: Generate captions with spatial information",
+    description="Upload an image to run the VQASynth which will constuct a 3d representation of the image and generates the caption with spatial information"
 )
 
 if __name__ == "__main__":
