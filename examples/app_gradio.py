@@ -9,6 +9,7 @@ from vqasynth.localize import Localizer
 from vqasynth.scene_fusion import SpatialSceneConstructor
 from vqasynth.prompts import PromptGenerator
 from datasets import DatasetDict, Dataset
+import tempfile
 
 import open3d as o3d
 import os
@@ -43,18 +44,8 @@ def run_vqasynth_pipeline(dataset: DatasetDict):
 
     # Apply the resizing to your dataset
     dataset = dataset.map(lambda example: resize_image_keep_aspect_ratio(example, images_column=images))
-
-
     dataset = dataset.map(lambda example: depth.apply_transform(example, images))
-
-    del embedding_generator
-    del tag_filter
-    del depth
-
-    
     dataset = dataset.map(lambda example: localizer.apply_transform(example, images))
-
-    
 
     # Storing pointclouds for viewing
     point_cloud_dir = os.path.join(cache_dir, "pointclouds")
@@ -77,9 +68,12 @@ def run(image: PIL.Image):
     output_dir = "./vqasynth_output/gradio"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    ply_file = f"{output_dir}/output.ply"
-    obj_file = f"{output_dir}/output.obj"
-    pcd = o3d.io.read_point_cloud('output.ply')
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        ply_file = os.path.join(temp_dir, "output.ply")
+        obj_file = os.path.join(temp_dir, "output.obj")
+        pcd = o3d.io.read_point_cloud(ply_file)
+        
     o3d.io.write_point_cloud(ply_file, pcd)
 
     mesh = o3d.io.read_triangle_mesh(ply_file)
@@ -101,7 +95,7 @@ if __name__ == "__main__":
     depth = DepthEstimator()
     localizer = Localizer()
     spatial_scene_constructor = SpatialSceneConstructor()
-    
+
     iface.launch(debug=True)
 
 
