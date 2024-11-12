@@ -85,6 +85,26 @@ class CaptionLocalizer:
 
         return {'bboxes': filtered_bboxes, 'labels': filtered_labels, 'caption': data['caption']}
 
+    def check_resize_image(self, image, max_dimension=512):
+        """
+        Resizes the image to ensure the largest dimension is at most max_dimension
+        while maintaining aspect ratio.
+
+        Parameters:
+        - image (Image.Image): The PIL image to resize.
+        - max_dimension (int): The maximum allowed size for the largest dimension. Default is 512.
+
+        Returns:
+        - Image.Image: The resized image, if resizing was needed; otherwise, the original image.
+        """
+        if max(image.size) <= max_dimension:
+            return image
+
+        scale_factor = max_dimension / max(image.size)
+        new_size = (int(image.width * scale_factor), int(image.height * scale_factor))
+        return image.resize(new_size, Image.LANCZOS)
+
+
     def run(self, image):
         """
         Extract captioned bounding boxes of objects found in the scene.
@@ -98,72 +118,106 @@ class CaptionLocalizer:
         captioned_bboxes = []
         task = "<MORE_DETAILED_CAPTION>"
         prompt = f"{task}"
-        inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
+        image = self.check_resize_image(image)
 
-        generated_ids = self.model.generate(
-            input_ids=inputs["input_ids"],
-            pixel_values=inputs["pixel_values"],
-            max_new_tokens=1024,
-            num_beams=3,
-            do_sample=False,
-        )
-        generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        parsed_answer = self.processor.post_process_generation(
-            generated_text, task=prompt, image_size=(image.width, image.height)
-        )
-        captions = parsed_answer[task].split(".")
-
-        for caption in captions:
-            if caption:
-                task = "<CAPTION_TO_PHRASE_GROUNDING>"
-                prompt = f"{task} {caption}"
-                inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
-
+        # Function to handle generation with CPU fallback
+        def safe_generate(inputs):
+            try:
                 generated_ids = self.model.generate(
                     input_ids=inputs["input_ids"],
                     pixel_values=inputs["pixel_values"],
-                    max_new_tokens=1024,
-                    num_beams=3,
+                    max_length=1024,
+                    num_beams=1,
                     do_sample=False,
                 )
-                generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-                parsed_answer = self.processor.post_process_generation(
-                    generated_text, task=task, image_size=(image.width, image.height)
-                )
-                caption_bbox = parsed_answer[task]
+                return generated_ids
+            except RuntimeError as e:
+                if "CUDA error" in str(e):
+                    print("CUDA error encountered, switching to CPU for this sample.")
+                    torch.cuda.empty_cache()
+                    self.model = self.model.to("cpu")
+                    inputs = inputs.to("cpu")
+                    return self.model.generate(
+                        input_ids=inputs["input_ids"],
+                        pixel_values=inputs["pixel_values"],
+                        max_length=1024,
+                        num_beams=1,
+                        do_sample=False,
+                    )
+                else:
+                    raise e
 
-                # Normalize the caption using Spacy (to remove duplicates like "apple" and "apples")
-                caption_bbox["caption"] = self.normalize_caption(caption)
-                caption_bbox = self.bbox_dedupe(caption_bbox)
+        try:
+            # Initial prompt and inputs
+            inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
 
-                if len(caption_bbox['bboxes']) > 1:
-                    flip = random.choice(['heads', 'tails'])
-                    if flip == 'heads':
-                        idx = random.randint(1, len(caption_bbox['bboxes']) - 1)
-                    else:
-                        idx = 0
-                    if idx > 0:
-                        caption_bbox['caption'] = caption_bbox['labels'][idx].lower() + ' with ' + caption_bbox['labels'][0].lower()
-                    caption_bbox['bboxes'] = [caption_bbox['bboxes'][idx]]
-                    caption_bbox['labels'] = [caption_bbox['labels'][idx]]
+            # Generate detailed captions
+            generated_ids = safe_generate(inputs)
+            generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
 
-                captioned_bboxes.append(caption_bbox)
+            # Process the generated text
+            parsed_answer = self.processor.post_process_generation(
+                generated_text, task=prompt, image_size=(image.width, image.height)
+            )
+            captions = parsed_answer.get(task, "").split(".")
 
-        # Filter out the largest bounding box if it encompasses all others
-        captioned_bboxes = self.filter_large_bbox(captioned_bboxes)
+            for caption in captions:
+                if caption:
+                    # For each caption, ground it to a phrase
+                    task = "<CAPTION_TO_PHRASE_GROUNDING>"
+                    prompt = f"{task} {caption}"
 
-        # Calculate distances between bounding boxes and select the top 3 distinct ones
-        bboxes = [item['bboxes'][0] for item in captioned_bboxes]
-        n = len(bboxes)
-        distance_matrix = np.zeros((n, n))
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    distance_matrix[i][j] = 1 - self.compute_iou(bboxes[i], bboxes[j])
+                    inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
+                    generated_ids = safe_generate(inputs)
 
-        scores = np.sum(distance_matrix, axis=1)
-        selected_indices = np.argsort(scores)[-3:]
-        captioned_bboxes = [{"bboxes": captioned_bboxes[i]['bboxes'][0], "caption": captioned_bboxes[i]['caption']} for i in selected_indices]
+                    generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+                    parsed_answer = self.processor.post_process_generation(
+                        generated_text, task=task, image_size=(image.width, image.height)
+                    )
+                    caption_bbox = parsed_answer.get(task, {})
+
+                    if "bboxes" not in caption_bbox or "labels" not in caption_bbox:
+                        print("Skipping entry due to missing bounding boxes or labels.")
+                        continue
+
+                    # Normalize and deduplicate
+                    caption_bbox["caption"] = self.normalize_caption(caption)
+                    caption_bbox = self.bbox_dedupe(caption_bbox)
+
+                    # Handle multiple bounding boxes
+                    if len(caption_bbox['bboxes']) > 1:
+                        flip = random.choice(['heads', 'tails'])
+                        idx = random.randint(1, len(caption_bbox['bboxes']) - 1) if flip == 'heads' else 0
+                        if idx > 0:
+                            caption_bbox['caption'] = f"{caption_bbox['labels'][idx].lower()} with {caption_bbox['labels'][0].lower()}"
+                        caption_bbox['bboxes'] = [caption_bbox['bboxes'][idx]]
+                        caption_bbox['labels'] = [caption_bbox['labels'][idx]]
+
+                    captioned_bboxes.append(caption_bbox)
+
+            # Filter out the largest bounding box if it encompasses all others
+            captioned_bboxes = self.filter_large_bbox(captioned_bboxes)
+
+            # Calculate distances between bounding boxes and select the top 3 distinct ones
+            if captioned_bboxes:
+                bboxes = [item['bboxes'][0] for item in captioned_bboxes]
+                n = len(bboxes)
+                distance_matrix = np.zeros((n, n))
+                for i in range(n):
+                    for j in range(n):
+                        if i != j:
+                            distance_matrix[i][j] = 1 - self.compute_iou(bboxes[i], bboxes[j])
+
+                scores = np.sum(distance_matrix, axis=1)
+                selected_indices = np.argsort(scores)[-3:]
+                captioned_bboxes = [
+                    {"bboxes": captioned_bboxes[i]['bboxes'][0], "caption": captioned_bboxes[i]['caption']}
+                    for i in selected_indices
+                ]
+
+        except Exception as e:
+            print(f"Error during localization: {str(e)}")
+            return []
 
         return captioned_bboxes
 

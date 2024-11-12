@@ -152,12 +152,8 @@ class SpatialSceneConstructor:
         return height_i > height_j
 
     def run(self, image_filename, image, depth_map, focallength, masks, output_dir):
-        original_image_cv = cv2.cvtColor(
-            np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR
-        )
-        depth_image_cv = cv2.cvtColor(
-            np.array(depth_map.convert("RGB")), cv2.COLOR_RGB2BGR
-        )
+        original_image_cv = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        depth_image_cv = cv2.cvtColor(np.array(depth_map.convert("RGB")), cv2.COLOR_RGB2BGR)
 
         width, height = image.size
         intrinsic_parameters = {
@@ -170,7 +166,6 @@ class SpatialSceneConstructor:
         }
 
         original_pcd = self.create_point_cloud_from_rgbd(original_image_cv, depth_image_cv, intrinsic_parameters)
-
         pcd, canonicalized, transformation = self.canonicalize_point_cloud(original_pcd, canonicalize_threshold=0.3)
 
         output_pointcloud_dir = os.path.join(output_dir, "pointclouds")
@@ -178,26 +173,50 @@ class SpatialSceneConstructor:
 
         point_cloud_data = []
 
+        # Process each mask
         for idx, mask in enumerate(masks):
+            print(f"[INFO] Processing mask {idx + 1}/{len(masks)}")
+
+            # Ensure mask is in the correct format
             if isinstance(mask, list):
                 mask = np.array(mask)
 
             mask_binary = mask.astype(bool)
 
+            # Find indices of the mask
             mask_indices = np.argwhere(mask_binary)
-            masked_pcd = original_pcd.select_by_index(mask_indices.flatten(), invert=False)
+            if mask_indices.size == 0:
+                print(f"[WARNING] Mask {idx + 1} produced no valid points, skipping.")
+                continue
 
-            cl, ind = masked_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-            inlier_cloud = masked_pcd.select_by_index(ind)
+            # Select points and colors based on the mask
+            points = np.asarray(original_pcd.points)
+            colors = np.asarray(original_pcd.colors)
+            masked_points = points[mask_binary.flatten()]
+            masked_colors = colors[mask_binary.flatten()]
 
+            # Create a new point cloud with the masked points and colors
+            masked_pcd = o3d.geometry.PointCloud()
+            masked_pcd.points = o3d.utility.Vector3dVector(masked_points)
+            masked_pcd.colors = o3d.utility.Vector3dVector(masked_colors)
+
+            if masked_pcd.is_empty():
+                print(f"[WARNING] Masked point cloud is empty for mask {idx + 1}.")
+                continue
+
+            # Apply transformation if canonicalized
             if canonicalized:
-                inlier_cloud.transform(transformation)
+                masked_pcd.transform(transformation)
+            if masked_pcd.is_empty():
+                print(f"[WARNING] Transformed point cloud is empty for mask {idx + 1}.")
+                continue
 
+            # Save the colored point cloud to a file
             pointcloud_filepath = os.path.join(
                 output_pointcloud_dir,
                 f"pointcloud_{Path(image_filename).stem}_{idx}.pcd"
             )
-            self.save_pointcloud(inlier_cloud, pointcloud_filepath)
+            self.save_pointcloud(masked_pcd, pointcloud_filepath)
             point_cloud_data.append(pointcloud_filepath)
 
         return point_cloud_data, canonicalized
