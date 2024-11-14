@@ -1,5 +1,6 @@
 # VQASynth 🎹 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sJUsJ5-UR-3Bydgg-thJ59KSNxRG8Q30?usp=sharing)
+Try VQASynth in the [HF Space](https://huggingface.co/spaces/remyxai/SpaceMantis)
 
 ![GIF Description](./assets/vqasynth-example.gif)
 
@@ -110,7 +111,7 @@ Here are some examples:
 * [SpaceFlorence-2 - <1B](https://huggingface.co/remyxai/SpaceFlorence-2)
 * [SpaceVLMs Collection](https://huggingface.co/collections/remyxai/spacevlms-66a3dbb924756d98e7aec678)
 
-Try SpaceMantis in the [HF Space](https://huggingface.co/spaces/remyxai/SpaceMantis) or SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
+Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
 
 ![image](https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef)
 
