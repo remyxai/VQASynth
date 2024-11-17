@@ -4,13 +4,14 @@ import random
 import numpy as np
 from itertools import combinations
 from vqasynth.prompt_templates import *
-from vqasynth.scene_fusion import SpatialSceneConstructor 
+from vqasynth.scene_fusion import SpatialSceneConstructor
 
-class PromptGenerator():
+
+class PromptGenerator:
     def __init__(self):
         self.spatial_scene_constructor = SpatialSceneConstructor()
 
-    def human_like_distance(self, distance_meters, scaling_factor=20):
+    def human_like_distance(self, distance_meters, scaling_factor=10):
         """
         Converts a distance in meters to a more human-readable format (e.g., centimeters, feet),
         with an adaptive scaling factor.
@@ -39,16 +40,8 @@ class PromptGenerator():
             ]
         elif distance_meters < 3:
             choices = [
-                (
-                    round(distance_meters, 2),
-                    "meters",
-                    0.6,
-                ),  # Meters for clarity
-                (
-                    round(distance_meters * 3.281, 2),
-                    "feet",
-                    0.4,
-                ),
+                (round(distance_meters, 2), "meters", 0.6),  # Meters for clarity
+                (round(distance_meters * 3.281, 2), "feet", 0.4),
             ]
         else:
             choices = [
@@ -94,7 +87,6 @@ class PromptGenerator():
         final_choice_value = round(final_value, rounding_precision)
         return f"{final_choice_value} {final_choice_unit}"
 
-
     def extract_distance_from_result(self, result):
         """
         Extracts the distance value from the result string in the form 'question + " Answer: " + answer'.
@@ -129,8 +121,6 @@ class PromptGenerator():
 
         return True
 
-
-
     def left_predicate(self, A, B):
         template_questions = left_predicate_questions
         true_responses = left_true_responses
@@ -146,13 +136,14 @@ class PromptGenerator():
         is_left = A_pos[0] < B_pos[0]  # Compare X coordinates
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_left else false_responses)
+        response_template = random.choice(
+            true_responses if is_left else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def right_predicate(self, A, B):
         template_questions = right_predicate_questions
@@ -169,13 +160,14 @@ class PromptGenerator():
         is_right = A_pos[0] > B_pos[0]  # Compare X coordinates
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_right else false_responses)
+        response_template = random.choice(
+            true_responses if is_right else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def above_predicate(self, A, B):
         template_questions = above_predicate_questions
@@ -189,16 +181,17 @@ class PromptGenerator():
         A_pos = A_cloud.get_center()
         B_pos = B_cloud.get_center()
 
-        is_above = A_pos[1] > B_pos[1]  
+        is_above = A_pos[1] > B_pos[1]
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_above else false_responses)
+        response_template = random.choice(
+            true_responses if is_above else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def below_predicate(self, A, B):
         template_questions = below_predicate_questions
@@ -212,16 +205,17 @@ class PromptGenerator():
         A_pos = A_cloud.get_center()
         B_pos = B_cloud.get_center()
 
-        is_below = A_pos[1] < B_pos[1]  
+        is_below = A_pos[1] < B_pos[1]
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_below else false_responses)
+        response_template = random.choice(
+            true_responses if is_below else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def wide_predicate(self, A, B):
         template_questions = wide_predicate_questions
@@ -238,13 +232,14 @@ class PromptGenerator():
         is_wider = width_A > width_B
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_wider else false_responses)
+        response_template = random.choice(
+            true_responses if is_wider else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def big_predicate(self, A, B):
         template_questions = big_predicate_questions
@@ -264,7 +259,9 @@ class PromptGenerator():
         is_bigger = volume_A > volume_B
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_bigger else false_responses)
+        response_template = random.choice(
+            true_responses if is_bigger else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
@@ -286,13 +283,14 @@ class PromptGenerator():
         is_taller = height_A > height_B
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_taller else false_responses)
+        response_template = random.choice(
+            true_responses if is_taller else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def short_predicate(self, A, B):
         template_questions = short_predicate_questions
@@ -309,13 +307,14 @@ class PromptGenerator():
         is_shorter = height_A < height_B
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_shorter else false_responses)
+        response_template = random.choice(
+            true_responses if is_shorter else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def thin_predicate(self, A, B):
         template_questions = thin_predicate_questions
@@ -332,13 +331,14 @@ class PromptGenerator():
         is_thinner = width_A < width_B
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_thinner else false_responses)
+        response_template = random.choice(
+            true_responses if is_thinner else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def small_predicate(self, A, B):
         template_questions = small_predicate_questions
@@ -358,13 +358,14 @@ class PromptGenerator():
         is_smaller = volume_A < volume_B
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_smaller else false_responses)
+        response_template = random.choice(
+            true_responses if is_smaller else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def behind_predicate(self, A, B):
         template_questions = behind_predicate_questions
@@ -380,13 +381,14 @@ class PromptGenerator():
         is_behind = A_center[2] > B_center[2]
 
         question_template = random.choice(template_questions)
-        response_template = random.choice(true_responses if is_behind else false_responses)
+        response_template = random.choice(
+            true_responses if is_behind else false_responses
+        )
 
         question = question_template.replace("[A]", A_desc).replace("[B]", B_desc)
         answer = response_template.replace("[A]", A_desc).replace("[B]", B_desc)
 
         return question + " Answer: " + answer
-
 
     def front_predicate(self, A, B):
         template_questions = front_predicate_questions
@@ -411,7 +413,6 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-
     # Choice prompts
 
     def left_choice(self, A, B):
@@ -435,7 +436,6 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-
     def right_choice(self, A, B):
         template_questions = right_choice_questions
         template_responses = right_choice_responses
@@ -456,7 +456,6 @@ class PromptGenerator():
         answer = answer_template.replace("[X]", more_right)
 
         return question + " Answer: " + answer
-
 
     def above_choice(self, A, B):
         template_questions = above_choice_questions
@@ -479,7 +478,6 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-
     def below_choice(self, A, B):
         template_questions = below_choice_questions
         template_responses = below_choice_responses
@@ -500,7 +498,6 @@ class PromptGenerator():
         answer = answer_template.replace("[X]", more_below)
 
         return question + " Answer: " + answer
-
 
     def tall_choice(self, A, B):
         template_questions = tall_choice_questions
@@ -523,7 +520,6 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-
     def short_choice(self, A, B):
         template_questions = short_choice_questions
         template_responses = short_choice_responses
@@ -545,7 +541,6 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-
     # Distance prompts
 
     def generate_spatial_reasoning_data(
@@ -565,7 +560,6 @@ class PromptGenerator():
 
         return question + " Answer: " + answer
 
-
     def vertical_distance_data(self, A, B):
         template_questions = vertical_distance_questions
         template_answers = vertical_distance_answers
@@ -578,7 +572,6 @@ class PromptGenerator():
         return self.generate_spatial_reasoning_data(
             A, B, human_readable_dist, template_questions, template_answers
         )
-
 
     def horizontal_distance_data(self, A, B):
         template_questions = horizontal_distance_questions
@@ -595,7 +588,6 @@ class PromptGenerator():
             A, B, human_readable_dist, template_questions, template_answers
         )
 
-
     def width_data(self, A, B=None):
         A_desc = A[0].lower()
 
@@ -609,7 +601,9 @@ class PromptGenerator():
         answer_template = random.choice(template_answers)
 
         question = question_template.replace("[A]", A_desc)
-        answer = answer_template.replace("[A]", A_desc).replace("[X]", human_readable_width)
+        answer = answer_template.replace("[A]", A_desc).replace(
+            "[X]", human_readable_width
+        )
 
         return question + " Answer: " + answer
 
@@ -626,7 +620,9 @@ class PromptGenerator():
         answer_template = random.choice(template_answers)
 
         question = question_template.replace("[A]", A_desc)
-        answer = answer_template.replace("[A]", A_desc).replace("[X]", human_readable_width)
+        answer = answer_template.replace("[A]", A_desc).replace(
+            "[X]", human_readable_width
+        )
 
         return question + " Answer: " + answer
 
@@ -684,7 +680,9 @@ class PromptGenerator():
 
         selected_distance_predicates = distance_related_predicates
         selected_other_predicates = random.sample(all_prompt_variants, k=2)
-        selected_predicates_choices = selected_distance_predicates + selected_other_predicates
+        selected_predicates_choices = (
+            selected_distance_predicates + selected_other_predicates
+        )
 
         results = []
         filtered_out_count = 0
@@ -717,7 +715,9 @@ class PromptGenerator():
         if filtered_out_count > 0:
             replacements = []
             for A, B in pairs:
-                replacement_prompts = random.choices(selected_other_predicates, k=filtered_out_count)
+                replacement_prompts = random.choices(
+                    selected_other_predicates, k=filtered_out_count
+                )
                 for prompt_func in replacement_prompts:
                     replacements.append(prompt_func(A, B))
 
@@ -728,15 +728,19 @@ class PromptGenerator():
 
         return valid_results
 
-
     def run(self, captions, pointclouds, is_canonicalized):
         pointclouds = self.spatial_scene_constructor.restore_pointclouds(pointclouds)
         try:
             objects = list(zip(captions, pointclouds))
-            all_pairs = [(i, j) for i in range(len(objects)) for j in range(len(objects)) if i != j]
+            all_pairs = [
+                (i, j)
+                for i in range(len(objects))
+                for j in range(len(objects))
+                if i != j
+            ]
             random.shuffle(all_pairs)
             selected_pairs = all_pairs[:5]
-            object_pairs = [(objects[i], objects[j]) for i,j in selected_pairs]
+            object_pairs = [(objects[i], objects[j]) for i, j in selected_pairs]
             prompts = self.evaluate_predicates_on_pairs(object_pairs, is_canonicalized)
         except:
             prompts = []
@@ -756,23 +760,24 @@ class PromptGenerator():
         first_prompt = True
 
         for prompt in prompts:
-            if 'Answer: ' in prompt:
-                question, answer = prompt.split('Answer: ', 1)
+            if "Answer: " in prompt:
+                question, answer = prompt.split("Answer: ", 1)
 
                 # Add user message (include image only for the first prompt)
                 content = [{"index": None, "text": question.strip(), "type": "text"}]
                 if first_prompt:
                     content.insert(0, {"index": 0, "text": None, "type": "image"})
 
-                messages.append({
-                    "content": content,
-                    "role": "user"
-                })
+                messages.append({"content": content, "role": "user"})
 
-                messages.append({
-                    "content": [{"index": None, "text": answer.strip(), "type": "text"}],
-                    "role": "assistant"
-                })
+                messages.append(
+                    {
+                        "content": [
+                            {"index": None, "text": answer.strip(), "type": "text"}
+                        ],
+                        "role": "assistant",
+                    }
+                )
 
                 first_prompt = False
 
@@ -788,7 +793,9 @@ class PromptGenerator():
         Returns:
             Updated example(s) with prompts and messages, or None values on failure.
         """
-        is_batched = isinstance(example['captions'], list) and isinstance(example['captions'][0], list)
+        is_batched = isinstance(example["captions"], list) and isinstance(
+            example["captions"][0], list
+        )
 
         try:
             if is_batched:
@@ -796,11 +803,11 @@ class PromptGenerator():
                 messages_list = []
                 truncated_list = []
 
-                for i, captions in enumerate(example['captions']):
+                for i, captions in enumerate(example["captions"]):
                     prompts = self.run(
                         captions,
-                        example['pointclouds'][i],
-                        example['is_canonicalized'][i]
+                        example["pointclouds"][i],
+                        example["is_canonicalized"][i],
                     )
 
                     prompts_list.append(prompts)
@@ -814,29 +821,31 @@ class PromptGenerator():
                     messages_list.append(messages)
 
                 # Assign both lists to the example dictionary
-                example['prompts'] = prompts_list
-                example['truncated_prompts'] = truncated_list
-                example['messages'] = messages_list
+                example["prompts"] = prompts_list
+                example["truncated_prompts"] = truncated_list
+                example["messages"] = messages_list
 
             else:
-                example['prompts'] = self.run(
+                example["prompts"] = self.run(
                     example["captions"],
                     example["pointclouds"],
-                    example["is_canonicalized"]
+                    example["is_canonicalized"],
                 )
-                truncated_prompts = example['prompts']
+                truncated_prompts = example["prompts"]
                 random.shuffle(truncated_prompts)
                 truncated_prompts = truncated_prompts[:5]
-                example['truncated_prompts'] = truncated_prompts
-                example['messages'] = self.create_messages_from_prompts(example['prompts'])
+                example["truncated_prompts"] = truncated_prompts
+                example["messages"] = self.create_messages_from_prompts(
+                    example["prompts"]
+                )
 
         except Exception as e:
             print(f"Error processing example, skipping: {e}")
             if is_batched:
-                example['prompts'] = [None] * len(example['captions'])
-                example['messages'] = [None] * len(example['captions'])
+                example["prompts"] = [None] * len(example["captions"])
+                example["messages"] = [None] * len(example["captions"])
             else:
-                example['prompts'] = None
-                example['messages'] = None
+                example["prompts"] = None
+                example["messages"] = None
 
         return example
