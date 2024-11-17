@@ -1,106 +1,164 @@
-import PIL.Image
-from vqasynth.datasets import Dataloader
-from vqasynth.embeddings import EmbeddingGenerator
-from PIL import Image
 import os
-from vqasynth.embeddings import TagFilter
+import uuid
+import tempfile
+
+import cv2
+import open3d as o3d
+import PIL
+from PIL import Image
+
 from vqasynth.depth import DepthEstimator
 from vqasynth.localize import Localizer
 from vqasynth.scene_fusion import SpatialSceneConstructor
 from vqasynth.prompts import PromptGenerator
-from datasets import DatasetDict, Dataset
-import tempfile
 
-import open3d as o3d
-import os
+import numpy as np
 import gradio as gr
-import PIL
 
-cache_dir = './vqasynth_output'
-images = 'images'
-
-
-def resize_image_keep_aspect_ratio(example, images_column, max_width=500):
-        # Get the original image
-        image = example[images_column]
-
-        # Get the original size
-        width, height = image.size
-
-        # Calculate the new height to maintain aspect ratio
-        if width > max_width:
-            new_width = max_width
-            new_height = int((new_width / width) * height)
-            resized_image = image.resize((new_width, new_height), Image.LANCZOS)  # Replaced ANTIALIAS with LANCZOS
-        else:
-            # If width is already less than or equal to max_width, don't resize
-            resized_image = image
-
-        # Replace the image in the example
-        example[images_column] = resized_image
-        return example
-
-def run_vqasynth_pipeline(dataset: DatasetDict):
-
-    # Apply the resizing to your dataset
-    dataset = dataset.map(lambda example: resize_image_keep_aspect_ratio(example, images_column=images))
-    dataset = dataset.map(lambda example: depth.apply_transform(example, images))
-    dataset = dataset.map(lambda example: localizer.apply_transform(example, images))
-
-    # Storing pointclouds for viewing
-    point_cloud_dir = os.path.join(cache_dir, "pointclouds")
-    if not os.path.exists(point_cloud_dir):
-        os.makedirs(point_cloud_dir)
-
-    dataset = dataset.map(lambda example, idx: spatial_scene_constructor.apply_transform(example, idx, cache_dir, images), with_indices=True)
-    
-    pcds = dataset['train']['pointclouds'][0][0]
-
-    return pcds[1], 'ok'
-    
+depth = DepthEstimator(from_onnx=False)
+localizer = Localizer()
+spatial_scene_constructor = SpatialSceneConstructor()
+prompt_generator = PromptGenerator()
 
 
-def run(image: PIL.Image):
-    dataset = DatasetDict()
-    dataset["train"] = Dataset.from_dict({"images": [image]})
+def combine_segmented_pointclouds(
+    pointcloud_ply_files: list, captions: list, prompts: list, cache_dir: str
+):
+    """
+    Process a list of segmented point clouds to combine two based on captions and return the resulting 3D point cloud and the identified prompt.
 
-    pcd_file, final_dataset = run_vqasynth_pipeline(dataset)
-    output_dir = "./vqasynth_output/gradio"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    with tempfile.TemporaryDirectory() as temp_dir:
-        ply_file = os.path.join(temp_dir, "output.ply")
-        obj_file = os.path.join(temp_dir, "output.obj")
-        pcd = o3d.io.read_point_cloud(ply_file)
+    Args:
+        pointcloud_ply_files (list): List of file paths to `.pcd` files representing segmented point clouds.
+        captions (list): List of captions corresponding to the segmented point clouds.
+        prompts (list): List of prompts containing questions and answers about the captions.
+        cache_dir (str): Directory to save the final `.ply` and `.obj` files.
 
-    o3d.io.write_point_cloud(ply_file, pcd)
+    Returns:
+        tuple: The path to the generated `.obj` file and the identified prompt text.
+    """
+    selected_prompt = None
+    selected_indices = None
+    for i, caption1 in enumerate(captions):
+        for j, caption2 in enumerate(captions):
+            if i != j:
+                for prompt in prompts:
+                    if caption1 in prompt and caption2 in prompt:
+                        selected_prompt = prompt
+                        selected_indices = (i, j)
+                        break
+                if selected_prompt:
+                    break
+        if selected_prompt:
+            break
+
+    if not selected_prompt or not selected_indices:
+        raise ValueError("No prompt found containing two captions.")
+
+    idx1, idx2 = selected_indices
+    pointcloud_files = [pointcloud_ply_files[idx1], pointcloud_ply_files[idx2]]
+    captions = [captions[idx1], captions[idx2]]
+
+    combined_point_cloud = o3d.geometry.PointCloud()
+    for idx, pointcloud_file in enumerate(pointcloud_files):
+        pcd = o3d.io.read_point_cloud(pointcloud_file)
+        if pcd.is_empty():
+            continue
+
+        combined_point_cloud += pcd
+
+    if combined_point_cloud.is_empty():
+        raise ValueError(
+            "Combined point cloud is empty after loading the selected segments."
+        )
+
+    uuid_out = str(uuid.uuid4())
+    ply_file = os.path.join(cache_dir, f"combined_output_{uuid_out}.ply")
+    obj_file = os.path.join(cache_dir, f"combined_output_{uuid_out}.obj")
+
+    o3d.io.write_point_cloud(ply_file, combined_point_cloud)
 
     mesh = o3d.io.read_triangle_mesh(ply_file)
-
     o3d.io.write_triangle_mesh(obj_file, mesh)
-    
-    return obj_file, "OK"
+
+    return obj_file, selected_prompt
 
 
-iface = gr.Interface(
-    fn=run,
-    inputs=gr.Image(type="pil", label="Upload an Image"),
-    outputs=[gr.Model3D(label="3D Point Cloud"), gr.Text(label="Caption")],
-    title="VQASynth: Generate captions with spatial information",
-    description="Upload an image to run the VQASynth which will constuct a 3d representation of the image and generates the caption with spatial information"
-)
+def run_vqasynth_pipeline(image: PIL.Image, cache_dir: str):
+    depth_map, focal_length = depth.run(image)
+    masks, bounding_boxes, captions = localizer.run(image)
+    pointcloud_data, cannonicalized = spatial_scene_constructor.run(
+        str(0), image, depth_map, focal_length, masks, cache_dir
+    )
+    prompts = prompt_generator.run(captions, pointcloud_data, cannonicalized)
+    obj_file, selected_prompt = combine_segmented_pointclouds(
+        pointcloud_data, captions, prompts, cache_dir
+    )
+    return obj_file, selected_prompt
+
+
+def process_image(image: str):
+    # Use a persistent temporary directory to keep the .obj file accessible by Gradio
+    temp_dir = tempfile.mkdtemp()
+    image = Image.open(image).convert("RGB")
+    obj_file, prompt = run_vqasynth_pipeline(image, temp_dir)
+    return obj_file, prompt
+
+
+def build_demo():
+    with gr.Blocks() as demo:
+        gr.Markdown(
+            """
+        # Synthesizing SpatialVQA Samples with VQASynth
+        This space helps test the full [VQASynth](https://github.com/remyxai/VQASynth) scene reconstruction pipeline on a single image with visualizations. 
+        ### [Github](https://github.com/remyxai/VQASynth) | [Collection](https://huggingface.co/collections/remyxai/spacevlms-66a3dbb924756d98e7aec678) 
+        """
+        )
+
+        gr.Markdown(
+            """
+        ## Instructions
+        Upload an image, and the tool will generate a corresponding 3D point cloud visualization of the objects found and an example prompt and response describing a spatial relationship between the objects.
+        """
+        )
+
+        with gr.Row():
+            with gr.Column():
+                image_input = gr.Image(type="filepath", label="Upload an Image")
+                generate_button = gr.Button("Generate")
+
+            with gr.Column():
+                model_output = gr.Model3D(label="3D Point Cloud")  # Only used as output
+                caption_output = gr.Text(label="Caption")
+
+        generate_button.click(
+            process_image, inputs=image_input, outputs=[model_output, caption_output]
+        )
+
+        gr.Examples(
+            examples=[["./assets/warehouse_rgb.jpg"], ["./assets/spooky_doggy.png"]],
+            inputs=image_input,
+            label="Example Images",
+            examples_per_page=5,
+        )
+
+        gr.Markdown(
+            """
+        ## Citation
+        ```
+        @article{chen2024spatialvlm,
+          title = {SpatialVLM: Endowing Vision-Language Models with Spatial Reasoning Capabilities},
+          author = {Chen, Boyuan and Xu, Zhuo and Kirmani, Sean and Ichter, Brian and Driess, Danny and Florence, Pete and Sadigh, Dorsa and Guibas, Leonidas and Xia, Fei},
+          journal = {arXiv preprint arXiv:2401.12168},
+          year = {2024},
+          url = {https://arxiv.org/abs/2401.12168},
+        }
+        ```
+        """
+        )
+
+    return demo
+
 
 if __name__ == "__main__":
-    depth = DepthEstimator()
-    localizer = Localizer()
-    spatial_scene_constructor = SpatialSceneConstructor()
-
-    iface.launch(debug=True)
-
-
-
-
-
-
-
+    demo = build_demo()
+    demo.launch(share=True)
