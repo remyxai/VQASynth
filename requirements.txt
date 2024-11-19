@@ -4,11 +4,11 @@ timm==1.0.9
 einops==0.7.0
 open3d==0.18.0
 opencv-python==4.7.0.72
-tqdm==4.64.1
+tqdm==4.66.3
 torchprofile==0.0.4
 matplotlib==3.6.2
 transformers==4.44.2
-huggingface-hub==0.24.7
+huggingface-hub==0.25.1
 onnx==1.13.1
 onnxruntime==1.14.1
 onnxsim==0.4.35
@@ -17,6 +17,7 @@ openai==1.12.0
 litellm==1.25.2
 pycocotools==2.0.6
 onnxruntime-gpu==1.18.1
-pandas
-html5lib
-datasets
+pandas==2.2.3
+html5lib==1.1
+datasets==3.1.0
+spacy==3.7.5
