@@ -20,9 +20,13 @@ class SpatialSceneConstructor:
         o3d.io.write_point_cloud(file_path, pcd)
 
     def restore_pointclouds(self, pointcloud_paths):
+        if len(pointcloud_paths) == 1 and isinstance(pointcloud_paths[0], list):
+            pointcloud_paths = pointcloud_paths[0]
+
         restored_pointclouds = []
         for path in pointcloud_paths:
             restored_pointclouds.append(o3d.io.read_point_cloud(path))
+
         return restored_pointclouds
 
     def apply_mask_to_image(self, image, mask):
