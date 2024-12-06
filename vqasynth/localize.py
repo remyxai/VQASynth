@@ -1,3 +1,4 @@
+import re
 import torch
 import numpy as np
 import random
@@ -6,6 +7,12 @@ from PIL import Image
 
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import (
+    AutoModelForCausalLM,
+    AutoProcessor,
+    BitsAndBytesConfig,
+    GenerationConfig,
+)
 
 
 class CaptionLocalizer:
@@ -29,7 +36,7 @@ class CaptionLocalizer:
     def extract_descriptions(self, doc, head):
         descriptions = []
         for chunk in doc.noun_chunks:
-            if chunk.root.head == head or chunk.root.dep_ == 'attr':
+            if chunk.root.head == head or chunk.root.dep_ == "attr":
                 descriptions.append(chunk.text.lower())
         return descriptions
 
@@ -38,7 +45,7 @@ class CaptionLocalizer:
         subject, action_verb = self.find_subject(doc)
         if action_verb:
             descriptions = self.extract_descriptions(doc, action_verb)
-            return ', '.join(descriptions)
+            return ", ".join(descriptions)
         else:
             return caption
 
@@ -69,13 +76,13 @@ class CaptionLocalizer:
         filtered_bboxes = []
         filtered_labels = []
 
-        for i in range(len(data['bboxes'])):
-            current_box = data['bboxes'][i]
-            current_label = data['labels'][i]
+        for i in range(len(data["bboxes"])):
+            current_box = data["bboxes"][i]
+            current_label = data["labels"][i]
             is_duplicate = False
 
             for j in range(len(filtered_bboxes)):
-                if current_label == filtered_labels[j]: 
+                if current_label == filtered_labels[j]:
                     is_duplicate = True
                     break
 
@@ -83,7 +90,11 @@ class CaptionLocalizer:
                 filtered_bboxes.append(current_box)
                 filtered_labels.append(current_label)
 
-        return {'bboxes': filtered_bboxes, 'labels': filtered_labels, 'caption': data['caption']}
+        return {
+            "bboxes": filtered_bboxes,
+            "labels": filtered_labels,
+            "caption": data["caption"],
+        }
 
     def check_resize_image(self, image, max_dimension=512):
         """
@@ -103,7 +114,6 @@ class CaptionLocalizer:
         scale_factor = max_dimension / max(image.size)
         new_size = (int(image.width * scale_factor), int(image.height * scale_factor))
         return image.resize(new_size, Image.LANCZOS)
-
 
     def run(self, image):
         """
@@ -149,11 +159,15 @@ class CaptionLocalizer:
 
         try:
             # Initial prompt and inputs
-            inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
+            inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(
+                self.device, self.torch_dtype
+            )
 
             # Generate detailed captions
             generated_ids = safe_generate(inputs)
-            generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+            generated_text = self.processor.batch_decode(
+                generated_ids, skip_special_tokens=False
+            )[0]
 
             # Process the generated text
             parsed_answer = self.processor.post_process_generation(
@@ -167,12 +181,18 @@ class CaptionLocalizer:
                     task = "<CAPTION_TO_PHRASE_GROUNDING>"
                     prompt = f"{task} {caption}"
 
-                    inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
+                    inputs = self.processor(
+                        text=prompt, images=image, return_tensors="pt"
+                    ).to(self.device, self.torch_dtype)
                     generated_ids = safe_generate(inputs)
 
-                    generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+                    generated_text = self.processor.batch_decode(
+                        generated_ids, skip_special_tokens=False
+                    )[0]
                     parsed_answer = self.processor.post_process_generation(
-                        generated_text, task=task, image_size=(image.width, image.height)
+                        generated_text,
+                        task=task,
+                        image_size=(image.width, image.height),
                     )
                     caption_bbox = parsed_answer.get(task, {})
 
@@ -185,13 +205,19 @@ class CaptionLocalizer:
                     caption_bbox = self.bbox_dedupe(caption_bbox)
 
                     # Handle multiple bounding boxes
-                    if len(caption_bbox['bboxes']) > 1:
-                        flip = random.choice(['heads', 'tails'])
-                        idx = random.randint(1, len(caption_bbox['bboxes']) - 1) if flip == 'heads' else 0
+                    if len(caption_bbox["bboxes"]) > 1:
+                        flip = random.choice(["heads", "tails"])
+                        idx = (
+                            random.randint(1, len(caption_bbox["bboxes"]) - 1)
+                            if flip == "heads"
+                            else 0
+                        )
                         if idx > 0:
-                            caption_bbox['caption'] = f"{caption_bbox['labels'][idx].lower()} with {caption_bbox['labels'][0].lower()}"
-                        caption_bbox['bboxes'] = [caption_bbox['bboxes'][idx]]
-                        caption_bbox['labels'] = [caption_bbox['labels'][idx]]
+                            caption_bbox[
+                                "caption"
+                            ] = f"{caption_bbox['labels'][idx].lower()} with {caption_bbox['labels'][0].lower()}"
+                        caption_bbox["bboxes"] = [caption_bbox["bboxes"][idx]]
+                        caption_bbox["labels"] = [caption_bbox["labels"][idx]]
 
                     captioned_bboxes.append(caption_bbox)
 
@@ -200,18 +226,23 @@ class CaptionLocalizer:
 
             # Calculate distances between bounding boxes and select the top 3 distinct ones
             if captioned_bboxes:
-                bboxes = [item['bboxes'][0] for item in captioned_bboxes]
+                bboxes = [item["bboxes"][0] for item in captioned_bboxes]
                 n = len(bboxes)
                 distance_matrix = np.zeros((n, n))
                 for i in range(n):
                     for j in range(n):
                         if i != j:
-                            distance_matrix[i][j] = 1 - self.compute_iou(bboxes[i], bboxes[j])
+                            distance_matrix[i][j] = 1 - self.compute_iou(
+                                bboxes[i], bboxes[j]
+                            )
 
                 scores = np.sum(distance_matrix, axis=1)
                 selected_indices = np.argsort(scores)[-3:]
                 captioned_bboxes = [
-                    {"bboxes": captioned_bboxes[i]['bboxes'][0], "caption": captioned_bboxes[i]['caption']}
+                    {
+                        "bboxes": captioned_bboxes[i]["bboxes"][0],
+                        "caption": captioned_bboxes[i]["caption"],
+                    }
                     for i in selected_indices
                 ]
 
@@ -227,14 +258,21 @@ class CaptionLocalizer:
         """
         if len(captioned_bboxes) > 1:
             # Ensure we have valid bounding boxes
-            valid_bboxes = [item for item in captioned_bboxes if 'bboxes' in item and item['bboxes']]
+            valid_bboxes = [
+                item for item in captioned_bboxes if "bboxes" in item and item["bboxes"]
+            ]
             if len(valid_bboxes) > 1:
-                largest_idx = self.get_largest_bbox_idx([item['bboxes'][0] for item in valid_bboxes])
-                largest_bbox = valid_bboxes[largest_idx]['bboxes'][0]
+                largest_idx = self.get_largest_bbox_idx(
+                    [item["bboxes"][0] for item in valid_bboxes]
+                )
+                largest_bbox = valid_bboxes[largest_idx]["bboxes"][0]
 
                 # Check if all other bounding boxes are inside the largest one
-                if all(self.is_bbox_inside(bbox['bboxes'][0], largest_bbox)
-                       for i, bbox in enumerate(valid_bboxes) if i != largest_idx):
+                if all(
+                    self.is_bbox_inside(bbox["bboxes"][0], largest_bbox)
+                    for i, bbox in enumerate(valid_bboxes)
+                    if i != largest_idx
+                ):
                     valid_bboxes.pop(largest_idx)
 
             return valid_bboxes
@@ -258,26 +296,25 @@ class CaptionLocalizer:
 
         return " ".join(final_caption)
 
-
     def is_bbox_inside(self, inner_bbox, outer_bbox):
         """
         Check if one bounding box is inside another.
         """
         return (
-            inner_bbox[0] >= outer_bbox[0] and
-            inner_bbox[1] >= outer_bbox[1] and
-            inner_bbox[2] <= outer_bbox[2] and
-            inner_bbox[3] <= outer_bbox[3]
+            inner_bbox[0] >= outer_bbox[0]
+            and inner_bbox[1] >= outer_bbox[1]
+            and inner_bbox[2] <= outer_bbox[2]
+            and inner_bbox[3] <= outer_bbox[3]
         )
-
 
     def get_largest_bbox_idx(self, bboxes):
         """
         Returns the index of the largest bounding box by area.
         """
-        return max(range(len(bboxes)), key=lambda i: (bboxes[i][2] - bboxes[i][0]) * (bboxes[i][3] - bboxes[i][1]))
-
-
+        return max(
+            range(len(bboxes)),
+            key=lambda i: (bboxes[i][2] - bboxes[i][0]) * (bboxes[i][3] - bboxes[i][1]),
+        )
 
 
 class LocationRefiner:
@@ -330,7 +367,6 @@ class Localizer:
             all_bboxes = []
             all_captions = []
 
-
             object_counter = 1
             for pred in preds:
                 bbox = pred.get("bboxes", [])
@@ -360,7 +396,9 @@ class Localizer:
         Returns:
             Updated example(s) with masks, bboxes, and captions.
         """
-        is_batched = isinstance(example[images], list) and isinstance(example[images][0], (list, Image.Image))
+        is_batched = isinstance(example[images], list) and isinstance(
+            example[images][0], (list, Image.Image)
+        )
 
         try:
             if is_batched:
@@ -374,41 +412,198 @@ class Localizer:
                     if not isinstance(image, Image.Image):
                         raise ValueError(f"Expected a PIL image but got {type(image)}")
 
-                    if image.mode != 'RGB':
-                        image = image.convert('RGB')
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
 
                     masks, bboxes, captions = self.run(image)
                     all_masks.append(masks)
                     all_bboxes.append(bboxes)
                     all_captions.append(captions)
 
-                example['masks'] = all_masks
-                example['bboxes'] = all_bboxes
-                example['captions'] = all_captions
+                example["masks"] = all_masks
+                example["bboxes"] = all_bboxes
+                example["captions"] = all_captions
 
             else:
-                image = example[images][0] if isinstance(example[images], list) else example[images]
+                image = (
+                    example[images][0]
+                    if isinstance(example[images], list)
+                    else example[images]
+                )
 
                 if not isinstance(image, Image.Image):
                     raise ValueError(f"Expected a PIL image but got {type(image)}")
 
-                if image.mode != 'RGB':
-                    image = image.convert('RGB')
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
 
                 masks, bboxes, captions = self.run(image)
-                example['masks'] = masks
-                example['bboxes'] = bboxes
-                example['captions'] = captions
+                example["masks"] = masks
+                example["bboxes"] = bboxes
+                example["captions"] = captions
 
         except Exception as e:
             print(f"Error processing image, skipping: {e}")
             if is_batched:
-                example['masks'] = [None] * len(example[images])
-                example['bboxes'] = [None] * len(example[images])
-                example['captions'] = [None] * len(example[images])
+                example["masks"] = [None] * len(example[images])
+                example["bboxes"] = [None] * len(example[images])
+                example["captions"] = [None] * len(example[images])
             else:
-                example['masks'] = None
-                example['bboxes'] = None
-                example['captions'] = None
+                example["masks"] = None
+                example["bboxes"] = None
+                example["captions"] = None
 
         return example
+
+
+class Captioner:
+    def generate_caption(self, image, prompt):
+        raise NotImplementedError("Subclasses must implement this method.")
+
+
+class MolmoCaptioner(Captioner):
+    def __init__(self, model_name="allenai/Molmo-7B-O-0924"):
+        quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.processor = AutoProcessor.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+        )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            quantization_config=quantization_config,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+        )
+
+    def generate_caption(self, image, prompt):
+        inputs = self.processor.process(images=[image], text=prompt)
+        inputs["images"] = inputs["images"].to(torch.bfloat16)
+        inputs = {k: v.to(self.device).unsqueeze(0) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            output = self.model.generate_from_batch(
+                inputs,
+                GenerationConfig(max_new_tokens=200, stop_strings=["<|endoftext|>"]),
+                tokenizer=self.processor.tokenizer,
+            )
+            generated_tokens = output[0, inputs["input_ids"].size(1) :]
+            return self.processor.tokenizer.decode(
+                generated_tokens, skip_special_tokens=True
+            )
+
+
+class FlorenceCaptioner(Captioner):
+    def __init__(self, model_name="microsoft/Florence-2-base"):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.processor = AutoProcessor.from_pretrained(
+            model_name, trust_remote_code=True
+        )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name, torch_dtype=torch.float16, trust_remote_code=True
+        ).to(self.device)
+
+    def generate_caption(self, image, prompt):
+        inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(
+            self.device
+        )
+        with torch.no_grad():
+            generated_ids = self.model.generate(
+                input_ids=inputs["input_ids"],
+                pixel_values=inputs["pixel_values"],
+                max_length=1024,
+                num_beams=1,
+                do_sample=False,
+            )
+            return self.processor.batch_decode(
+                generated_ids, skip_special_tokens=False
+            )[0]
+
+
+class SAM2Segmenter:
+    def __init__(
+        self,
+        model_name="sam2_hiera_l.yaml",
+        checkpoint="../checkpoints/sam2_hiera_large.pt",
+    ):
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.predictor = SAM2ImagePredictor.from_pretrained(
+            model_name, trust_remote_code=True, device=self.device
+        )
+
+    def segment_with_points(self, image, points):
+        self.predictor.set_image(image)
+        input_labels = np.ones(len(points))
+        masks, scores, _ = self.predictor.predict(
+            point_coords=np.array(points),
+            point_labels=input_labels,
+            box=None,
+            multimask_output=False,
+        )
+        return masks, scores
+
+    def segment_with_bboxes(self, image, bboxes):
+        self.predictor.set_image(image)
+        masks, scores, _ = self.predictor.predict(
+            point_coords=None, box=np.array(bboxes), multimask_output=False
+        )
+        return masks, scores
+
+
+def extract_points_from_caption(caption, image_w, image_h):
+    """Parse points from caption."""
+    points = []
+    for match in re.finditer(
+        r'x\d*="\s*([0-9]+(?:\.[0-9]+)?)"\s+y\d*="\s*([0-9]+(?:\.[0-9]+)?)"', caption
+    ):
+        try:
+            point = [float(match.group(1)), float(match.group(2))]
+            if max(point) > 100:  # Invalid if values exceed 100
+                continue
+            point = np.array(point) / 100.0  # Normalize to [0, 1]
+            points.append(point * np.array([image_w, image_h]))
+        except ValueError:
+            continue
+    return points
+
+
+class Localizer:
+    def __init__(
+        self,
+        captioner_type="molmo",
+        sam2_cfg="sam2_hiera_l.yaml",
+        sam2_checkpoint="../checkpoints/sam2_hiera_large.pt",
+    ):
+        if captioner_type == "molmo":
+            self.captioner = MolmoCaptioner()
+        elif captioner_type == "florence":
+            self.captioner = FlorenceCaptioner()
+        else:
+            raise ValueError("Unsupported captioner type.")
+        self.segmenter = SAM2Segmenter(sam2_cfg, sam2_checkpoint)
+
+    def run(
+        self,
+        image,
+        prompt="Point to the object of interest in the scene.",
+        use_points=True,
+    ):
+        """Run the localization pipeline."""
+        # Generate caption and points
+        caption = self.captioner.generate_caption(image, prompt)
+        w, h = image.size
+        points = extract_points_from_caption(caption, w, h) if use_points else None
+
+        if use_points and points:
+            masks, scores = self.segmenter.segment_with_points(image, points)
+        elif not use_points:
+            # Use bounding boxes (if bbox extraction logic is added in caption parsing)
+            bboxes = []  # Replace with bbox parsing logic
+            masks, scores = self.segmenter.segment_with_bboxes(image, bboxes)
+        else:
+            masks, scores = [], []
+
+        return {"masks": masks, "scores": scores, "points": points, "caption": caption}
