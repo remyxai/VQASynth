@@ -110,6 +110,7 @@ Here are some examples:
 
 * [SpaceLLaVA - 13B](https://huggingface.co/remyxai/SpaceLLaVA)
 * [SpaceMantis - 8B](https://huggingface.co/remyxai/SpaceMantis)
+* [SpaceQwen2.5-VL-3B-Instruct - 3B](https://huggingface.co/remyxai/SpaceQwen2.5-VL-3B-Instruct)
 * [SpaceFlorence-2 - <1B](https://huggingface.co/remyxai/SpaceFlorence-2)
 * [SpaceVLMs Collection](https://huggingface.co/collections/remyxai/spacevlms-66a3dbb924756d98e7aec678)
 
