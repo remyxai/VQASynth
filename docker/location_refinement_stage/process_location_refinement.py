@@ -29,7 +29,7 @@ def main(output_dir, source_repo_id, images):
         localizer.apply_transform,
         fn_kwargs={'images': images},
         batched=True,
-        batch_size=32,
+        batch_size=1,
     )
 
     # 5) Filter out nulls
