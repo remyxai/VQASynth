@@ -1,414 +1,315 @@
-import torch
-import numpy as np
 import random
+import re
+import numpy as np
+import torch
 import spacy
 from PIL import Image
 
+from transformers import (
+    AutoProcessor,
+    AutoModelForCausalLM,
+    GenerationConfig
+)
+
+from transformers.utils.quantization_config import BitsAndBytesConfig
 from sam2.sam2_image_predictor import SAM2ImagePredictor
-from transformers import AutoModelForCausalLM, AutoProcessor
 
+########################################
+# Helper for Molmo: parse text -> points
+########################################
+def extract_points_and_descriptions(molmo_output, image_w, image_h):
+    """
+    Extract points and their corresponding descriptions from the Molmo output.
+    Convert normalized coordinates (0-100) into pixel coordinates.
+    """
+    results = []
+    pattern = re.compile(
+        r'<point\s+x="\s*([0-9]+(?:\.[0-9]+)?)"\s+y="\s*([0-9]+(?:\.[0-9]+)?)"\s+alt="([^"]+)">'
+    )
+    for match in pattern.finditer(molmo_output):
+        try:
+            x_norm = float(match.group(1))
+            y_norm = float(match.group(2))
+            description = match.group(3)
+        except ValueError:
+            continue
+        if max(x_norm, y_norm) > 100:
+            continue
+        x_pixel = (x_norm / 100.0) * image_w
+        y_pixel = (y_norm / 100.0) * image_h
+        results.append({"points": [x_pixel, y_pixel], "caption": description})
+    return results
 
-class CaptionLocalizer:
-    def __init__(self, model_name="microsoft/Florence-2-base", device=None):
+def extract_captions(raw_text):
+    """
+    Extracts a list of captions from Molmo's generated text.
+    It expects output with tags of the form:
+      <point ... alt="Caption text">...</point>
+    Returns a flat list of caption strings.
+    """
+    pattern = r'<point\s+[^>]*alt="([^"]+)"'
+    captions = re.findall(pattern, raw_text)
+    return [cap.strip().lower() for cap in captions]
+
+########################################
+# 1) BaseCaptionLocalizer
+########################################
+class BaseCaptionLocalizer:
+    def __init__(self, device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.torch_dtype = torch.float16
-        self.processor = AutoProcessor.from_pretrained(
-            model_name, trust_remote_code=True
-        )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=self.torch_dtype, trust_remote_code=True
-        ).to(self.device)
         self.nlp = spacy.load("en_core_web_sm")
+        self.torch_dtype = torch.float16
+        self.model = None
+        self.processor = None
+        self.post_init()
 
-    def find_subject(self, doc):
-        for token in doc:
-            if "subj" in token.dep_:
-                return token.text, token.head
-        return None, None
+    def post_init(self):
+        pass
 
-    def extract_descriptions(self, doc, head):
-        descriptions = []
-        for chunk in doc.noun_chunks:
-            if chunk.root.head == head or chunk.root.dep_ == 'attr':
-                descriptions.append(chunk.text.lower())
-        return descriptions
-
-    def caption_refiner(self, caption):
-        doc = self.nlp(caption)
-        subject, action_verb = self.find_subject(doc)
-        if action_verb:
-            descriptions = self.extract_descriptions(doc, action_verb)
-            return ', '.join(descriptions)
-        else:
-            return caption
-
-    def compute_iou(self, box1, box2):
-        x1_min, y1_min, x1_max, y1_max = box1
-        x2_min, y2_min, x2_max, y2_max = box2
-
-        x_inter_min = max(x1_min, x2_min)
-        y_inter_min = max(y1_min, y2_min)
-        x_inter_max = min(x1_max, x2_max)
-        y_inter_max = min(y1_max, y2_max)
-
-        inter_width = max(0, x_inter_max - x_inter_min)
-        inter_height = max(0, y_inter_max - y_inter_min)
-
-        inter_area = inter_width * inter_height
-
-        box1_area = (x1_max - x1_min) * (y1_max - y1_min)
-        box2_area = (x2_max - x2_min) * (y2_max - y2_min)
-
-        union_area = box1_area + box2_area - inter_area
-
-        iou = inter_area / union_area if union_area != 0 else 0
-
-        return iou
-
-    def bbox_dedupe(self, data, iou_threshold=0.5):
-        filtered_bboxes = []
-        filtered_labels = []
-
-        for i in range(len(data['bboxes'])):
-            current_box = data['bboxes'][i]
-            current_label = data['labels'][i]
-            is_duplicate = False
-
-            for j in range(len(filtered_bboxes)):
-                if current_label == filtered_labels[j]: 
-                    is_duplicate = True
-                    break
-
-            if not is_duplicate:
-                filtered_bboxes.append(current_box)
-                filtered_labels.append(current_label)
-
-        return {'bboxes': filtered_bboxes, 'labels': filtered_labels, 'caption': data['caption']}
-
-    def check_resize_image(self, image, max_dimension=512):
-        """
-        Resizes the image to ensure the largest dimension is at most max_dimension
-        while maintaining aspect ratio.
-
-        Parameters:
-        - image (Image.Image): The PIL image to resize.
-        - max_dimension (int): The maximum allowed size for the largest dimension. Default is 512.
-
-        Returns:
-        - Image.Image: The resized image, if resizing was needed; otherwise, the original image.
-        """
-        if max(image.size) <= max_dimension:
-            return image
-
-        scale_factor = max_dimension / max(image.size)
-        new_size = (int(image.width * scale_factor), int(image.height * scale_factor))
-        return image.resize(new_size, Image.LANCZOS)
-
+    def generate_ids(self, inputs):
+        raise NotImplementedError
 
     def run(self, image):
-        """
-        Extract captioned bounding boxes of objects found in the scene.
+        raise NotImplementedError
 
-        Args:
-            image: A PIL Image
+#######################################
+# 2) FlorenceCaptionLocalizer
+#######################################
+class FlorenceCaptionLocalizer(BaseCaptionLocalizer):
+    def __init__(self, model_name="microsoft/Florence-2-base", device=None):
+        self.model_name = model_name
+        super().__init__(device=device)
 
-        Returns:
-            list: A list of dictionaries containing bounding boxes and captions for objects found.
-        """
-        captioned_bboxes = []
-        task = "<MORE_DETAILED_CAPTION>"
-        prompt = f"{task}"
-        image = self.check_resize_image(image)
+    def post_init(self):
+        self.processor = AutoProcessor.from_pretrained(self.model_name, trust_remote_code=True)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            torch_dtype=self.torch_dtype,
+            trust_remote_code=True
+        ).to(self.device)
 
-        # Function to handle generation with CPU fallback
-        def safe_generate(inputs):
-            try:
-                generated_ids = self.model.generate(
-                    input_ids=inputs["input_ids"],
-                    pixel_values=inputs["pixel_values"],
-                    max_length=1024,
-                    num_beams=1,
-                    do_sample=False,
-                )
-                return generated_ids
-            except RuntimeError as e:
-                if "CUDA error" in str(e):
-                    print("CUDA error encountered, switching to CPU for this sample.")
-                    torch.cuda.empty_cache()
-                    self.model = self.model.to("cpu")
-                    inputs = inputs.to("cpu")
-                    return self.model.generate(
-                        input_ids=inputs["input_ids"],
-                        pixel_values=inputs["pixel_values"],
-                        max_length=1024,
-                        num_beams=1,
-                        do_sample=False,
-                    )
-                else:
-                    raise e
-
-        try:
-            # Initial prompt and inputs
-            inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
-
-            # Generate detailed captions
-            generated_ids = safe_generate(inputs)
-            generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-
-            # Process the generated text
-            parsed_answer = self.processor.post_process_generation(
-                generated_text, task=prompt, image_size=(image.width, image.height)
-            )
-            captions = parsed_answer.get(task, "").split(".")
-
-            for caption in captions:
-                if caption:
-                    # For each caption, ground it to a phrase
-                    task = "<CAPTION_TO_PHRASE_GROUNDING>"
-                    prompt = f"{task} {caption}"
-
-                    inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
-                    generated_ids = safe_generate(inputs)
-
-                    generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-                    parsed_answer = self.processor.post_process_generation(
-                        generated_text, task=task, image_size=(image.width, image.height)
-                    )
-                    caption_bbox = parsed_answer.get(task, {})
-
-                    if "bboxes" not in caption_bbox or "labels" not in caption_bbox:
-                        print("Skipping entry due to missing bounding boxes or labels.")
-                        continue
-
-                    # Normalize and deduplicate
-                    caption_bbox["caption"] = self.normalize_caption(caption)
-                    caption_bbox = self.bbox_dedupe(caption_bbox)
-
-                    # Handle multiple bounding boxes
-                    if len(caption_bbox['bboxes']) > 1:
-                        flip = random.choice(['heads', 'tails'])
-                        idx = random.randint(1, len(caption_bbox['bboxes']) - 1) if flip == 'heads' else 0
-                        if idx > 0:
-                            caption_bbox['caption'] = f"{caption_bbox['labels'][idx].lower()} with {caption_bbox['labels'][0].lower()}"
-                        caption_bbox['bboxes'] = [caption_bbox['bboxes'][idx]]
-                        caption_bbox['labels'] = [caption_bbox['labels'][idx]]
-
-                    captioned_bboxes.append(caption_bbox)
-
-            # Filter out the largest bounding box if it encompasses all others
-            captioned_bboxes = self.filter_large_bbox(captioned_bboxes)
-
-            # Calculate distances between bounding boxes and select the top 3 distinct ones
-            if captioned_bboxes:
-                bboxes = [item['bboxes'][0] for item in captioned_bboxes]
-                n = len(bboxes)
-                distance_matrix = np.zeros((n, n))
-                for i in range(n):
-                    for j in range(n):
-                        if i != j:
-                            distance_matrix[i][j] = 1 - self.compute_iou(bboxes[i], bboxes[j])
-
-                scores = np.sum(distance_matrix, axis=1)
-                selected_indices = np.argsort(scores)[-3:]
-                captioned_bboxes = [
-                    {"bboxes": captioned_bboxes[i]['bboxes'][0], "caption": captioned_bboxes[i]['caption']}
-                    for i in selected_indices
-                ]
-
-        except Exception as e:
-            print(f"Error during localization: {str(e)}")
-            return []
-
-        return captioned_bboxes
-
-    def filter_large_bbox(self, captioned_bboxes):
-        """
-        Filters out the largest bounding box if it encapsulates all others, assuming it's the entire image.
-        """
-        if len(captioned_bboxes) > 1:
-            # Ensure we have valid bounding boxes
-            valid_bboxes = [item for item in captioned_bboxes if 'bboxes' in item and item['bboxes']]
-            if len(valid_bboxes) > 1:
-                largest_idx = self.get_largest_bbox_idx([item['bboxes'][0] for item in valid_bboxes])
-                largest_bbox = valid_bboxes[largest_idx]['bboxes'][0]
-
-                # Check if all other bounding boxes are inside the largest one
-                if all(self.is_bbox_inside(bbox['bboxes'][0], largest_bbox)
-                       for i, bbox in enumerate(valid_bboxes) if i != largest_idx):
-                    valid_bboxes.pop(largest_idx)
-
-            return valid_bboxes
-
-        return captioned_bboxes
-
-    def normalize_caption(self, caption):
-        """
-        Normalize the caption using Spacy to remove duplicates like "apple" and "apples".
-        """
-        doc = self.nlp(caption)
-        normalized_nouns = set()
-        final_caption = []
-
-        for token in doc:
-            if token.pos_ in ["NOUN", "ADJ"]:
-                lemma = token.lemma_.lower()
-                if lemma not in normalized_nouns:
-                    normalized_nouns.add(lemma)
-                    final_caption.append(lemma)
-
-        return " ".join(final_caption)
-
-
-    def is_bbox_inside(self, inner_bbox, outer_bbox):
-        """
-        Check if one bounding box is inside another.
-        """
-        return (
-            inner_bbox[0] >= outer_bbox[0] and
-            inner_bbox[1] >= outer_bbox[1] and
-            inner_bbox[2] <= outer_bbox[2] and
-            inner_bbox[3] <= outer_bbox[3]
+    def generate_ids(self, inputs):
+        generated_ids = self.model.generate(
+            input_ids=inputs["input_ids"],
+            pixel_values=inputs["pixel_values"],
+            max_length=1024,
+            num_beams=1,
+            do_sample=False,
         )
+        return generated_ids
 
+    def run(self, image):
+        prompt_task = "<MORE_DETAILED_CAPTION>"
+        inputs = self.processor(text=prompt_task, images=image, return_tensors="pt").to(self.device)
+        generated_ids = self.generate_ids(inputs)
+        generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+        parsed_answer = self.processor.post_process_generation(
+            generated_text, task=prompt_task, image_size=(image.width, image.height)
+        )
+        main_captions = parsed_answer.get(prompt_task, "").split(".")
+        results = []
+        for chunk in main_captions:
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            grounding_prompt = f"<CAPTION_TO_PHRASE_GROUNDING> {chunk}"
+            grounding_in = self.processor(text=grounding_prompt, images=image, return_tensors="pt").to(self.device)
+            grounding_ids = self.generate_ids(grounding_in)
+            grounding_text = self.processor.batch_decode(grounding_ids, skip_special_tokens=False)[0]
+            parse2 = self.processor.post_process_generation(
+                grounding_text, task="<CAPTION_TO_PHRASE_GROUNDING>", image_size=(image.width, image.height)
+            )
+            phrase_data = parse2.get("<CAPTION_TO_PHRASE_GROUNDING>", {})
+            if "bboxes" not in phrase_data or "labels" not in phrase_data:
+                continue
+            results.append({
+                "bboxes": phrase_data["bboxes"],
+                "caption": chunk
+            })
+        return results
 
-    def get_largest_bbox_idx(self, bboxes):
-        """
-        Returns the index of the largest bounding box by area.
-        """
-        return max(range(len(bboxes)), key=lambda i: (bboxes[i][2] - bboxes[i][0]) * (bboxes[i][3] - bboxes[i][1]))
+########################################
+# 3) MolmoCaptionLocalizer
+########################################
+class MolmoCaptionLocalizer(BaseCaptionLocalizer):
+    def __init__(self, model_name="cyan2k/molmo-7B-O-bnb-4bit", device=None):
+        self.model_name = model_name
+        super().__init__(device=device)
 
+    def post_init(self):
+        if BitsAndBytesConfig is None:
+            raise ImportError("BitsAndBytesConfig not found for 4-bit usage.")
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16
+        )
+        print("Loading processor...")
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            device_map="auto",
+            torch_dtype=torch.float16
+        )
+        print("Loading model...")
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            quantization_config=quant_config,
+            device_map="auto",
+            torch_dtype=torch.float16
+        )
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.LayerNorm):
+                module.float()
 
+    def generate_ids(self, inputs):
+        with torch.no_grad():
+            output = self.model.generate_from_batch(
+                inputs,
+                GenerationConfig(max_new_tokens=300, stop_strings=["<|endoftext|>"]),
+                tokenizer=self.processor.tokenizer
+            )
+            generated_tokens = output[0, inputs["input_ids"].size(1):]
+            return generated_tokens.unsqueeze(0)
 
+    def run(self, image):
+        prompt = (
+            "You are an AI assistant that localizes objects in an image. "
+            "Identify each distinct object and output a list of <point> elements in this format: "
+            '<point x="X" y="Y" alt="Object description"/>. '
+            "Use normalized coordinates from 0 to 100. "
+            "Only provide valid points in the specified format."
+        )
+        inputs = self.processor.process(images=[image], text=prompt)
+        inputs = {k: v.to(self.device).unsqueeze(0) for k, v in inputs.items() if isinstance(v, torch.Tensor)}
+        generated_ids = self.generate_ids(inputs)
+        generated_text = self.processor.tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+        image_w, image_h = image.size
+        extracted_data = extract_points_and_descriptions(generated_text, image_w, image_h)
+        cleaned_captions = extract_captions(generated_text)
+        # Return a plain dictionary (not wrapped in an extra list) with flat lists.
+        if extracted_data:
+            structured_output = {
+                "points": [entry["points"] for entry in extracted_data],
+                "caption": cleaned_captions
+            }
+        else:
+            structured_output = {
+                "points": [],
+                "caption": cleaned_captions
+            }
+        del inputs, generated_ids
+        torch.cuda.empty_cache()
+        return structured_output
 
+########################################
+# 4) LocationRefiner (SAM2)
+########################################
 class LocationRefiner:
+    """
+    SAM2-based segmenter that can handle bounding boxes or points.
+    """
     def __init__(self, model_name="facebook/sam2-hiera-small", device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.sam2_model = SAM2ImagePredictor.from_pretrained(
             model_name, trust_remote_code=True, device=self.device
         )
 
-    def run(self, image, input_box):
-        """
-        Extract and refine object segmentation masks.
-
-        Args:
-            image: A PIL Image
-
-        Returns:
-            numpy.ndarray: A boolean NumPy array representing produced segmentation masks for objects found.
-
-        """
-        input_box = np.array(list(map(int, input_box)))
+    def run(self, image, prompts, use_points=False):
         self.sam2_model.set_image(image)
-        masks, scores, _ = self.sam2_model.predict(
-            point_coords=None, box=input_box[None, :], multimask_output=False
-        )
-        return masks.astype(bool)
+        if use_points:
+            mask_list = []
+            score_list = []
+            # Iterate over each point so that each gets its own segmentation mask.
+            for point in prompts:
+                pts = np.array(point, dtype=int).reshape(1, 2)
+                labels = np.ones(1, dtype=int)
+                masks, scores, _ = self.sam2_model.predict(
+                    point_coords=pts,
+                    point_labels=labels,
+                    box=None,
+                    multimask_output=False
+                )
+                # Use the first (and only) returned mask for this point.
+                mask_list.append(masks[0])
+                score_list.append(scores[0])
+            return np.array(mask_list).astype(bool), np.array(score_list)
+        else:
+            bboxes = np.array(prompts, dtype=int).reshape(-1, 4)
+            masks, scores, _ = self.sam2_model.predict(
+                point_coords=None,
+                box=bboxes,
+                multimask_output=False
+            )
+            return masks.astype(bool), scores
 
 
+########################################
+# 5) Localizer: unify the pipeline
+########################################
 class Localizer:
-    def __init__(self):
-        self.caption_localizer = CaptionLocalizer()
-        self.location_refiner = LocationRefiner()
+    """
+    If captioner_type="florence", produce bounding boxes (use_points=False).
+    If captioner_type="molmo", produce points (use_points=True).
+    Then refine with SAM2.
+    """
+    def __init__(self, captioner_type="florence", segmenter_model="facebook/sam2-hiera-small", device=None):
+        if captioner_type == "florence":
+            self.caption_localizer = FlorenceCaptionLocalizer(device=device)
+            self.use_points = False
+        elif captioner_type == "molmo":
+            self.caption_localizer = MolmoCaptionLocalizer(device=device)
+            self.use_points = True
+        else:
+            raise ValueError(f"Unknown captioner_type={captioner_type}")
+        self.location_refiner = LocationRefiner(model_name=segmenter_model, device=device)
 
     def run(self, image):
-        """
-        Produce object location masks, bboxes, and captions
-
-        Args:
-            image: A PIL Image
-
-        Returns:
-            tuple: list of  boolean NumPy arrays representing produced segmentation masks for objects found, a list of bounding boxes, a list of captions
-
-        """
-
-        try:
-            preds = self.caption_localizer.run(image)
-            sam_masks = []
-            original_size = image.size
-            all_bboxes = []
-            all_captions = []
-
-
-            object_counter = 1
-            for pred in preds:
-                bbox = pred.get("bboxes", [])
-                caption = pred.get("caption", [])
-
-                mask_tensor = self.location_refiner.run(image, bbox)
-                mask = mask_tensor[0]
-                mask_uint8 = (mask.astype(np.uint8)) * 255
-                sam_masks.append(mask_uint8)
-
-                all_bboxes.append(bbox)
-                all_captions.append(caption)
-
-            return sam_masks, all_bboxes, all_captions
-        except Exception as e:
-            print(f"Error during localization: {str(e)}")
-            return [], [], []
+        preds = self.caption_localizer.run(image)
+        if self.use_points:
+            # For Molmo, preds is a dictionary with flat lists.
+            prompts = preds.get("points", [])
+            captions = preds.get("caption", [])
+        else:
+            # For Florence, assume preds is a list; take the first element.
+            pred = preds[0] if isinstance(preds, list) else preds
+            prompts = pred.get("bboxes", [])
+            captions = pred.get("caption", "")
+            if not isinstance(captions, list):
+                captions = [captions]
+        masks, scores = self.location_refiner.run(image, prompts, use_points=self.use_points)
+        if masks is not None and len(masks) > 0:
+            mask_uint8_list = [m.astype(np.uint8) * 255 for m in masks]
+        else:
+            mask_uint8_list = []
+        return mask_uint8_list, prompts, captions
 
     def apply_transform(self, example, images):
-        """
-        Process one or more rows in the dataset, adding masks, bboxes, and captions.
-
-        Args:
-            example: A single example or a batch of examples from the dataset.
-            images: The column in the dataset containing the images.
-
-        Returns:
-            Updated example(s) with masks, bboxes, and captions.
-        """
         is_batched = isinstance(example[images], list) and isinstance(example[images][0], (list, Image.Image))
-
-        try:
-            if is_batched:
-                all_masks = []
-                all_bboxes = []
-                all_captions = []
-
-                for img_list in example[images]:
-                    image = img_list[0] if isinstance(img_list, list) else img_list
-
-                    if not isinstance(image, Image.Image):
-                        raise ValueError(f"Expected a PIL image but got {type(image)}")
-
-                    if image.mode != 'RGB':
-                        image = image.convert('RGB')
-
-                    masks, bboxes, captions = self.run(image)
-                    all_masks.append(masks)
-                    all_bboxes.append(bboxes)
-                    all_captions.append(captions)
-
-                example['masks'] = all_masks
-                example['bboxes'] = all_bboxes
-                example['captions'] = all_captions
-
-            else:
-                image = example[images][0] if isinstance(example[images], list) else example[images]
-
+        if is_batched:
+            all_masks_list, all_prompts_list, all_captions_list = [], [], []
+            for img_list in example[images]:
+                image = img_list[0] if isinstance(img_list, list) else img_list
                 if not isinstance(image, Image.Image):
-                    raise ValueError(f"Expected a PIL image but got {type(image)}")
-
-                if image.mode != 'RGB':
-                    image = image.convert('RGB')
-
-                masks, bboxes, captions = self.run(image)
-                example['masks'] = masks
-                example['bboxes'] = bboxes
-                example['captions'] = captions
-
-        except Exception as e:
-            print(f"Error processing image, skipping: {e}")
-            if is_batched:
-                example['masks'] = [None] * len(example[images])
-                example['bboxes'] = [None] * len(example[images])
-                example['captions'] = [None] * len(example[images])
-            else:
-                example['masks'] = None
-                example['bboxes'] = None
-                example['captions'] = None
-
+                    raise ValueError("Expected a PIL Image.")
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                masks, prompts, captions = self.run(image)
+                all_masks_list.append(masks)
+                all_prompts_list.append(prompts)
+                all_captions_list.append(captions)
+            example["masks"] = all_masks_list
+            example["bboxes_or_points"] = all_prompts_list
+            example["captions"] = all_captions_list
+        else:
+            image = example[images][0] if isinstance(example[images], list) else example[images]
+            if not isinstance(image, Image.Image):
+                raise ValueError("Expected a PIL Image.")
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            masks, prompts, captions = self.run(image)
+            example["masks"] = masks
+            example["bboxes_or_points"] = prompts
+            example["captions"] = captions
         return example
+
