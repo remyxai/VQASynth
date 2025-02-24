@@ -17,7 +17,7 @@ def main(output_dir, source_repo_id, images):
     #    You can choose whichever SAM2 model variant:
     #    e.g. "facebook/sam2-hiera-small", "facebook/sam2-hiera-large", etc.
     localizer = Localizer(
-        captioner_type="molmo",
+        captioner_type="florence",
         segmenter_model="facebook/sam2-hiera-small"
     )
 
