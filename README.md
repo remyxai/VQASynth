@@ -31,6 +31,7 @@ Initial VQASynth 🎹 pipelines prompted [LLaVA](https://github.com/haotian-liu/
 ## What's New 👀 in VQASynth 🎹
 
 🪶 Faster & lighter using [Florence-2](https://arxiv.org/abs/2311.06242) for detailed image captions **and** region proposal grounded on text captions.
+   For better caption quality, try object-grounded captions by [point prompting with Molmo](https://github.com/remyxai/VQASynth/issues/27)
 
 📐 Improves metric depth estimation speed & accuracy by replacing ZoeDepth with [DepthPro](https://github.com/apple/ml-depth-pro).
 
