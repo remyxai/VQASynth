@@ -89,14 +89,17 @@ class FlorenceCaptionLocalizer(BaseCaptionLocalizer):
         ).to(self.device)
 
     def generate_ids(self, inputs):
-        generated_ids = self.model.generate(
+        expected_dtype = next(self.model.parameters()).dtype
+        pixel_values = inputs.get("pixel_values")
+        if pixel_values is not None:
+            pixel_values = pixel_values.to(expected_dtype)
+        return self.model.generate(
             input_ids=inputs["input_ids"],
-            pixel_values=inputs["pixel_values"],
+            pixel_values=pixel_values,
             max_length=1024,
             num_beams=1,
             do_sample=False,
         )
-        return generated_ids
 
     def run(self, image):
         prompt_task = "<MORE_DETAILED_CAPTION>"
