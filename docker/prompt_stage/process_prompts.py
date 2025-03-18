@@ -11,6 +11,22 @@ from vqasynth.datasets import Dataloader
 from vqasynth.prompts import PromptGenerator
 from vqasynth.utils import filter_null
 
+from datasets import Features, Sequence, Value
+
+message_schema = {
+    "role": Value("string"),
+    "index": Value("int64"),   # int64 is nullable so None is allowed.
+    "text": Value("string"),
+    "type": Value("string")
+}
+
+def build_new_features(dataset):
+    new_features = dataset["train"].features.copy()
+    new_features["prompts"] = Sequence(Value("string"))
+    new_features["truncated_prompts"] = Sequence(Value("string"))
+    new_features["messages"] = Sequence(message_schema)
+    return new_features
+
 def save_and_push_datasets(dataset, output_dir, target_repo_name, images, dataloader):
     """
     Save the full dataset and a dataset with selected columns, then push to the hub.
@@ -31,16 +47,22 @@ def save_and_push_datasets(dataset, output_dir, target_repo_name, images, datalo
 def main(output_dir, source_repo_id, target_repo_name, images):
     prompt_generator = PromptGenerator()
     dataloader = Dataloader(output_dir)
-
     dataset = dataloader.load_dataset(source_repo_id)
+
+    for col in ["prompts", "truncated_prompts", "messages"]:
+        if col in dataset.column_names:
+            dataset = dataset.remove_columns(col)
+
     dataset = dataset.map(
         prompt_generator.apply_transform,
+        batched=False
+    )
+
+    dataset = dataset.filter(
+        lambda batch: [len(msg_list) > 0 for msg_list in batch["messages"]],
         batched=True,
         batch_size=32
     )
-
-    dataset = dataset.filter(lambda x: [len(msg) > 0 for msg in x['messages']], batched=True, batch_size=32)
-    dataset = dataset.filter(filter_null, batched=True, batch_size=32)
 
     save_and_push_datasets(dataset, output_dir, target_repo_name, images, dataloader)
 
