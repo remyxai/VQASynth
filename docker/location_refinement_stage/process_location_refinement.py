@@ -10,21 +10,15 @@ from vqasynth.localize import Localizer
 from vqasynth.utils import filter_null
 
 def main(output_dir, source_repo_id, images):
-    # 1) Instantiate the Dataloader
     dataloader = Dataloader(output_dir)
     
-    # 2) Create the Localizer with Molmo + SAM2 (points)
-    #    You can choose whichever SAM2 model variant:
-    #    e.g. "facebook/sam2-hiera-small", "facebook/sam2-hiera-large", etc.
     localizer = Localizer(
-        captioner_type="florence",
+        captioner_type="molmo",
         segmenter_model="facebook/sam2-hiera-small"
     )
 
-    # 3) Load the dataset
     dataset = dataloader.load_dataset(source_repo_id)
 
-    # 4) Apply the localizer transformation with batching and pass use_points=True
     dataset = dataset.map(
         localizer.apply_transform,
         fn_kwargs={'images': images},
@@ -32,10 +26,8 @@ def main(output_dir, source_repo_id, images):
         batch_size=1,
     )
 
-    # 5) Filter out nulls
     dataset = dataset.filter(filter_null, batched=True, batch_size=32)
 
-    # 6) Save the processed dataset
     dataloader.save_to_disk(dataset)
 
     print("Localization complete")

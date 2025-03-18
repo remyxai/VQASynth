@@ -785,67 +785,63 @@ class PromptGenerator:
 
     def apply_transform(self, example):
         """
-        Process one or more rows in the dataset, adding prompts and messages.
+        Process a single example to produce:
+          - "prompts": list of strings (from self.run)
+          - "truncated_prompts": list of strings (first 5 shuffled prompts)
+          - "messages": a list of message dictionaries with the nested structure:
 
-        Args:
-            example: A single example or a batch of examples from the dataset.
+              Each message dictionary:
+              {
+                 "role": <"user" or "assistant">,
+                 "content": [
+                     { "index": 0 or None, "text": <string or None>, "type": <"image" or "text"> },
+                     ... (possibly multiple items)
+                 ]
+              }
 
-        Returns:
-            Updated example(s) with prompts and messages, or None values on failure.
+              Specifically, the first message always has:
+                 "content": [
+                     {"index": 0, "text": None, "type": "image"},
+                     {"index": None, "text": <first prompt>, "type": "text"}
+                 ]
+              and subsequent messages have:
+                 "content": [ { "index": None, "text": <prompt>, "type": "text" } ]
+
+        If any error occurs for this sample, returns None (and the sample will be dropped).
         """
-        is_batched = isinstance(example["captions"], list) and isinstance(
-            example["captions"][0], list
-        )
-
         try:
-            if is_batched:
-                prompts_list = []
-                messages_list = []
-                truncated_list = []
-
-                for i, captions in enumerate(example["captions"]):
-                    prompts = self.run(
-                        captions,
-                        example["pointclouds"][i],
-                        example["is_canonicalized"][i],
-                    )
-
-                    prompts_list.append(prompts)
-
-                    truncated_prompts = prompts
-                    random.shuffle(truncated_prompts)
-                    truncated_prompts = truncated_prompts[:5]
-                    truncated_list.append(truncated_prompts)
-
-                    messages = self.create_messages_from_prompts(truncated_prompts)
-                    messages_list.append(messages)
-
-                # Assign both lists to the example dictionary
-                example["prompts"] = prompts_list
-                example["truncated_prompts"] = truncated_list
-                example["messages"] = messages_list
-
-            else:
-                example["prompts"] = self.run(
-                    example["captions"],
-                    example["pointclouds"],
-                    example["is_canonicalized"],
-                )
-                truncated_prompts = example["prompts"]
-                random.shuffle(truncated_prompts)
-                truncated_prompts = truncated_prompts[:5]
-                example["truncated_prompts"] = truncated_prompts
-                example["messages"] = self.create_messages_from_prompts(
-                    example["prompts"]
-                )
-
+            # Process a single sample.
+            prompts = self.run(example["captions"], example["pointclouds"], example["is_canonicalized"])
+            random.shuffle(prompts)
+            truncated = prompts[:5]
+            messages = []
+            if truncated:
+                # Build the first message.
+                first_message = {
+                    "role": "user",
+                    "content": [
+                        {"index": 0, "text": None, "type": "image"},
+                        {"index": None, "text": truncated[0], "type": "text"}
+                    ]
+                }
+                messages.append(first_message)
+                # Build subsequent messages by alternating roles.
+                role = "assistant"
+                for prompt in truncated[1:]:
+                    msg = {
+                        "role": role,
+                        "content": [
+                            {"index": None, "text": prompt, "type": "text"}
+                        ]
+                    }
+                    messages.append(msg)
+                    role = "user" if role == "assistant" else "assistant"
+            return {
+                "prompts": prompts,
+                "truncated_prompts": truncated,
+                "messages": messages
+            }
         except Exception as e:
-            print(f"Error processing example, skipping: {e}")
-            if is_batched:
-                example["prompts"] = [None] * len(example["captions"])
-                example["messages"] = [None] * len(example["captions"])
-            else:
-                example["prompts"] = None
-                example["messages"] = None
+            print(f"Error processing sample, skipping: {e}")
+            return None
 
-        return example
