@@ -4,12 +4,10 @@ import random
 import numpy as np
 from itertools import combinations
 from vqasynth.prompt_templates import *
-from vqasynth.scene_fusion import SpatialSceneConstructor
+from vqasynth.scene_fusion import restore_pointclouds
 
 
 class PromptGenerator:
-    def __init__(self):
-        self.spatial_scene_constructor = SpatialSceneConstructor()
 
     def human_like_distance(self, distance_meters, scaling_factor=10):
         """
@@ -729,7 +727,7 @@ class PromptGenerator:
         return valid_results
 
     def run(self, captions, pointclouds, is_canonicalized):
-        pointclouds = self.spatial_scene_constructor.restore_pointclouds(pointclouds)
+        pointclouds = restore_pointclouds(pointclouds)
         try:
             objects = list(zip(captions, pointclouds))
             all_pairs = [

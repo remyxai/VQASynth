@@ -1,80 +1,62 @@
 import os
-import cv2
-import pickle
-import random
 import numpy as np
+import torch
 import open3d as o3d
+import cv2
 from pathlib import Path
-import PIL
+import tempfile
 from PIL import Image
 
+from vggt.models.vggt import VGGT
+from vggt.utils.load_fn import load_and_preprocess_images
+from vggt.utils.pose_enc import pose_encoding_to_extri_intri
+from vggt.utils.geometry import unproject_depth_map_to_point_map
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+if device == "cuda":
+    major_cap = torch.cuda.get_device_capability()[0]
+    dtype = torch.bfloat16 if major_cap >= 8 else torch.float16
+else:
+    dtype = torch.float32
+
+
+def restore_pointclouds(pointcloud_paths):
+    if len(pointcloud_paths) == 1 and isinstance(pointcloud_paths[0], list):
+        pointcloud_paths = pointcloud_paths[0]
+
+    restored_pointclouds = []
+    for path in pointcloud_paths:
+        restored_pointclouds.append(o3d.io.read_point_cloud(path))
+
+    return restored_pointclouds
 
 class SpatialSceneConstructor:
     def __init__(self):
-        pass
+        """
+        Initialize the constructor and load the VGGT model.
+        """
+        self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
+        self.model.eval()
 
     def save_pointcloud(self, pcd, file_path):
-        """
-        Save a point cloud to a file using Open3D.
-        """
         o3d.io.write_point_cloud(file_path, pcd)
 
-    def restore_pointclouds(self, pointcloud_paths):
-        if len(pointcloud_paths) == 1 and isinstance(pointcloud_paths[0], list):
-            pointcloud_paths = pointcloud_paths[0]
-
-        restored_pointclouds = []
-        for path in pointcloud_paths:
-            restored_pointclouds.append(o3d.io.read_point_cloud(path))
-
-        return restored_pointclouds
-
-    def apply_mask_to_image(self, image, mask):
-        """
-        Apply a binary mask to an image. The mask should be a binary array where the regions to keep are True.
-        """
-        masked_image = image.copy()
-        for c in range(masked_image.shape[2]):
-            masked_image[:, :, c] = masked_image[:, :, c] * mask
-        return masked_image
-
-    def create_point_cloud_from_rgbd(
-        self, rgb_image, depth_image, intrinsic_parameters
-    ):
-        rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
-            o3d.geometry.Image(rgb_image),
-            o3d.geometry.Image(depth_image),
-            depth_scale=10.0,
-            depth_trunc=100.0,
-            convert_rgb_to_intensity=False,
-        )
-        intrinsic = o3d.camera.PinholeCameraIntrinsic()
-        intrinsic.set_intrinsics(
-            intrinsic_parameters["width"],
-            intrinsic_parameters["height"],
-            intrinsic_parameters["fx"],
-            intrinsic_parameters["fy"],
-            intrinsic_parameters["cx"],
-            intrinsic_parameters["cy"],
-        )
-        pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic)
-        return pcd
-
     def canonicalize_point_cloud(self, pcd, canonicalize_threshold=0.3):
-        # Segment the largest plane, assumed to be the floor
+        """
+        Segment a 'floor' plane, if large enough, orient the cloud so that plane is XZ.
+        """
         plane_model, inliers = pcd.segment_plane(
             distance_threshold=0.01, ransac_n=3, num_iterations=1000
         )
-
         canonicalized = False
         if len(inliers) / len(pcd.points) > canonicalize_threshold:
             canonicalized = True
 
+            # Ensure floor normal is 'up'
             if np.dot(plane_model[:3], [0, 1, 0]) < 0:
                 plane_model = -plane_model
 
             normal = plane_model[:3] / np.linalg.norm(plane_model[:3])
-
             new_y = normal
             new_x = np.cross(new_y, [0, 0, -1])
             new_x /= np.linalg.norm(new_x)
@@ -88,258 +70,270 @@ class SpatialSceneConstructor:
 
             pcd.transform(transformation)
 
+            # optional rotate 180 deg around Z
             rotation_z_180 = np.array(
                 [
                     [np.cos(np.pi), -np.sin(np.pi), 0],
-                    [np.sin(np.pi), np.cos(np.pi), 0],
-                    [0, 0, 1],
+                    [np.sin(np.pi),  np.cos(np.pi),  0],
+                    [0,              0,             1],
                 ]
             )
             pcd.rotate(rotation_z_180, center=(0, 0, 0))
 
             return pcd, canonicalized, transformation
+
+        return pcd, canonicalized, None
+
+    def extract_focal_from_intrinsic(self, intrinsic_1):
+        """
+        Read a single 'focal length' from the given intrinsic matrix,
+        """
+
+        if isinstance(intrinsic_1, torch.Tensor):
+            intrinsic_1 = intrinsic_1.cpu()
+
+        shape = intrinsic_1.shape
+
+        if shape == (1, 3, 3):
+            intrinsic_1 = intrinsic_1.squeeze(0)
+            shape = intrinsic_1.shape
+
+        if shape == (3, 3):
+            # standard pinhole => top-left is fx
+            if torch.is_tensor(intrinsic_1):
+                focal = intrinsic_1[0, 0].item()
+            else:
+                focal = float(intrinsic_1[0, 0])
+            return focal
+
+        elif shape == (3,):
+            val = intrinsic_1[0].item() if torch.is_tensor(intrinsic_1) else float(intrinsic_1[0])
+            return val
+
+        elif len(shape) == 2 and shape[0] == 1 and shape[1] == 3:
+            val = (intrinsic_1[0, 0].item()
+                   if torch.is_tensor(intrinsic_1) else float(intrinsic_1[0, 0]))
+            return val
+
         else:
-            return pcd, canonicalized, None
+            # fallback for unexpected shape
+            raise ValueError(f"[ERROR] Cannot interpret intrinsic of shape {shape} to extract focal length!")
 
-    def calculate_centroid(self, pcd):
-        """Calculate the centroid of a point cloud."""
-        points = np.asarray(pcd.points)
-        centroid = np.mean(points, axis=0)
-        return centroid
 
-    def calculate_relative_positions(self, centroids):
-        """Calculate the relative positions between centroids of point clouds."""
-        num_centroids = len(centroids)
-        relative_positions_info = []
-
-        for i in range(num_centroids):
-            for j in range(i + 1, num_centroids):
-                relative_vector = centroids[j] - centroids[i]
-
-                distance = np.linalg.norm(relative_vector)
-                relative_positions_info.append(
-                    {
-                        "pcd_pair": (i, j),
-                        "relative_vector": relative_vector,
-                        "distance": distance,
-                    }
-                )
-
-        return relative_positions_info
-
-    def get_bounding_box_height(self, pcd):
+    def create_point_cloud_from_model(self, pil_image):
         """
-        Compute the height of the bounding box for a given point cloud.
-
-        Parameters:
-        pcd (open3d.geometry.PointCloud): The input point cloud.
-
-        Returns:
-        float: The height of the bounding box.
+        1) Resize & normalize PIL image for VGGT,
+        2) aggregator + camera + depth heads,
+        3) Unproject depth => 3D point cloud,
+        4) Return (pcd, depth_map_np, focal_val).
         """
-        aabb = pcd.get_axis_aligned_bounding_box()
-        return aabb.get_extent()[1]
 
-    def compare_bounding_box_height(self, pcd_i, pcd_j):
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmpfile:
+            pil_image.save(tmpfile.name)
+            temp_path = tmpfile.name
+        pil_image.save(temp_path)
+
+        images = load_and_preprocess_images([temp_path])  # (B=1,C=3,H,W)
+        images = images.to(device, dtype=dtype)
+        images = images.unsqueeze(1)
+
+        with torch.no_grad():
+            with torch.amp.autocast(device_type="cuda", dtype=dtype):
+                aggregated_tokens_list, ps_idx = self.model.aggregator(images)
+                pose_enc = self.model.camera_head(aggregated_tokens_list)[-1]
+                extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images.shape[-2:])
+                depth_map, depth_conf = self.model.depth_head(aggregated_tokens_list, images, ps_idx)
+
+        depth_map_2d = depth_map.squeeze(0)
+        extrinsic_1 = extrinsic.squeeze(0)
+        intrinsic_1 = intrinsic.squeeze(0)
+
+        # Convert depth map to NumPy
+        if isinstance(depth_map_2d, torch.Tensor):
+            depth_map_np = depth_map_2d.cpu().numpy()
+        else:
+            depth_map_np = depth_map_2d
+        depth_map_np = np.squeeze(depth_map_np)
+
+        # Safely extract focal
+        focal_val = self.extract_focal_from_intrinsic(intrinsic_1)
+
+        point_map = unproject_depth_map_to_point_map(depth_map_2d, extrinsic_1, intrinsic_1)
+        if isinstance(point_map, torch.Tensor):
+            point_map = point_map.cpu().numpy()
+
+        if point_map.ndim == 4 and point_map.shape[0] == 1:
+            point_map = point_map[0]
+
+        if point_map.shape[-1] != 3:
+            raise ValueError(f"[ERROR] Unexpected shape for unprojected points: {point_map.shape}")
+
+        H, W, _ = point_map.shape
+
+        pil_image_resized = pil_image.resize((W, H), Image.BILINEAR)
+        np_image = np.array(pil_image_resized, dtype=np.uint8)
+
+        coords_3d = point_map.reshape(-1, 3)
+        color_np = np_image.reshape(-1, 3) / 255.0
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(coords_3d)
+        pcd.colors = o3d.utility.Vector3dVector(color_np)
+        os.remove(temp_path)
+
+        return pcd, depth_map_np, focal_val
+
+    def run(self, image_filename, image, masks, output_dir):
         """
-        Compare the bounding box heights of two point clouds.
-
-        Parameters:
-        pcd_i (open3d.geometry.PointCloud): The first point cloud.
-        pcd_j (open3d.geometry.PointCloud): The second point cloud.
-
-        Returns:
-        bool: True if the bounding box of pcd_i is taller than that of pcd_j, False otherwise.
+        Create full scene from model, canonicalize, segment with masks,
+        return pcd filepaths, canonicalized, plus depth/focal.
         """
-        height_i = self.get_bounding_box_height(pcd_i)
-        height_j = self.get_bounding_box_height(pcd_j)
+        import math
+        import numpy as np
+        import os
+        import cv2
+        from pathlib import Path
+        import open3d as o3d
 
-        return height_i > height_j
+        scene_pcd, depth_map_np, focal_val = self.create_point_cloud_from_model(image)
 
-    def run(
-        self,
-        image_filename: str,
-        image: PIL.Image,
-        depth_map: PIL.Image,
-        focal_length: float,
-        masks: list,
-        output_dir: str,
-    ):
-        """
-        Process an image and depth map to create and save segmented point clouds for each mask.
-
-        Args:
-            image_filename (str): Name of the original image file.
-            image (PIL.Image): Original RGB image.
-            depth_map (PIL.Image): Depth map corresponding to the image.
-            focal_length (float): Focal length of the camera.
-            masks (list): List of masks, one for each segmented region.
-            output_dir (str): Directory to save the point cloud files.
-
-        Returns:
-            tuple: (List of file paths to saved point clouds, boolean indicating if canonicalization was applied).
-        """
-        image = image.convert("RGB")
-        width, height = image.size
-        depth_array = (
-            np.array(depth_map, dtype=np.uint16).astype(np.float32) / 1000.0
-        )  # Convert to meters
-
-        intrinsic_parameters = {
-            "width": width,
-            "height": height,
-            "fx": focal_length,
-            "fy": focal_length * height / width,
-            "cx": width / 2,
-            "cy": height / 2,
-        }
-
-        original_pcd = self.create_point_cloud_from_rgbd(
-            np.array(image), depth_array, intrinsic_parameters
-        )
         normed_pcd, canonicalized, transformation = self.canonicalize_point_cloud(
-            original_pcd, canonicalize_threshold=0.3
+            scene_pcd, canonicalize_threshold=0.3
         )
+
+        points = np.asarray(normed_pcd.points)   # shape (N, 3)
+        colors = np.asarray(normed_pcd.colors)   # shape (N, 3)
+        total_points = points.shape[0]
+
+        def factor_hw(n):
+            root = int(math.isqrt(n))
+            for i in range(root, 0, -1):
+                if n % i == 0:
+                    return i, n // i
+            return 1, n
+
+        H, W = factor_hw(total_points)
 
         output_pointcloud_dir = os.path.join(output_dir, "pointclouds")
         Path(output_pointcloud_dir).mkdir(parents=True, exist_ok=True)
 
+        all_indices = np.arange(total_points)
         point_cloud_filepaths = []
 
-        points = np.asarray(normed_pcd.points)
-        colors = np.asarray(normed_pcd.colors)
-        for idx, mask in enumerate(masks):
-            print(f"[INFO] Processing mask {idx + 1}/{len(masks)}")
+        for idx, mask_img in enumerate(masks):
+            mask_array = np.array(mask_img, dtype=np.uint8)
 
-            mask = np.array(mask, dtype=bool).squeeze()
-            assert mask.shape == (
-                height,
-                width,
-            ), f"Mask shape {mask.shape} does not match image dimensions {(height, width)}"
+            if (mask_array.ndim == 2) and ((mask_array.shape[0] != H) or (mask_array.shape[1] != W)):
+                mask_array = cv2.resize(mask_array, (W, H), interpolation=cv2.INTER_NEAREST)
 
-            depth_flat = depth_array.ravel()
-            mask_flat = mask.ravel()
+            elif mask_array.ndim != 2:
+                continue
 
-            valid_depth_indices = np.where(depth_flat > 0)[0]
-            valid_mask_indices = valid_depth_indices[
-                np.where(mask_flat[valid_depth_indices])[0]
-            ]
+            mask_bool = mask_array.astype(bool)
+            mask_flat = mask_bool.ravel()
 
+            valid_mask_indices = all_indices[mask_flat]
             if len(valid_mask_indices) == 0:
-                print(f"[WARNING] Mask {idx + 1} produced no valid points, skipping.")
+                print(f"[WARNING] Mask {idx+1} produced no valid points, skipping.")
                 continue
 
             masked_points = points[valid_mask_indices]
             masked_colors = colors[valid_mask_indices]
+            if masked_points.size == 0:
+                print(f"[WARNING] No points left after indexing for mask {idx+1}, skipping.")
+                continue
 
             masked_pcd = o3d.geometry.PointCloud()
             masked_pcd.points = o3d.utility.Vector3dVector(masked_points)
             masked_pcd.colors = o3d.utility.Vector3dVector(masked_colors)
-
             if masked_pcd.is_empty():
-                print(f"[WARNING] Masked point cloud is empty for mask {idx + 1}.")
-                continue
-
-            if canonicalized:
-                masked_pcd.transform(transformation)
-
-            if masked_pcd.is_empty():
-                print(f"[WARNING] Transformed point cloud is empty for mask {idx + 1}.")
+                print(f"[WARNING] Empty PCD for mask {idx+1}, skipping.")
                 continue
 
             pointcloud_filepath = os.path.join(
                 output_pointcloud_dir,
-                f"pointcloud_{Path(image_filename).stem}_{idx}.pcd",
+                f"pointcloud_{Path(image_filename).stem}_{idx}.pcd"
             )
-            o3d.io.write_point_cloud(pointcloud_filepath, masked_pcd)
+            self.save_pointcloud(masked_pcd, pointcloud_filepath)
             point_cloud_filepaths.append(pointcloud_filepath)
+        return point_cloud_filepaths, canonicalized, depth_map_np, focal_val
 
-        return point_cloud_filepaths, canonicalized
 
     def apply_transform(self, example, idx, output_dir, images):
         """
-        Process one or more rows of the dataset to generate point clouds and canonicalization status.
-
-        Args:
-            example (dict): A single example or a batch of examples from the dataset.
-            idx (int or list): The index or indices of the current example(s).
-            output_dir (str): The directory where the output point clouds will be saved.
-            images (str): The column containing image data.
-
-        Returns:
-            dict: Updated example(s) with point clouds and canonicalization status.
+        Called by dataset.map(...) => produce pcd + store depth_map/focallength.
         """
-        is_batched = isinstance(example[images], list) and isinstance(
-            example[images][0], (list, Image.Image)
+        is_batched = (
+            isinstance(example[images], list)
+            and isinstance(example[images][0], (list, Image.Image))
         )
 
         try:
             if is_batched:
-                pointclouds = []
-                canonicalization_status = []
+                pointclouds_all = []
+                canonicalizations_all = []
+                depthmaps_all = []
+                focals_all = []
 
                 for i, img_list in enumerate(example[images]):
                     if isinstance(img_list, list):
-                        image = (
-                            img_list[0]
-                            if isinstance(img_list[0], Image.Image)
-                            else img_list
-                        )
+                        image = img_list[0] if isinstance(img_list[0], Image.Image) else img_list
                     else:
                         image = img_list
 
                     if not isinstance(image, Image.Image):
-                        raise ValueError(
-                            f"Expected a PIL image but got {type(image)} at index {i}"
-                        )
+                        raise ValueError(f"[ERROR] Expected a PIL image but got {type(image)} at index {i}")
                     if image.mode != "RGB":
                         image = image.convert("RGB")
 
-                    pcd_data, canonicalized = self.run(
+                    pcd_files, is_canonical, depth_map_np, focal_val = self.run(
                         str(idx[i]),
                         image,
-                        example["depth_map"][i],
-                        example["focallength"][i],
                         example["masks"][i],
                         output_dir,
                     )
-                    pointclouds.append(pcd_data)
-                    canonicalization_status.append(canonicalized)
+                    pointclouds_all.append(pcd_files)
+                    canonicalizations_all.append(is_canonical)
+                    depthmaps_all.append(depth_map_np)
+                    focals_all.append(focal_val)
 
-                example["pointclouds"] = pointclouds
-                example["is_canonicalized"] = canonicalization_status
+                example["pointclouds"] = pointclouds_all
+                example["is_canonicalized"] = canonicalizations_all
+                example["depth_map"] = depthmaps_all
+                example["focallength"] = focals_all
 
             else:
-                image = (
-                    example[images][0]
-                    if isinstance(example[images], list)
-                    else example[images]
-                )
-
+                image = example[images]
+                if isinstance(image, list) and len(image) > 0:
+                    image = image[0]
                 if not isinstance(image, Image.Image):
-                    raise ValueError("The image is not a valid PIL image.")
+                    raise ValueError("[ERROR] The image is not a valid PIL image.")
                 if image.mode != "RGB":
                     image = image.convert("RGB")
 
-                pcd_data, canonicalized = self.run(
+                pcd_files, is_canonical, depth_map_np, focal_val = self.run(
                     str(idx),
                     image,
-                    example["depth_map"],
-                    example["focallength"],
                     example["masks"],
                     output_dir,
                 )
-
-                example["pointclouds"] = [pcd_data]
-                example["is_canonicalized"] = [canonicalized]
+                example["pointclouds"] = [pcd_files]
+                example["is_canonicalized"] = [is_canonical]
+                example["depth_map"] = [depth_map_np]
+                example["focallength"] = [focal_val]
 
         except Exception as e:
-            print(f"Error processing image, skipping: {e}")
             if is_batched:
-                example["pointclouds"] = [None] * len(example[images])
-                example["is_canonicalized"] = [None] * len(example[images])
+                length = len(example[images])
+                example["pointclouds"] = [None] * length
+                example["is_canonicalized"] = [None] * length
+                example["depth_map"] = [None] * length
+                example["focallength"] = [None] * length
             else:
                 example["pointclouds"] = [None]
                 example["is_canonicalized"] = [None]
+                example["depth_map"] = [None]
+                example["focallength"] = [None]
 
         return example
+
