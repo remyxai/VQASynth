@@ -11,9 +11,9 @@ IMAGES=$(yq e '.arguments.images' $CONFIG_FILE)
 export OUTPUT_DIR
 
 echo "Using output directory: $OUTPUT_DIR"
-echo "Waiting for depth processing to complete..."
+echo "Waiting for filter processing to complete..."
 
-while [ ! -f "${OUTPUT_DIR}/depth_done.txt" ]; do
+while [ ! -f "${OUTPUT_DIR}/filter_done.txt" ]; do
   sleep 10
 done
 
@@ -23,5 +23,5 @@ python3 process_location_refinement.py \
     --source_repo_id="${SOURCE_REPO_ID}" \
     --images="${IMAGES}"
 
-rm "${OUTPUT_DIR}/depth_done.txt" 
+rm "${OUTPUT_DIR}/filter_done.txt" 
 touch "${OUTPUT_DIR}/location_refinement_done.txt"

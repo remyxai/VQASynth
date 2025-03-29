@@ -40,6 +40,10 @@ RUN pip install git+https://github.com/openai/CLIP.git
 
 RUN pip install --upgrade torch==2.4.0+cu118 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu118
 
+WORKDIR /app
+RUN git clone https://github.com/facebookresearch/vggt.git && cd vggt && pip install .
+
+
 WORKDIR /app/VQASynth
 COPY . /app/VQASynth
 RUN pip install .

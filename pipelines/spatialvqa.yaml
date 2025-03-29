@@ -33,23 +33,6 @@ services:
           devices:
           - capabilities: ["gpu"]
 
-  depth_stage:
-    build:
-      context: ../
-      dockerfile: docker/depth_stage/Dockerfile
-    volumes:
-      - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    depends_on:
-      - filter_stage
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      HF_TOKEN: ${HF_TOKEN}
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - capabilities: ["gpu"]
-
   location_refinement_stage:
     build:
       context: ../
@@ -57,7 +40,7 @@ services:
     volumes:
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
     depends_on:
-      - depth_stage
+      - filter_stage
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       HF_TOKEN: ${HF_TOKEN}
