@@ -812,28 +812,7 @@ class PromptGenerator:
             prompts = self.run(example["captions"], example["pointclouds"], example["is_canonicalized"])
             random.shuffle(prompts)
             truncated = prompts[:5]
-            messages = []
-            if truncated:
-                # Build the first message.
-                first_message = {
-                    "role": "user",
-                    "content": [
-                        {"index": 0, "text": None, "type": "image"},
-                        {"index": None, "text": truncated[0], "type": "text"}
-                    ]
-                }
-                messages.append(first_message)
-                # Build subsequent messages by alternating roles.
-                role = "assistant"
-                for prompt in truncated[1:]:
-                    msg = {
-                        "role": role,
-                        "content": [
-                            {"index": None, "text": prompt, "type": "text"}
-                        ]
-                    }
-                    messages.append(msg)
-                    role = "user" if role == "assistant" else "assistant"
+            messages = self.create_messages_from_prompts(truncated)
             return {
                 "prompts": prompts,
                 "truncated_prompts": truncated,
