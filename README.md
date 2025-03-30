@@ -98,7 +98,24 @@ Here are some examples:
 | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_1.jpeg?raw=true"  alt="sample_1" style="max-height: 350px;" > | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_2.jpeg?raw=true"  alt="sample_2" style="max-height: 350px;"> | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_3.jpeg?raw=true" alt="sample_3" style="max-height: 350px;"> |
 |----------|-------------|--------|
 | Does the red forklift in warehouse appear on the left side of the brown cardboard boxes stacked? | How close is the man in red hat walking from the wooden pallet with boxes? | Does the man in blue shirt working have a greater height compared to the wooden pallet with boxes on floor? |
-| Incorrect, the red forklift in warehouse is not on the left side of the brown cardboard boxes stacked. | The man in red hat walking is 60.13 centimeters from the wooden pallet with boxes. | Indeed, the man in blue shirt working is taller compared to the wooden pallet with boxes on floor. |
+| <think>Okay, let me analyze the layout of the scene to figure this out. The red forklift is clearly visible and it's facing the stack of brown cardboard boxes. The boxes are loaded onto a pallet, and the forklift's forks are inserted under this pallet, indicating that the forklift is preparing to lift or place the boxes.
+
+...
+To verify scale and orientation: the yellow safety rails and barriers are on the left side of the boxes. The ladder and wall panels are further left. The forklift is operating from the right-hand side of the image, engaging the pallet head-on.
+...
+</think> <answer>Correct, the red forklift in the warehouse is not on the left side of the brown cardboard boxes stacked; it is on the right side, actively engaging the boxes from that direction.</answer> | <think>Alright, let me break this down. The man in the red hat is walking in a warehouse aisle, and there's a wooden pallet loaded with boxes right behind him. The pallet is attached to a manual pallet jack, which appears to have been pulled forward.
+
+...
+Taking the average stride length of an adult male into account (about 0.75 meters or 75 cm), it looks like the distance from the man's heel to the nearest edge of the pallet is slightly shorter than a full stride. That puts us at just under that 75 cm mark. I'd estimate somewhere around 60 cm is reasonable here, based on visual proximity.
+
+...
+</think> <answer>The man in the red hat walking is approximately 60.13 centimeters from the wooden pallet with boxes.</answer> | <think>Let me take a close look at this warehouse scene. The man in the blue shirt is leaning over, reaching toward boxes on a shelf, and there's a pallet with cardboard boxes on the floor near him. To compare their heights, I need to reason about how tall the man would be if he were standing straight, and how tall the pallet is with boxes stacked on top.
+
+A standard wooden pallet is about 15 cm (6 inches) tall. The boxes on top add some height, maybe around 30–50 cm depending on their size. Altogether, the total height of the loaded pallet might be roughly 45–65 cm (about 1.5 to 2 feet).
+
+...
+
+</think> <answer>Indeed, the man in the blue shirt working is taller compared to the wooden pallet with boxes on the floor.</answer> |
 
 Train your VLM using more robust CoT spatial reasoning traces in the R1-style dataset:
 
