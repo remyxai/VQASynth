@@ -19,23 +19,14 @@ VLMs trained using VQASynth 🎹
 Fusing semantic and metric data into templated VQA chat, Vision Language Models can be instruction-tuned with low-rank adapters to enhance their baseline spatial reasoning capabilities. 
 VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://arxiv.org/abs/2401.12168), which describes a 3D scene reconstruction pipeline and prompt templates for enhancing the spatial reasoning abilities of VLMs including:
 
-* Semantic filtering with [CLIP](https://github.com/openai/CLIP) to normalize the image distribution and attributes
-* Metric Depth Estimation with [ZoeDepth](https://github.com/isl-org/ZoeDepth) to lift the 2D image to 3D point cloud
-* Object-level captioning with [FlexCap](https://flex-cap.github.io/) for precise 2D region proposal
-* Plane-fitting with RANSAC for consistent 3D reference coordinates
+![VQASynth-diagram.png](https://github.com/user-attachments/assets/913fbc87-f778-4675-83b8-357c28c56c4d)
 
-Initial VQASynth 🎹 pipelines prompted [LLaVA](https://github.com/haotian-liu/LLaVA) for JSON-formatted object-level detailed captions or tags using [RAM](https://github.com/xinyu1205/recognize-anything). Accordingly, we evaluated caption/tag based region proposal with publicly available models like [CLIPSeg](https://github.com/timojl/clipseg) and [groundingDINO](https://github.com/IDEA-Research/GroundingDINO).
 
-![VQASynth-diagram.png](https://github.com/remyxai/VQASynth/blob/main/assets/VQASynth-diagram.png?raw=true)
+🪄 Object-grounded captions by [point prompting with Molmo](https://github.com/remyxai/VQASynth/issues/27)
 
-## What's New 👀 in VQASynth 🎹
+📐 Improves metric depth estimation speed & accuracy by replacing DepthPro with [VGGT]([https://github.com/apple/ml-depth-pro](https://vgg-t.github.io/)).
 
-🪶 Faster & lighter using [Florence-2](https://arxiv.org/abs/2311.06242) for detailed image captions **and** region proposal grounded on text captions.
-   For better caption quality, try object-grounded captions by [point prompting with Molmo](https://github.com/remyxai/VQASynth/issues/27)
-
-📐 Improves metric depth estimation speed & accuracy by replacing ZoeDepth with [DepthPro](https://github.com/apple/ml-depth-pro).
-
-🎓 [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
+🪢 [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
 
 
 ### Environment
