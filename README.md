@@ -24,7 +24,7 @@ VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://arxiv
 
 🪄 Object-grounded captions by [point prompting with Molmo](https://github.com/remyxai/VQASynth/issues/27)
 
-📐 Improves metric depth estimation speed & accuracy by replacing DepthPro with [VGGT]([https://github.com/apple/ml-depth-pro](https://vgg-t.github.io/)).
+📐 Improves metric depth estimation speed & accuracy by replacing DepthPro with [VGGT](https://vgg-t.github.io/).
 
 🪢 [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
 
