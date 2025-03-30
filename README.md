@@ -13,6 +13,7 @@ VLMs trained using VQASynth 🎹
 * describe distances colloquially, convert between common units of measurement
 * answer queries about the orientation and spatial relationships between objects
 * base responses on consistent references like floors and surfaces
+* apply CoT "thinking" for more robust reasoning and better estimates
 
 ## Description
 
@@ -27,6 +28,8 @@ VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://arxiv
 📐 Improves metric depth estimation speed & accuracy by replacing DepthPro with [VGGT](https://vgg-t.github.io/).
 
 🪢 [SAM2](https://github.com/facebookresearch/sam2) replaces SAM in the localization refinement stage.
+
+🧠 Multimodal "Thinking" by CoT Reasoning
 
 
 ### Environment
