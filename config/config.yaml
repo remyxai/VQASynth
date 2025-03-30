@@ -8,3 +8,4 @@ arguments:
   images: "image"
   include_tags: "Park,Street,Home,Office,Garden,Playground,Warehouse,Shop,Library,Classroom,Kitchen,Living Room,Bedroom,Bathroom,Garage,Balcony,Alley,Sidewalk,Field,Meadow,Tennis court,Driveway,Lobby,Workshop,Gym"
   exclude_tags: "Aerial Photography,Single Subject,Macro Photography,Microscopic Views,Drawings,Unrealistic CGI,Graphs,Charts,Icons,Logos,Text Overlays,Minimalist,Art,Portraits,Close-up shot,Flat Art,Abstract Paintings,Silhouettes,Monochrome Photography,Stock Photos"
+  openai_key: ""

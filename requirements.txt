@@ -13,7 +13,7 @@ onnx==1.13.1
 onnxruntime==1.15.1
 onnxsim==0.4.35
 scipy==1.12.0
-openai==1.12.0
+openai==1.69.0
 litellm==1.25.2
 pycocotools==2.0.6
 onnxruntime-gpu==1.18.1
