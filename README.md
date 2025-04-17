@@ -105,6 +105,7 @@ Here are some examples:
 
 * [SpaceLLaVA - 13B](https://huggingface.co/remyxai/SpaceLLaVA)
 * [SpaceQwen2.5-VL-3B-Instruct - 3B](https://huggingface.co/remyxai/SpaceQwen2.5-VL-3B-Instruct)
+* [SpaceThinker-Qwen2.5VL-3B](https://huggingface.co/remyxai/SpaceThinker-Qwen2.5VL-3B)
 
 Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
 
