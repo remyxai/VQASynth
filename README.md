@@ -46,6 +46,8 @@ Here are some samples from the VQASynth pipeline:
   
 ## Models trained using VQASynth 🎹
 
+[![Try the SpaceThinker Space](https://img.shields.io/badge/🤗%20Spaces-Demo-blue)](https://huggingface.co/spaces/remyxai/SpaceThinker-Qwen2.5VL-3B)
+
 * [SpaceThinker-Qwen2.5VL-3B](https://huggingface.co/remyxai/SpaceThinker-Qwen2.5VL-3B)
 * [SpaceQwen2.5-VL-3B-Instruct - 3B](https://huggingface.co/remyxai/SpaceQwen2.5-VL-3B-Instruct)
 * [SpaceLLaVA - 13B](https://huggingface.co/remyxai/SpaceLLaVA)
