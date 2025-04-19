@@ -36,7 +36,7 @@ VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://arxiv
 * [OpenSpaces](https://huggingface.co/datasets/remyxai/OpenSpaces)
 * [vqasynth_spacellava](https://huggingface.co/datasets/remyxai/vqasynth_spacellava)
   
-Here are some examples:
+Here are some samples from the VQASynth pipeline:
 
 | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_1.jpeg?raw=true"  alt="sample_1" style="max-height: 350px;" > | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_2.jpeg?raw=true"  alt="sample_2" style="max-height: 350px;"> | <img src="https://github.com/remyxai/VQASynth/blob/main/assets/warehouse_sample_3.jpeg?raw=true" alt="sample_3" style="max-height: 350px;"> |
 |----------|-------------|--------|
@@ -54,7 +54,7 @@ Here are some examples:
 
 Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
 
-![image](https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef)
+![image](<https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef> "SpaceThinker-Qwen2.5VL-3B")
 
 
 ### Environment
