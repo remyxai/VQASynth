@@ -1,7 +1,4 @@
 # VQASynth 🎹 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sJUsJ5-UR-3Bydgg-thJ59KSNxRG8Q30?usp=sharing)
-
-Try VQASynth on your image in the [HF Space](https://huggingface.co/spaces/remyxai/SpaceMantis)
 
 ![GIF Description](./assets/vqasynth-example.gif)
 
