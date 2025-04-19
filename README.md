@@ -52,11 +52,6 @@ Here are some samples from the VQASynth pipeline:
 
 ![image](https://github.com/user-attachments/assets/789a9963-dd90-4fc9-aefb-f89757cfd18f)
 
-Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
-
-![image](<https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef> "SpaceThinker-Qwen2.5VL-3B")
-
-
 ### Environment
 
 Before running the demo scripts, ensure you have the following installed:
@@ -120,6 +115,10 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 |----------|-------------|--------|
 | Generate Spatial VQA Dataset | Augment an HF Image Dataset with Spatial VQA | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sJUsJ5-UR-3Bydgg-thJ59KSNxRG8Q30?usp=sharing) |
 | Spatial Reasoning with Point Clouds | Visualize point clouds and evaluate spatial relationships | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1f3rr-y233GvxWVzPE7_mK-DY52pG0fsm?usp=sharing) |
+
+Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
+
+![image](<https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef> "SpaceThinker-Qwen2.5VL-3B")
 
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
