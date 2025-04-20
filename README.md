@@ -59,6 +59,8 @@ Here are some samples from the VQASynth pipeline:
 | **Answer:** 2–3 feet | **Answer:** 10–15 meters | **Answer:** 1 meter |
 
 
+## Run a Pipeline on Your Image Dataset
+
 ### Environment
 
 Before running the demo scripts, ensure you have the following installed:
@@ -66,8 +68,6 @@ Before running the demo scripts, ensure you have the following installed:
 - [Docker](https://docs.docker.com/engine/install/), [Docker Compose V2](https://docs.docker.com/compose/migrate/)
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
-
-## Run a Pipeline on Your Image Dataset
 
 Use Docker Compose to transform Image datasets from Huggingface Hub into VQA datasets describing spatial relations between objects. 
 You can process different datasets after updating the [config.yaml](config/config.yaml).
