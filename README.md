@@ -69,6 +69,7 @@ Before running the demo scripts, ensure you have the following installed:
 - Python 3.10 or later
 - [Docker](https://docs.docker.com/engine/install/), [Docker Compose V2](https://docs.docker.com/compose/migrate/)
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- At least 24GB VRAM (A10 or larger) and 16GB RAM
 
 
 Use Docker Compose to transform Image datasets from Huggingface Hub into VQA datasets describing spatial relations between objects. 
