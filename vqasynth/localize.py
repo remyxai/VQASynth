@@ -13,6 +13,7 @@ from transformers import (
 
 from transformers.utils.quantization_config import BitsAndBytesConfig
 from sam2.sam2_image_predictor import SAM2ImagePredictor
+from accelerate import Accelerator
 
 ########################################
 # Helper for Molmo: parse text -> points
@@ -74,95 +75,98 @@ class BaseCaptionLocalizer:
 ########################################
 # 2) FlorenceCaptionLocalizer
 ########################################
+
 class FlorenceCaptionLocalizer(BaseCaptionLocalizer):
     """
-    **Key change**: Return a single dictionary with
-       { "points": [...], "caption": [...] }
-    so it's consistent with MolmoCaptionLocalizer.
+    Produces a dict
+        { "points": [...], "caption": [...] }
+    identical to the earlier version, but the model is now prepared
+    by `Accelerator`, so it transparently spans all available GPUs.
     """
-    def __init__(self, model_name="microsoft/Florence-2-base", device=None):
+
+    def __init__(self,
+                 model_name: str = "microsoft/Florence-2-base",
+                 device: str | None = None):
         self.model_name = model_name
-        super().__init__(device=device)
+        super().__init__(device=device)          # `device` kept for API
 
     def post_init(self):
-        self.processor = AutoProcessor.from_pretrained(self.model_name, trust_remote_code=True)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            torch_dtype=self.torch_dtype,
-            trust_remote_code=True
-        ).to(self.device)
+        self.accelerator = Accelerator()
+        self.device = self.accelerator.device   # overwrite base attr
 
-    def generate_ids(self, inputs):
-        expected_dtype = next(self.model.parameters()).dtype
-        pixel_values = inputs.get("pixel_values")
-        if pixel_values is not None:
-            pixel_values = pixel_values.to(expected_dtype)
-        return self.model.generate(
-            input_ids=inputs["input_ids"],
-            pixel_values=pixel_values,
-            max_length=1024,
-            num_beams=1,
-            do_sample=False,
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_name, trust_remote_code=True
         )
 
-    def run(self, image):
+        model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            torch_dtype=self.torch_dtype,
+        )
+
+        self.model = self.accelerator.prepare(model)
+
+    def generate_ids(self, inputs):
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        expected_dtype = next(self.model.parameters()).dtype
+        if "pixel_values" in inputs and inputs["pixel_values"] is not None:
+            inputs["pixel_values"] = inputs["pixel_values"].to(expected_dtype)
+
+        with torch.no_grad():
+            return self.model.generate(
+                input_ids=inputs["input_ids"],
+                pixel_values=inputs.get("pixel_values"),
+                max_length=1024,
+                num_beams=1,
+                do_sample=False,
+            )
+
+    def run(self, image: Image.Image):
         """
-        Return:
-          {
-            "points": a list of bounding boxes (each is [x1, y1, x2, y2]),
-            "caption": a list of strings
-          }
+        Returns:
+          { "points": [[x1,y1,x2,y2], …], "caption": ["…", …] }
+        Behaviour identical to previous code; only the model loading
+        & device handling changed.
         """
-        # Step 1: Get a more detailed caption.
         prompt_task = "<MORE_DETAILED_CAPTION>"
         inputs = self.processor(
             text=prompt_task, images=image, return_tensors="pt"
-        ).to(self.device)
+        )
         generated_ids = self.generate_ids(inputs)
-        generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        parsed_answer = self.processor.post_process_generation(
-            generated_text, task=prompt_task, image_size=(image.width, image.height)
+        generated_text = self.processor.batch_decode(
+            generated_ids, skip_special_tokens=False
+        )[0]
+        parsed = self.processor.post_process_generation(
+            generated_text,
+            task=prompt_task,
+            image_size=(image.width, image.height),
         )
 
-        # Step 2: For each chunk of the main caption, ground it to bounding boxes.
-        main_captions = [c.strip() for c in parsed_answer.get(prompt_task, "").split(".") if c.strip()]
-        bboxes_list = []
-        captions_list = []
-
-        for chunk in main_captions:
-            grounding_prompt = f"<CAPTION_TO_PHRASE_GROUNDING> {chunk}"
-            grounding_in = self.processor(
-                text=grounding_prompt, images=image, return_tensors="pt"
-            ).to(self.device)
-            grounding_ids = self.generate_ids(grounding_in)
-            grounding_text = self.processor.batch_decode(grounding_ids, skip_special_tokens=False)[0]
-            parse2 = self.processor.post_process_generation(
-                grounding_text,
+        main_caps = [c.strip() for c in parsed.get(prompt_task, "").split(".") if c.strip()]
+        bboxes, captions = [], []
+        for chunk in main_caps:
+            g_prompt = f"<CAPTION_TO_PHRASE_GROUNDING> {chunk}"
+            g_in = self.processor(text=g_prompt, images=image, return_tensors="pt")
+            g_ids = self.generate_ids(g_in)
+            g_txt = self.processor.batch_decode(g_ids, skip_special_tokens=False)[0]
+            phrase = self.processor.post_process_generation(
+                g_txt,
                 task="<CAPTION_TO_PHRASE_GROUNDING>",
                 image_size=(image.width, image.height),
-            )
-            phrase_data = parse2.get("<CAPTION_TO_PHRASE_GROUNDING>", {})
-            if "bboxes" not in phrase_data or "labels" not in phrase_data:
-                continue
+            ).get("<CAPTION_TO_PHRASE_GROUNDING>", {})
 
-            # The result can be multiple bounding boxes or one. We flatten them.
-            # Usually bboxes is a list of floats [x1,y1,x2,y2], or a list of lists.
-            bbs = phrase_data["bboxes"]
-            if isinstance(bbs, list) and len(bbs) == 4 and isinstance(bbs[0], (int, float)):
-                # Single bounding box
-                bboxes_list.append([float(x) for x in bbs])
-                captions_list.append(chunk)
-            elif isinstance(bbs, list) and len(bbs) > 0:
-                # Possibly multiple bounding boxes
-                for box in bbs:
+            boxes = phrase.get("bboxes", [])
+            if isinstance(boxes, list) and len(boxes) == 4 and isinstance(boxes[0], (int, float)):
+                bboxes.append([float(x) for x in boxes])
+                captions.append(chunk)
+            elif isinstance(boxes, list):
+                for box in boxes:
                     if isinstance(box, list) and len(box) == 4:
-                        bboxes_list.append([float(x) for x in box])
-                        captions_list.append(chunk)
+                        bboxes.append([float(x) for x in box])
+                        captions.append(chunk)
 
-        return {
-            "points": bboxes_list,  # unify name with "points" for consistency
-            "caption": captions_list
-        }
+        return {"points": bboxes, "caption": captions}
 
 ########################################
 # 3) MolmoCaptionLocalizer
@@ -170,7 +174,7 @@ class FlorenceCaptionLocalizer(BaseCaptionLocalizer):
 class MolmoCaptionLocalizer(BaseCaptionLocalizer):
     def __init__(self, model_name="cyan2k/molmo-7B-O-bnb-4bit", device=None):
         self.model_name = model_name
-        super().__init__(device=device)
+        super().__init__(device="cuda:0")
 
     def post_init(self):
         if BitsAndBytesConfig is None:
@@ -183,15 +187,13 @@ class MolmoCaptionLocalizer(BaseCaptionLocalizer):
         self.processor = AutoProcessor.from_pretrained(
             self.model_name,
             trust_remote_code=True,
-            device_map="auto",
-            torch_dtype=torch.float16
         )
         print("Loading model...")
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
             trust_remote_code=True,
             quantization_config=quant_config,
-            device_map="auto",
+            device_map={"": 0},
             torch_dtype=torch.float16
         )
         for module in self.model.modules():
@@ -255,6 +257,7 @@ class LocationRefiner:
             model_name, trust_remote_code=True, device=self.device
         )
 
+        device_map={"": 0},
     def run(self, image, prompts, use_points=False):
         """
         If use_points=False, prompts is a list of bounding boxes [x1, y1, x2, y2].

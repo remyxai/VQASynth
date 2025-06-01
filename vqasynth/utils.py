@@ -6,6 +6,14 @@ import numpy as np
 import matplotlib.cm
 from PIL import Image
 
+def pick_dtype():
+    if not torch.cuda.is_available():
+        return torch.float32          # CPU path
+    major_cc, _ = torch.cuda.get_device_capability()
+    if major_cc >= 8:                 # Ampere (A10, A100, RTX30) or newer
+        return torch.bfloat16
+    return torch.float16              # older GPUs fall back to FP16
+
 def filter_null(example):
     """
     Filter out rows with None values in any of the columns.
