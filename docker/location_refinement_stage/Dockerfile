@@ -1,7 +1,7 @@
 FROM vqasynth:base
 WORKDIR /app
 
-ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
 
 COPY docker/location_refinement_stage/process_location_refinement.py /app
 COPY docker/location_refinement_stage/entrypoint.sh /app
