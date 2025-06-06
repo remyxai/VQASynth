@@ -51,6 +51,7 @@ Here are some samples from the VQASynth pipeline:
 * [SpaceThinker-Qwen2.5VL-3B](https://huggingface.co/remyxai/SpaceThinker-Qwen2.5VL-3B) - the most accurate
 * [SpaceQwen2.5-VL-3B-Instruct - 3B](https://huggingface.co/remyxai/SpaceQwen2.5-VL-3B-Instruct) - the most popular
 * [SpaceLLaVA - 13B](https://huggingface.co/remyxai/SpaceLLaVA) - the original
+* [SpaceLLaVA - 7B](https://huggingface.co/salma-remyx/spacellava-1.5-7b) - the most interpretable
 
 | <img src="assets/thinking_example_1.jpg"  alt="sample_1" style="max-height: 350px;" > | <img src="assets/thinking_example_2.png"  alt="sample_2" style="max-height: 350px;"> | <img src="assets/thinking_example_3.png" alt="sample_3" style="max-height: 350px;"> |
 |----------|-------------|--------|
