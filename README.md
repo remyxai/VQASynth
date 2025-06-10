@@ -48,7 +48,8 @@ Here are some samples from the VQASynth pipeline:
 
 [![Try the SpaceThinker Space](https://img.shields.io/badge/🤗%20Spaces-Demo-blue)](https://huggingface.co/spaces/remyxai/SpaceThinker-Qwen2.5VL-3B)
 
-* [SpaceThinker-Qwen2.5VL-3B](https://huggingface.co/remyxai/SpaceThinker-Qwen2.5VL-3B) - the most accurate
+* [SpaceOm](https://huggingface.co/remyxai/SpaceOm) - the best overall
+* [SpaceThinker-Qwen2.5VL-3B](https://huggingface.co/remyxai/SpaceThinker-Qwen2.5VL-3B) - the most accurate distance estimates
 * [SpaceQwen2.5-VL-3B-Instruct - 3B](https://huggingface.co/remyxai/SpaceQwen2.5-VL-3B-Instruct) - the most popular
 * [SpaceLLaVA - 13B](https://huggingface.co/remyxai/SpaceLLaVA) - the original
 * [SpaceLLaVA - 7B](https://huggingface.co/salma-remyx/spacellava-1.5-7b) - the most interpretable
