@@ -31,6 +31,7 @@ VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://spati
 
 ## Datasets made using VQASynth 🎹
 
+* [SpaceOm](https://huggingface.co/datasets/remyxai/SpaceOm)
 * [SpaceThinker](https://huggingface.co/datasets/remyxai/SpaceThinker)
 * [OpenSpaces_MC_R1](https://huggingface.co/datasets/remyxai/OpenSpaces_MC_R1)
 * [OpenSpaces](https://huggingface.co/datasets/remyxai/OpenSpaces)
