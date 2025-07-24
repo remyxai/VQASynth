@@ -88,7 +88,7 @@ huggingface-cli login
 cd /path/to/VQASynth
 bash run.sh
 ```
-You can run the colab notebook using free-tier CPU or GPU acceleration or customize your own pipeline:
+You can run the colab notebook (requires A100 runtime) or customize your own pipeline:
 ```python
 from vqasynth.datasets import Dataloader
 from vqasynth.embeddings import EmbeddingGenerator, TagFilter
