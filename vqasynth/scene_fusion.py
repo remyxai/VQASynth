@@ -2,13 +2,11 @@ import os
 import numpy as np
 import torch
 import open3d as o3d
-import cv2
 from pathlib import Path
-import tempfile
 from PIL import Image
+from torchvision import transforms as TF
 
 from vggt.models.vggt import VGGT
-from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from vggt.utils.geometry import unproject_depth_map_to_point_map
 
@@ -19,6 +17,153 @@ if device == "cuda":
 else:
     dtype = torch.float32
 
+def preprocess_images(image_list, mode="crop", interpolation=Image.Resampling.BICUBIC):
+    """
+    Modified from https://github.com/facebookresearch/vggt/blob/44b3afbd1869d8bde4894dd8ea1e293112dd5eba/vggt/utils/load_fn.py#L97-L230
+
+    A quick start function to load and preprocess images for model input.
+    This assumes the images should have the same shape for easier batching, but our model can also work well with different shapes.
+
+    Args:
+        image_list (list): List of images (PIL.Image or torch.Tensor)
+        mode (str, optional): Preprocessing mode, either "crop" or "pad".
+                             - "crop" (default): Sets width to 518px and center crops height if needed.
+                             - "pad": Preserves all pixels by making the largest dimension 518px
+                               and padding the smaller dimension to reach a square shape.
+
+    Returns:
+        torch.Tensor: Batched tensor of preprocessed images with shape (N, 3, H, W)
+
+    Raises:
+        ValueError: If the input list is empty or if mode is invalid
+
+    Notes:
+        - Images with different dimensions will be padded with white (value=1.0)
+        - A warning is printed when images have different shapes
+        - When mode="crop": The function ensures width=518px while maintaining aspect ratio
+          and height is center-cropped if larger than 518px
+        - When mode="pad": The function ensures the largest dimension is 518px while maintaining aspect ratio
+          and the smaller dimension is padded to reach a square shape (518x518)
+        - Dimensions are adjusted to be divisible by 14 for compatibility with model requirements
+    """
+    # Check for empty list
+    if len(image_list) == 0:
+        raise ValueError("At least 1 image is required")
+
+    # Validate mode
+    if mode not in ["crop", "pad"]:
+        raise ValueError("Mode must be either 'crop' or 'pad'")
+
+    images = []
+    shapes = set()
+    to_tensor = TF.ToTensor()
+    target_size = 518
+
+    # First process all images and collect their shapes
+    for img in image_list:
+        if isinstance(img, torch.Tensor):
+            height, width = img.shape[-2:]
+        else:
+            # If there's an alpha channel, blend onto white background:
+            if img.mode == "RGBA":
+                # Create white background
+                background = Image.new("RGBA", img.size, (255, 255, 255, 255))
+                # Alpha composite onto the white background
+                img = Image.alpha_composite(background, img)
+
+            # Now convert to "RGB" (this step assigns white for transparent areas)
+            img = img.convert("RGB")
+
+            width, height = img.size
+
+        if mode == "pad":
+            # Make the largest dimension 518px while maintaining aspect ratio
+            if width >= height:
+                new_width = target_size
+                new_height = (
+                    round(height * (new_width / width) / 14) * 14
+                )  # Make divisible by 14
+            else:
+                new_height = target_size
+                new_width = (
+                    round(width * (new_height / height) / 14) * 14
+                )  # Make divisible by 14
+        else:  # mode == "crop"
+            # Original behavior: set width to 518px
+            new_width = target_size
+            # Calculate height maintaining aspect ratio, divisible by 14
+            new_height = round(height * (new_width / width) / 14) * 14
+
+        # Resize with new dimensions (width, height)
+        img = TF.Resize((new_height, new_width), interpolation=interpolation)(img)
+        if not isinstance(img, torch.Tensor):
+            img = to_tensor(img)  # Convert to tensor (0, 1)
+
+        # Center crop height if it's larger than 518 (only in crop mode)
+        if mode == "crop" and new_height > target_size:
+            start_y = (new_height - target_size) // 2
+            img = img[:, start_y : start_y + target_size, :]
+
+        # For pad mode, pad to make a square of target_size x target_size
+        if mode == "pad":
+            h_padding = target_size - img.shape[1]
+            w_padding = target_size - img.shape[2]
+
+            if h_padding > 0 or w_padding > 0:
+                pad_top = h_padding // 2
+                pad_bottom = h_padding - pad_top
+                pad_left = w_padding // 2
+                pad_right = w_padding - pad_left
+
+                # Pad with white (value=1.0)
+                img = torch.nn.functional.pad(
+                    img,
+                    (pad_left, pad_right, pad_top, pad_bottom),
+                    mode="constant",
+                    value=1.0,
+                )
+
+        shapes.add((img.shape[1], img.shape[2]))
+        images.append(img)
+
+    # Check if we have different shapes
+    # In theory our model can also work well with different shapes
+    if len(shapes) > 1:
+        print(f"Warning: Found images with different shapes: {shapes}")
+        # Find maximum dimensions
+        max_height = max(shape[0] for shape in shapes)
+        max_width = max(shape[1] for shape in shapes)
+
+        # Pad images if necessary
+        padded_images = []
+        for img in images:
+            h_padding = max_height - img.shape[1]
+            w_padding = max_width - img.shape[2]
+
+            if h_padding > 0 or w_padding > 0:
+                pad_top = h_padding // 2
+                pad_bottom = h_padding - pad_top
+                pad_left = w_padding // 2
+                pad_right = w_padding - pad_left
+
+                img = torch.nn.functional.pad(
+                    img,
+                    (pad_left, pad_right, pad_top, pad_bottom),
+                    mode="constant",
+                    value=1.0,
+                )
+            padded_images.append(img)
+        images = padded_images
+
+    images = torch.stack(images)  # concatenate images
+
+    # Ensure correct shape when single image
+    if len(image_list) == 1:
+        # Verify shape is (1, C, H, W)
+        if images.dim() == 3:
+            images = images.unsqueeze(0)
+
+    return images
 
 def restore_pointclouds(pointcloud_paths):
     if len(pointcloud_paths) == 1 and isinstance(pointcloud_paths[0], list):
@@ -120,7 +265,7 @@ class SpatialSceneConstructor:
             raise ValueError(f"[ERROR] Cannot interpret intrinsic of shape {shape} to extract focal length!")
 
 
-    def create_point_cloud_from_model(self, pil_image):
+    def create_point_cloud_from_model(self, pil_image, mode="crop"):
         """
         1) Resize & normalize PIL image for VGGT,
         2) aggregator + camera + depth heads,
@@ -128,13 +273,8 @@ class SpatialSceneConstructor:
         4) Return (pcd, depth_map_np, focal_val).
         """
 
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmpfile:
-            pil_image.save(tmpfile.name)
-            temp_path = tmpfile.name
-        pil_image.save(temp_path)
-
-        images = load_and_preprocess_images([temp_path])  # (B=1,C=3,H,W)
-        images = images.to(device, dtype=dtype)
+        preprocessed_images = preprocess_images([pil_image], mode=mode)  # (B=1,C=3,H,W)
+        images = preprocessed_images.to(device, dtype=dtype)
         images = images.unsqueeze(1)
 
         with torch.no_grad():
@@ -168,34 +308,23 @@ class SpatialSceneConstructor:
         if point_map.shape[-1] != 3:
             raise ValueError(f"[ERROR] Unexpected shape for unprojected points: {point_map.shape}")
 
-        H, W, _ = point_map.shape
-
-        pil_image_resized = pil_image.resize((W, H), Image.BILINEAR)
-        np_image = np.array(pil_image_resized, dtype=np.uint8)
+        preprocessed_image = preprocessed_images.squeeze()
+        color_np = preprocessed_image.permute(1, 2, 0).reshape(-1, 3).cpu().numpy()
 
         coords_3d = point_map.reshape(-1, 3)
-        color_np = np_image.reshape(-1, 3) / 255.0
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(coords_3d)
         pcd.colors = o3d.utility.Vector3dVector(color_np)
-        os.remove(temp_path)
 
         return pcd, depth_map_np, focal_val
 
-    def run(self, image_filename, image, masks, output_dir):
+    def run(self, image_filename, image, masks, output_dir, mode="crop"):
         """
         Create full scene from model, canonicalize, segment with masks,
         return pcd filepaths, canonicalized, plus depth/focal.
         """
-        import math
-        import numpy as np
-        import os
-        import cv2
-        from pathlib import Path
-        import open3d as o3d
-
-        scene_pcd, depth_map_np, focal_val = self.create_point_cloud_from_model(image)
+        scene_pcd, depth_map_np, focal_val = self.create_point_cloud_from_model(image, mode=mode)
 
         normed_pcd, canonicalized, transformation = self.canonicalize_point_cloud(
             scene_pcd, canonicalize_threshold=0.3
@@ -205,31 +334,16 @@ class SpatialSceneConstructor:
         colors = np.asarray(normed_pcd.colors)   # shape (N, 3)
         total_points = points.shape[0]
 
-        def factor_hw(n):
-            root = int(math.isqrt(n))
-            for i in range(root, 0, -1):
-                if n % i == 0:
-                    return i, n // i
-            return 1, n
-
-        H, W = factor_hw(total_points)
-
         output_pointcloud_dir = os.path.join(output_dir, "pointclouds")
         Path(output_pointcloud_dir).mkdir(parents=True, exist_ok=True)
 
         all_indices = np.arange(total_points)
         point_cloud_filepaths = []
 
-        for idx, mask_img in enumerate(masks):
-            mask_array = np.array(mask_img, dtype=np.uint8)
-
-            if (mask_array.ndim == 2) and ((mask_array.shape[0] != H) or (mask_array.shape[1] != W)):
-                mask_array = cv2.resize(mask_array, (W, H), interpolation=cv2.INTER_NEAREST)
-
-            elif mask_array.ndim != 2:
-                continue
-
-            mask_bool = mask_array.astype(bool)
+        masks = torch.tensor(masks) / 255.0
+        masks = preprocess_images(masks.unsqueeze(0), mode=mode).squeeze(0)
+        masks = masks >= 0.5
+        for idx, mask_bool in enumerate(masks):
             mask_flat = mask_bool.ravel()
 
             valid_mask_indices = all_indices[mask_flat]
