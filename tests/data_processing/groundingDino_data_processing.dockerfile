@@ -55,7 +55,7 @@ RUN wget https://huggingface.co/spaces/xinyu1205/Tag2Text/resolve/main/tag2text_
 RUN wget https://remyx.ai/assets/spatialvlm/warehouse_rgb.jpg
 RUN python3 -m pip install --no-cache-dir diffusers[torch]==0.15.1 opencv-python==4.7.0.72 \
     pycocotools==2.0.6 matplotlib==3.5.3 \
-    onnxruntime==1.14.1 onnx==1.13.1 ipykernel==6.16.2 scipy gradio openai litellm
+    onnxruntime==1.14.1 onnx==1.13.1 ipykernel==6.16.2 scipy gradio openai litellm==1.83.13
 
 ENTRYPOINT ["python3", "groundingDino_data_processing.py"]
 CMD ["--config", "GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py", "--grounded_checkpoint", "groundingdino_swint_ogc.pth", "--input_image", "warehouse_rgb.jpg", "--output_dir", "outputs", "--box_threshold", "0.25", "--text_threshold", "0.2", "--iou_threshold", "0.5", "--device", "cuda"]
