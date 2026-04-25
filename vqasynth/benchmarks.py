@@ -1,0 +1,623 @@
+"""
+Benchmark dataset loaders for spatial reasoning evaluation.
+
+Loads and normalizes datasets from SpatialScore, OmniSpatial, SpaCE-10,
+and MindCube into a common format for evaluation.
+"""
+
+import io
+import json
+import os
+from collections import defaultdict
+
+from datasets import load_dataset
+
+from vqasynth.evaluation import (
+    classify_question,
+    extract_option,
+    extract_yes_no,
+    llm_judge,
+    score_choice,
+    score_distance,
+    score_distance_mra,
+    score_yes_no,
+)
+
+
+# ---------------------------------------------------------------------------
+# Common item schema
+# ---------------------------------------------------------------------------
+# Each loader normalizes benchmark items to:
+# {
+#     "id": str,
+#     "question": str,
+#     "answer": str,             # ground truth answer text
+#     "question_type": str,      # "multi-choice", "judgment", "open-ended"
+#     "category": str,           # benchmark-specific category
+#     "subcategory": str,        # benchmark-specific subcategory
+#     "options": list[str],      # answer options for multi-choice
+#     "images": list,            # PIL images (loaded lazily if possible)
+#     "source": str,             # benchmark name
+# }
+
+
+# ---------------------------------------------------------------------------
+# SpatialScore Loader
+# ---------------------------------------------------------------------------
+
+def load_spatialscore(data_path):
+    """
+    Load SpatialScore benchmark from a local JSON file.
+
+    SpatialScore is distributed as a zip on HuggingFace (haoningwu/SpatialScore)
+    and must be downloaded manually:
+        huggingface-cli download --repo-type dataset haoningwu/SpatialScore --local-dir ./
+        unzip SpatialScore.zip
+
+    Args:
+        data_path: Path to SpatialScore.json (e.g., "./dataset/SpatialScore.json")
+
+    Returns list of normalized items.
+    """
+    with open(data_path, "r") as f:
+        raw_data = json.load(f)
+
+    items = []
+    for entry in raw_data:
+        question_type = entry.get("question_type", "open-ended")
+
+        # Extract options from the question text for multi-choice
+        options = []
+        if question_type == "multi-choice":
+            q_text = entry.get("question", "")
+            # Options are typically embedded as (A) ... (B) ... in the question
+            import re
+            opt_matches = re.findall(r"\(([A-F])\)\s*([^(]+?)(?=\([A-F]\)|$)", q_text)
+            options = [m[1].strip() for m in opt_matches]
+
+        items.append({
+            "id": str(entry.get("id", entry.get("index", len(items)))),
+            "question": entry.get("question", ""),
+            "answer": entry.get("answer", ""),
+            "question_type": question_type,
+            "category": entry.get("category", "unknown"),
+            "subcategory": entry.get("subcategory", "unknown"),
+            "options": options,
+            "images": entry.get("img_paths", []),
+            "source": "SpatialScore",
+        })
+
+    return items
+
+
+# ---------------------------------------------------------------------------
+# OmniSpatial Loader
+# ---------------------------------------------------------------------------
+
+def load_omnispatial(split="test", streaming=False):
+    """
+    Load OmniSpatial benchmark from HuggingFace.
+
+    Dataset: qizekun/OmniSpatial
+
+    Args:
+        split: Dataset split ("test" or "train").
+        streaming: If True, returns an iterable dataset.
+
+    Returns list of normalized items.
+    """
+    ds = load_dataset("qizekun/OmniSpatial", split=split, streaming=streaming)
+
+    items = []
+    for entry in ds:
+        answer_idx = entry.get("answer", 0)
+        options = entry.get("options", [])
+        gt_letter = chr(65 + answer_idx) if isinstance(answer_idx, int) else str(answer_idx)
+        gt_text = options[answer_idx] if isinstance(answer_idx, int) and answer_idx < len(options) else gt_letter
+
+        items.append({
+            "id": str(entry.get("id", len(items))),
+            "question": entry.get("question", ""),
+            "answer": gt_letter,
+            "answer_text": gt_text,
+            "question_type": "multi-choice",
+            "category": entry.get("task_type", "unknown"),
+            "subcategory": entry.get("sub_task_type", "unknown"),
+            "options": options,
+            "images": [entry["image"]] if "image" in entry else [],
+            "source": "OmniSpatial",
+        })
+
+    return items
+
+
+# ---------------------------------------------------------------------------
+# SpaCE-10 Loader
+# ---------------------------------------------------------------------------
+
+SPACE10_SUBSETS = ["ep", "eq", "fr", "oo", "os", "sa", "sp", "sq"]
+
+SPACE10_SUBSET_NAMES = {
+    "ep": "Entity Presence",
+    "eq": "Entity Quantification",
+    "fr": "Functional Reasoning",
+    "oo": "Object-Object Spatial Relationship",
+    "os": "Object-Scene Spatial Relationship",
+    "sa": "Size Assessment",
+    "sp": "Spatial Planning",
+    "sq": "Scene Quantification",
+}
+
+
+def load_space10(subsets=None, streaming=False):
+    """
+    Load SpaCE-10 benchmark from HuggingFace.
+
+    Dataset: Cusyoung/SpaCE-10
+
+    Args:
+        subsets: List of subset abbreviations (e.g., ["ep", "oo"]).
+                 Defaults to all 8 subsets.
+        streaming: If True, returns items lazily.
+
+    Returns list of normalized items.
+    """
+    if subsets is None:
+        subsets = SPACE10_SUBSETS
+
+    items = []
+    for subset in subsets:
+        data_dir = f"single-choice/{subset}"
+        try:
+            ds = load_dataset(
+                "Cusyoung/SpaCE-10",
+                data_dir=data_dir,
+                split="test",
+                streaming=streaming,
+            )
+        except Exception as e:
+            print(f"Warning: Could not load SpaCE-10 subset '{subset}': {e}")
+            continue
+
+        for entry in ds:
+            # Build options list
+            options = []
+            for letter in ["A", "B", "C", "D", "E", "F"]:
+                if letter in entry and entry[letter]:
+                    options.append(entry[letter])
+
+            # Parse images from bytes
+            images = []
+            if "image" in entry and entry["image"] is not None:
+                img_data = entry["image"]
+                if isinstance(img_data, list):
+                    images = img_data  # list of PIL images or bytes
+                else:
+                    images = [img_data]
+
+            items.append({
+                "id": f"{subset}_{entry.get('index', len(items))}",
+                "question": entry.get("question", ""),
+                "answer": entry.get("answer", ""),
+                "question_type": "multi-choice",
+                "category": subset,
+                "subcategory": SPACE10_SUBSET_NAMES.get(subset, subset),
+                "options": options,
+                "images": images,
+                "source": "SpaCE-10",
+            })
+
+    return items
+
+
+# ---------------------------------------------------------------------------
+# MindCube Loader
+# ---------------------------------------------------------------------------
+
+MINDCUBE_SETTINGS = ["rotation", "among", "around", "translation"]
+
+
+def _mindcube_setting_from_id(item_id):
+    """Extract setting type from MindCube item ID."""
+    item_id_lower = item_id.lower()
+    for setting in ["around", "rotation", "translation", "among"]:
+        if setting in item_id_lower:
+            return setting
+    return "other"
+
+
+def load_mindcube(data_path=None, split="test", streaming=False):
+    """
+    Load MindCube benchmark.
+
+    Can load from HuggingFace (MLL-Lab/MindCube) or from a local JSONL file.
+
+    Args:
+        data_path: Path to MindCube.jsonl. If None, loads from HuggingFace.
+        split: Dataset split when loading from HuggingFace.
+        streaming: If True, returns items lazily.
+
+    Returns list of normalized items.
+    """
+    items = []
+
+    if data_path and os.path.exists(data_path):
+        # Load from local JSONL
+        with open(data_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                entry = json.loads(line)
+                item_id = str(entry.get("id", len(items)))
+                setting = _mindcube_setting_from_id(item_id)
+
+                items.append({
+                    "id": item_id,
+                    "question": entry.get("question", ""),
+                    "answer": entry.get("gt_answer", entry.get("answer", "")),
+                    "question_type": "multi-choice",
+                    "category": setting,
+                    "subcategory": setting,
+                    "options": [],
+                    "images": entry.get("images", []),
+                    "source": "MindCube",
+                })
+    else:
+        # Load from HuggingFace
+        try:
+            ds = load_dataset("MLL-Lab/MindCube", split=split, streaming=streaming)
+            for entry in ds:
+                item_id = str(entry.get("id", len(items)))
+                setting = _mindcube_setting_from_id(item_id)
+
+                items.append({
+                    "id": item_id,
+                    "question": entry.get("question", ""),
+                    "answer": entry.get("gt_answer", entry.get("answer", "")),
+                    "question_type": "multi-choice",
+                    "category": setting,
+                    "subcategory": setting,
+                    "options": [],
+                    "images": entry.get("images", []),
+                    "source": "MindCube",
+                })
+        except Exception as e:
+            print(f"Warning: Could not load MindCube from HuggingFace: {e}")
+
+    return items
+
+
+# ---------------------------------------------------------------------------
+# Unified Loader
+# ---------------------------------------------------------------------------
+
+BENCHMARK_LOADERS = {
+    "spatialscore": load_spatialscore,
+    "omnispatial": load_omnispatial,
+    "space10": load_space10,
+    "mindcube": load_mindcube,
+}
+
+
+def load_benchmark(name, **kwargs):
+    """
+    Load a benchmark dataset by name.
+
+    Args:
+        name: Benchmark name (spatialscore, omnispatial, space10, mindcube).
+        **kwargs: Passed to the specific loader.
+
+    Returns list of normalized items.
+    """
+    name_lower = name.lower()
+    if name_lower not in BENCHMARK_LOADERS:
+        valid = ", ".join(BENCHMARK_LOADERS.keys())
+        raise ValueError(f"Unknown benchmark '{name}'. Valid: {valid}")
+    return BENCHMARK_LOADERS[name_lower](**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Benchmark Scorer
+# ---------------------------------------------------------------------------
+
+# Scoring dispatch per (benchmark, question_type)
+# Each benchmark defines how to score its own question types
+
+def _score_spatialscore_item(item, prediction):
+    """Score a SpatialScore item using its native metrics."""
+    qt = item["question_type"]
+    gt = item["answer"]
+
+    if qt == "multi-choice":
+        pred_opt = extract_option(prediction)
+        gt_opt = extract_option(gt)
+        if pred_opt and gt_opt:
+            return 1.0 if pred_opt == gt_opt else 0.0
+        return 1.0 if prediction.strip().upper() == gt.strip().upper() else 0.0
+
+    elif qt == "judgment":
+        return score_yes_no(prediction, gt)
+
+    else:  # open-ended
+        # Check if it's a distance question
+        has_unit = any(
+            u in gt.lower()
+            for u in ["meter", "meters", "cm", "feet", "inch", "inches", "ft", "m "]
+        )
+        if has_unit:
+            score = score_distance(prediction, gt, tolerance=2.0)
+            if score is not None:
+                return score
+
+        # Try MRA for numeric answers
+        mra = score_distance_mra(prediction, gt)
+        if mra is not None:
+            return mra
+
+        # Exact match fallback
+        return 1.0 if prediction.strip().lower() == gt.strip().lower() else 0.0
+
+
+def _score_omnispatial_item(item, prediction):
+    """Score an OmniSpatial item (always multi-choice accuracy)."""
+    gt_letter = item["answer"]
+    pred_opt = extract_option(prediction)
+
+    if pred_opt:
+        return 1.0 if pred_opt == gt_letter.upper() else 0.0
+
+    # Fallback: check if prediction contains the correct option text
+    if item.get("answer_text"):
+        return 1.0 if item["answer_text"].lower() in prediction.lower() else 0.0
+
+    return 0.0
+
+
+def _score_space10_item(item, prediction):
+    """Score a SpaCE-10 item (single-choice accuracy)."""
+    gt = item["answer"].strip().upper()
+    pred = extract_option(prediction)
+
+    if pred:
+        return 1.0 if pred == gt else 0.0
+
+    # Try matching by option text
+    options = item.get("options", [])
+    for i, opt in enumerate(options):
+        letter = chr(65 + i)
+        if letter == gt and opt.lower() in prediction.lower():
+            return 1.0
+
+    return 0.0
+
+
+def _score_mindcube_item(item, prediction):
+    """Score a MindCube item (answer accuracy A-E)."""
+    gt = item["answer"].strip().upper()
+    pred = extract_option(prediction)
+
+    if pred:
+        return 1.0 if pred == gt else 0.0
+
+    return 1.0 if prediction.strip().upper() == gt else 0.0
+
+
+BENCHMARK_SCORERS = {
+    "spatialscore": _score_spatialscore_item,
+    "omnispatial": _score_omnispatial_item,
+    "space10": _score_space10_item,
+    "mindcube": _score_mindcube_item,
+}
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkRunner
+# ---------------------------------------------------------------------------
+
+class BenchmarkRunner:
+    """
+    Runs evaluation against external benchmark datasets.
+
+    Loads benchmark data, scores predictions, and generates reports
+    with benchmark-native categories and sub-categories.
+    """
+
+    def __init__(self, benchmarks=None, llm_client=None, llm_model="gpt-4o"):
+        """
+        Args:
+            benchmarks: List of benchmark names, or "all".
+            llm_client: Optional OpenAI client for LLM judge fallback.
+            llm_model: Model name for LLM judge.
+        """
+        if benchmarks is None or benchmarks == "all":
+            self.benchmarks = list(BENCHMARK_LOADERS.keys())
+        elif isinstance(benchmarks, str):
+            self.benchmarks = [benchmarks.lower()]
+        else:
+            self.benchmarks = [b.lower() for b in benchmarks]
+
+        self.llm_client = llm_client
+        self.llm_model = llm_model
+
+    def load(self, benchmark_name, **kwargs):
+        """Load a benchmark dataset."""
+        return load_benchmark(benchmark_name, **kwargs)
+
+    def score(self, benchmark_name, items, predictions):
+        """
+        Score predictions against benchmark items.
+
+        Args:
+            benchmark_name: Name of the benchmark.
+            items: List of normalized benchmark items.
+            predictions: Dict mapping item ID -> prediction string,
+                        or list of prediction strings (same order as items).
+
+        Returns dict with per-item scores and aggregated results.
+        """
+        scorer = BENCHMARK_SCORERS.get(benchmark_name.lower())
+        if scorer is None:
+            raise ValueError(f"No scorer for benchmark '{benchmark_name}'")
+
+        # Normalize predictions to dict
+        if isinstance(predictions, list):
+            pred_map = {item["id"]: predictions[i] for i, item in enumerate(items) if i < len(predictions)}
+        else:
+            pred_map = predictions
+
+        per_item = []
+        category_scores = defaultdict(list)
+        subcategory_scores = defaultdict(list)
+        all_scores = []
+
+        for item in items:
+            pred = pred_map.get(item["id"], "")
+            score = scorer(item, pred)
+
+            # LLM judge fallback if scorer returned None
+            if score is None and self.llm_client is not None:
+                score = llm_judge(
+                    self.llm_client, self.llm_model,
+                    item["question"], pred, item["answer"],
+                )
+            if score is None:
+                score = 0.0
+
+            per_item.append({
+                "id": item["id"],
+                "score": score,
+                "category": item["category"],
+                "subcategory": item["subcategory"],
+                "question_type": item["question_type"],
+            })
+
+            all_scores.append(score)
+            category_scores[item["category"]].append(score)
+            subcategory_scores[item["subcategory"]].append(score)
+
+        def _agg(scores):
+            return {"accuracy": sum(scores) / len(scores) if scores else 0.0, "count": len(scores)}
+
+        return {
+            "benchmark": benchmark_name,
+            "overall_accuracy": _agg(all_scores)["accuracy"],
+            "total": len(all_scores),
+            "by_category": {cat: _agg(s) for cat, s in sorted(category_scores.items())},
+            "by_subcategory": {sub: _agg(s) for sub, s in sorted(subcategory_scores.items())},
+            "per_item": per_item,
+        }
+
+    def run(self, predictions_by_benchmark, load_kwargs=None):
+        """
+        Run evaluation across configured benchmarks.
+
+        Args:
+            predictions_by_benchmark: Dict mapping benchmark name to predictions.
+                Each value is either:
+                - A dict mapping item ID -> prediction string
+                - A list of prediction strings (same order as loaded items)
+            load_kwargs: Optional dict mapping benchmark name to loader kwargs.
+
+        Returns a full report dict.
+        """
+        load_kwargs = load_kwargs or {}
+        report = {
+            "summary": {},
+            "benchmarks": {},
+        }
+
+        for bname in self.benchmarks:
+            if bname not in predictions_by_benchmark:
+                continue
+
+            kwargs = load_kwargs.get(bname, {})
+            items = self.load(bname, **kwargs)
+            preds = predictions_by_benchmark[bname]
+            result = self.score(bname, items, preds)
+
+            report["benchmarks"][result["benchmark"]] = {
+                "overall_accuracy": result["overall_accuracy"],
+                "total": result["total"],
+                "by_category": result["by_category"],
+                "by_subcategory": result["by_subcategory"],
+            }
+            report["summary"][result["benchmark"]] = result["overall_accuracy"]
+
+        return report
+
+    def get_benchmark_items(self, benchmark_name, **kwargs):
+        """
+        Load benchmark items for model inference.
+
+        Returns list of dicts with 'id', 'question', 'options', 'images'
+        that can be passed to a model. Ground truth is excluded.
+        """
+        items = self.load(benchmark_name, **kwargs)
+        return [
+            {
+                "id": item["id"],
+                "question": item["question"],
+                "options": item["options"],
+                "images": item["images"],
+                "category": item["category"],
+                "subcategory": item["subcategory"],
+            }
+            for item in items
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Report Formatting
+# ---------------------------------------------------------------------------
+
+def format_benchmark_report(report):
+    """
+    Format a benchmark report as a human-readable string.
+
+    Args:
+        report: Report dict from BenchmarkRunner.run().
+
+    Returns formatted string.
+    """
+    lines = []
+    lines.append("")
+    lines.append("=" * 70)
+    lines.append("SPATIAL REASONING BENCHMARK REPORT")
+    lines.append("=" * 70)
+
+    if report.get("summary"):
+        lines.append("")
+        lines.append(f"{'Benchmark':<25} {'Overall Accuracy':>18} {'Samples':>10}")
+        lines.append("-" * 55)
+        for bname, acc in report["summary"].items():
+            total = report["benchmarks"][bname]["total"]
+            lines.append(f"{bname:<25} {acc:>17.1%} {total:>10}")
+
+    for bname, bdata in report.get("benchmarks", {}).items():
+        lines.append("")
+        lines.append(f"--- {bname} ---")
+        lines.append(f"  Overall: {bdata['overall_accuracy']:.1%} ({bdata['total']} samples)")
+
+        if bdata.get("by_category"):
+            lines.append("")
+            lines.append(f"  {'Category':<40} {'Accuracy':>10} {'Count':>8}")
+            lines.append(f"  {'-' * 60}")
+            for cat, cdata in bdata["by_category"].items():
+                lines.append(f"  {cat:<40} {cdata['accuracy']:>9.1%} {cdata['count']:>8}")
+
+        if bdata.get("by_subcategory") and bdata["by_subcategory"] != bdata.get("by_category"):
+            # Only show subcategories if they differ from categories
+            subcats = bdata["by_subcategory"]
+            cats = bdata.get("by_category", {})
+            if set(subcats.keys()) != set(cats.keys()):
+                lines.append("")
+                lines.append(f"  {'Subcategory':<40} {'Accuracy':>10} {'Count':>8}")
+                lines.append(f"  {'-' * 60}")
+                for sub, sdata in subcats.items():
+                    lines.append(f"  {sub:<40} {sdata['accuracy']:>9.1%} {sdata['count']:>8}")
+
+    lines.append("")
+    lines.append("=" * 70)
+    lines.append("")
+    return "\n".join(lines)
