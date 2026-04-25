@@ -6,11 +6,14 @@ Implements scoring methods adapted from:
 - OmniSpatial: multi-choice accuracy, LLM judge fallback, per-category breakdown
 - SpaCE-10: cascading rule-based extraction with GPT fallback
 - MindCube: multi-choice extraction with cascading regex
+
+Supports running individual benchmarks or generating a full report across all.
 """
 
 import re
 import json
 import math
+from collections import defaultdict
 import numpy as np
 from openai import OpenAI
 
@@ -380,6 +383,101 @@ def score_choice(pred_text, gt_text, question=""):
 
 
 # ---------------------------------------------------------------------------
+# Benchmark Definitions
+# ---------------------------------------------------------------------------
+
+# Each benchmark defines how to score each question type and how to group results.
+# "scorer" maps qa_type -> scoring function name
+# "categories" maps display category -> list of qa_types that roll up into it
+
+BENCHMARKS = {
+    "spatialscore": {
+        "name": "SpatialScore",
+        "description": "Distance ratio tolerance, yes/no extraction, MRA for numeric (SpatialScore, CVPR 2026)",
+        "scorer": {
+            "distance": "ratio_tolerance",
+            "vertical_distance": "ratio_tolerance",
+            "horizontal_distance": "ratio_tolerance",
+            "measurement": "ratio_tolerance",
+            "comparison_yn": "yes_no",
+            "comparison_choice": "choice",
+            "unknown": "llm_judge",
+        },
+        "categories": {
+            "Object Distance": ["distance", "vertical_distance", "horizontal_distance"],
+            "Object Properties": ["measurement"],
+            "Spatial Relations": ["comparison_yn", "comparison_choice"],
+        },
+    },
+    "omnispatial": {
+        "name": "OmniSpatial",
+        "description": "Accuracy with LLM judge fallback, cognitive-psychology categories (OmniSpatial, arXiv 2506.03135)",
+        "scorer": {
+            "distance": "llm_judge",
+            "vertical_distance": "llm_judge",
+            "horizontal_distance": "llm_judge",
+            "measurement": "llm_judge",
+            "comparison_yn": "llm_judge",
+            "comparison_choice": "llm_judge",
+            "unknown": "llm_judge",
+        },
+        "categories": {
+            "Spatial Interaction": ["distance", "vertical_distance", "horizontal_distance"],
+            "Complex Logic": ["measurement"],
+            "Perspective Taking": ["comparison_yn", "comparison_choice"],
+        },
+    },
+    "space10": {
+        "name": "SpaCE-10",
+        "description": "Rule-based extraction with GPT fallback, compositional QA types (SpaCE-10)",
+        "scorer": {
+            "distance": "ratio_tolerance",
+            "vertical_distance": "ratio_tolerance",
+            "horizontal_distance": "ratio_tolerance",
+            "measurement": "ratio_tolerance",
+            "comparison_yn": "yes_no",
+            "comparison_choice": "choice",
+            "unknown": "llm_judge",
+        },
+        "categories": {
+            "Size Assessment": ["measurement"],
+            "Object-Object Spatial Relationship": ["comparison_yn", "comparison_choice"],
+            "Spatial Planning": ["distance", "vertical_distance", "horizontal_distance"],
+        },
+    },
+    "mindcube": {
+        "name": "MindCube",
+        "description": "Answer accuracy with MRA for distance, directional relation scoring (MindCube, arXiv 2506.21458)",
+        "scorer": {
+            "distance": "mra",
+            "vertical_distance": "mra",
+            "horizontal_distance": "mra",
+            "measurement": "mra",
+            "comparison_yn": "yes_no",
+            "comparison_choice": "choice",
+            "unknown": "llm_judge",
+        },
+        "categories": {
+            "Rotation": ["vertical_distance", "horizontal_distance"],
+            "Among": ["comparison_yn", "comparison_choice"],
+            "Around": ["distance", "measurement"],
+        },
+    },
+}
+
+ALL_BENCHMARK_NAMES = list(BENCHMARKS.keys())
+
+
+def get_benchmark(name):
+    """Return a benchmark config by name, or raise ValueError."""
+    name_lower = name.lower()
+    if name_lower not in BENCHMARKS:
+        valid = ", ".join(ALL_BENCHMARK_NAMES)
+        raise ValueError(f"Unknown benchmark '{name}'. Valid benchmarks: {valid}")
+    return BENCHMARKS[name_lower]
+
+
+# ---------------------------------------------------------------------------
 # LLM Judge (optional fallback)
 # ---------------------------------------------------------------------------
 
@@ -431,6 +529,9 @@ class Evaluator:
 
     Scores model predictions against ground truth using methods from
     SpatialScore, OmniSpatial, SpaCE-10, and MindCube.
+
+    Supports running a single benchmark, a list of benchmarks, or "all"
+    to generate a full comparative report.
     """
 
     def __init__(
@@ -441,18 +542,39 @@ class Evaluator:
         llm_api_key=None,
         llm_model="gpt-4o",
         distance_tolerance=2.0,
-        use_mra=False,
+        benchmark="all",
     ):
+        """
+        Args:
+            prediction_column: Column name with model predictions.
+            ground_truth_column: Column name with ground truth messages.
+            use_llm_judge: Enable LLM judge fallback for ambiguous outputs.
+            llm_api_key: OpenAI API key (required if use_llm_judge=True).
+            llm_model: Model name for LLM judge calls.
+            distance_tolerance: Ratio tolerance for distance scoring.
+            benchmark: Benchmark name, list of names, or "all".
+        """
         self.prediction_column = prediction_column
         self.ground_truth_column = ground_truth_column
         self.distance_tolerance = distance_tolerance
-        self.use_mra = use_mra
         self.use_llm_judge = use_llm_judge
         self.llm_model = llm_model
         self.client = None
 
         if use_llm_judge and llm_api_key:
             self.client = OpenAI(api_key=llm_api_key)
+
+        # Resolve benchmark selection
+        if benchmark == "all":
+            self.benchmarks = ALL_BENCHMARK_NAMES
+        elif isinstance(benchmark, str):
+            self.benchmarks = [benchmark.lower()]
+        else:
+            self.benchmarks = [b.lower() for b in benchmark]
+
+        # Validate
+        for b in self.benchmarks:
+            get_benchmark(b)
 
     def _extract_qa_pairs(self, messages):
         """
@@ -479,42 +601,69 @@ class Evaluator:
                     pairs.append((question_texts[0], answer_texts[0]))
         return pairs
 
-    def score_single(self, question, prediction, ground_truth):
+    def _apply_scorer(self, scorer_name, question, prediction, ground_truth):
+        """
+        Dispatch to a scoring function by name.
+
+        Returns (score, scoring_method) tuple. Score may be None on failure.
+        """
+        if scorer_name == "ratio_tolerance":
+            return (
+                score_distance(prediction, ground_truth, self.distance_tolerance),
+                "ratio_tolerance",
+            )
+        elif scorer_name == "mra":
+            return (
+                score_distance_mra(prediction, ground_truth),
+                "mra",
+            )
+        elif scorer_name == "yes_no":
+            return (
+                score_yes_no(prediction, ground_truth),
+                "yes_no_match",
+            )
+        elif scorer_name == "choice":
+            return (
+                score_choice(prediction, ground_truth, question),
+                "choice_match",
+            )
+        elif scorer_name == "llm_judge":
+            if self.use_llm_judge and self.client is not None:
+                return (
+                    llm_judge(self.client, self.llm_model, question, prediction, ground_truth),
+                    "llm_judge",
+                )
+            return (None, "llm_judge_unavailable")
+        return (None, "none")
+
+    def score_single(self, question, prediction, ground_truth, benchmark_name=None):
         """
         Score a single prediction against ground truth.
 
-        Classifies the question type and dispatches to the appropriate scorer.
+        If benchmark_name is provided, uses that benchmark's scoring strategy.
+        Otherwise uses the first configured benchmark.
 
         Returns dict with "qa_type", "score", and "scoring_method".
         """
         qa_type = classify_question(question)
+        bname = benchmark_name or self.benchmarks[0]
+        bench = get_benchmark(bname)
+        scorer_name = bench["scorer"].get(qa_type, bench["scorer"].get("unknown", "llm_judge"))
 
-        score = None
-        scoring_method = "none"
+        score, scoring_method = self._apply_scorer(scorer_name, question, prediction, ground_truth)
 
-        if qa_type in ("distance", "vertical_distance", "horizontal_distance", "measurement"):
-            if self.use_mra:
-                score = score_distance_mra(prediction, ground_truth)
-                scoring_method = "mra"
-            else:
-                score = score_distance(prediction, ground_truth, self.distance_tolerance)
-                scoring_method = "ratio_tolerance"
+        # Fallback chain: try rule-based if LLM judge failed or was unavailable
+        if score is None and scorer_name == "llm_judge":
+            if qa_type in ("distance", "vertical_distance", "horizontal_distance", "measurement"):
+                score, scoring_method = self._apply_scorer("ratio_tolerance", question, prediction, ground_truth)
+            elif qa_type == "comparison_yn":
+                score, scoring_method = self._apply_scorer("yes_no", question, prediction, ground_truth)
+            elif qa_type == "comparison_choice":
+                score, scoring_method = self._apply_scorer("choice", question, prediction, ground_truth)
 
-        elif qa_type == "comparison_yn":
-            score = score_yes_no(prediction, ground_truth)
-            scoring_method = "yes_no_match"
-
-        elif qa_type == "comparison_choice":
-            score = score_choice(prediction, ground_truth, question)
-            scoring_method = "choice_match"
-
-        # LLM judge fallback if rule-based extraction failed
-        if score is None and self.use_llm_judge and self.client is not None:
-            score = llm_judge(
-                self.client, self.llm_model,
-                question, prediction, ground_truth
-            )
-            scoring_method = "llm_judge"
+        # Final fallback: try LLM judge if rule-based failed
+        if score is None and self.use_llm_judge and self.client is not None and scorer_name != "llm_judge":
+            score, scoring_method = self._apply_scorer("llm_judge", question, prediction, ground_truth)
 
         if score is None:
             score = 0.0
@@ -526,85 +675,177 @@ class Evaluator:
             "scoring_method": scoring_method,
         }
 
-    def run(self, predictions, messages):
+    def _aggregate_scores(self, per_sample, benchmark_name):
+        """Build aggregate stats for a single benchmark from per-sample results."""
+        bench = get_benchmark(benchmark_name)
+        all_scores = [r["score"] for r in per_sample]
+
+        # Per qa_type breakdown
+        type_scores = defaultdict(list)
+        for r in per_sample:
+            type_scores[r["qa_type"]].append(r["score"])
+
+        by_type = {
+            t: {"accuracy": sum(s) / len(s), "count": len(s)}
+            for t, s in type_scores.items()
+        }
+
+        # Per benchmark category breakdown
+        by_category = {}
+        for cat_name, cat_types in bench["categories"].items():
+            cat_scores = []
+            for t in cat_types:
+                cat_scores.extend(type_scores.get(t, []))
+            if cat_scores:
+                by_category[cat_name] = {
+                    "accuracy": sum(cat_scores) / len(cat_scores),
+                    "count": len(cat_scores),
+                }
+
+        return {
+            "benchmark": bench["name"],
+            "description": bench["description"],
+            "overall_accuracy": sum(all_scores) / len(all_scores) if all_scores else 0.0,
+            "total_qa_pairs": len(all_scores),
+            "by_type": by_type,
+            "by_category": by_category,
+        }
+
+    def run(self, predictions, messages, benchmark_name=None):
         """
-        Score a list of predictions against ground truth messages.
+        Score predictions against ground truth for a single benchmark.
 
         Args:
             predictions: List of prediction strings (one per QA pair).
             messages: VQASynth messages list (alternating user/assistant).
+            benchmark_name: Benchmark to use. Defaults to first configured.
 
         Returns dict with "per_sample" scores and "aggregate" summary.
         """
+        bname = benchmark_name or self.benchmarks[0]
         qa_pairs = self._extract_qa_pairs(messages)
 
         per_sample = []
         for i, (question, gt_answer) in enumerate(qa_pairs):
             pred = predictions[i] if i < len(predictions) else ""
-            result = self.score_single(question, pred, gt_answer)
+            result = self.score_single(question, pred, gt_answer, bname)
             per_sample.append(result)
 
-        # Aggregate by type
-        type_scores = {}
-        all_scores = []
-        for r in per_sample:
-            all_scores.append(r["score"])
-            t = r["qa_type"]
-            type_scores.setdefault(t, []).append(r["score"])
-
-        aggregate = {
-            "overall_accuracy": sum(all_scores) / len(all_scores) if all_scores else 0.0,
-            "total_qa_pairs": len(all_scores),
-            "by_type": {
-                t: {
-                    "accuracy": sum(scores) / len(scores),
-                    "count": len(scores),
-                }
-                for t, scores in type_scores.items()
-            },
-        }
-
+        aggregate = self._aggregate_scores(per_sample, bname)
         return {"per_sample": per_sample, "aggregate": aggregate}
+
+    def generate_report(self, predictions, messages):
+        """
+        Generate a full evaluation report across all configured benchmarks.
+
+        Runs each benchmark's scoring strategy and produces a comparative
+        report with per-benchmark and per-category breakdowns.
+
+        Returns dict with structure:
+        {
+            "summary": { benchmark_name: overall_accuracy, ... },
+            "benchmarks": {
+                benchmark_name: {
+                    "overall_accuracy": float,
+                    "by_type": { qa_type: {accuracy, count}, ... },
+                    "by_category": { category: {accuracy, count}, ... },
+                },
+                ...
+            },
+            "total_qa_pairs": int,
+        }
+        """
+        qa_pairs = self._extract_qa_pairs(messages)
+        if not qa_pairs:
+            return {
+                "summary": {},
+                "benchmarks": {},
+                "total_qa_pairs": 0,
+            }
+
+        report = {"benchmarks": {}, "summary": {}, "total_qa_pairs": len(qa_pairs)}
+
+        for bname in self.benchmarks:
+            per_sample = []
+            for i, (question, gt_answer) in enumerate(qa_pairs):
+                pred = predictions[i] if i < len(predictions) else ""
+                result = self.score_single(question, pred, gt_answer, bname)
+                per_sample.append(result)
+
+            agg = self._aggregate_scores(per_sample, bname)
+            bench_display = agg.pop("benchmark")
+            report["benchmarks"][bench_display] = agg
+            report["summary"][bench_display] = agg["overall_accuracy"]
+
+        return report
 
     def apply_transform(self, example):
         """
         Pipeline-compatible transform for dataset.map().
 
-        Reads messages and predictions columns, scores each QA pair,
-        and adds eval_scores, eval_types, and eval_mean_score columns.
+        Reads messages and predictions columns. When a single benchmark is
+        configured, adds eval_scores/eval_types/eval_mean_score. When
+        multiple benchmarks are configured, generates a full report in
+        eval_report and stores per-benchmark scores.
         """
         messages = example.get(self.ground_truth_column)
         predictions = example.get(self.prediction_column)
 
+        empty = {
+            "eval_scores": [],
+            "eval_types": [],
+            "eval_mean_score": None,
+            "eval_report": None,
+        }
+
         if not messages:
-            return {
-                "eval_scores": [],
-                "eval_types": [],
-                "eval_mean_score": None,
-            }
+            return empty
 
         qa_pairs = self._extract_qa_pairs(messages)
         if not qa_pairs:
+            return empty
+
+        # Single benchmark mode: flat scores
+        if len(self.benchmarks) == 1:
+            bname = self.benchmarks[0]
+            scores = []
+            types = []
+            for i, (question, gt_answer) in enumerate(qa_pairs):
+                pred = predictions[i] if predictions and i < len(predictions) else ""
+                result = self.score_single(question, pred, gt_answer, bname)
+                scores.append(result["score"])
+                types.append(result["qa_type"])
+
+            mean_score = sum(scores) / len(scores) if scores else None
             return {
-                "eval_scores": [],
-                "eval_types": [],
-                "eval_mean_score": None,
+                "eval_scores": scores,
+                "eval_types": types,
+                "eval_mean_score": mean_score,
+                "eval_report": None,
             }
 
-        scores = []
-        types = []
-        for i, (question, gt_answer) in enumerate(qa_pairs):
-            pred = ""
-            if predictions and i < len(predictions):
-                pred = predictions[i]
-            result = self.score_single(question, pred, gt_answer)
-            scores.append(result["score"])
-            types.append(result["qa_type"])
+        # Multi-benchmark mode: full report
+        preds_list = [
+            predictions[i] if predictions and i < len(predictions) else ""
+            for i in range(len(qa_pairs))
+        ]
+        report = self.generate_report(preds_list, messages)
 
-        mean_score = sum(scores) / len(scores) if scores else None
+        # Use first benchmark's scores as the primary eval_scores
+        first_bname = self.benchmarks[0]
+        first_scores = []
+        first_types = []
+        for i, (question, gt_answer) in enumerate(qa_pairs):
+            pred = preds_list[i]
+            result = self.score_single(question, pred, gt_answer, first_bname)
+            first_scores.append(result["score"])
+            first_types.append(result["qa_type"])
+
+        mean_score = sum(first_scores) / len(first_scores) if first_scores else None
 
         return {
-            "eval_scores": scores,
-            "eval_types": types,
+            "eval_scores": first_scores,
+            "eval_types": first_types,
             "eval_mean_score": mean_score,
+            "eval_report": json.dumps(report),
         }

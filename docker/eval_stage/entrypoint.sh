@@ -7,6 +7,7 @@ OUTPUT_DIR=$(yq e '.directories.output_dir' $CONFIG_FILE)
 SOURCE_REPO_ID=$(yq e '.arguments.source_repo_id' $CONFIG_FILE)
 TARGET_REPO_NAME=$(yq e '.arguments.target_repo_name' $CONFIG_FILE)
 OPENAI_API_KEY=$(yq e '.arguments.openai_key' $CONFIG_FILE)
+BENCHMARK=$(yq e '.arguments.eval_benchmark // "all"' $CONFIG_FILE)
 
 # Export these values as environment variables
 export OUTPUT_DIR
@@ -19,14 +20,15 @@ while [ ! -f "${OUTPUT_DIR}/data_processing_done.txt" ]; do
   sleep 10
 done
 
-echo "Starting evaluation..."
+echo "Starting evaluation (benchmark: ${BENCHMARK})..."
 python3 process_eval.py \
     --output_dir="${OUTPUT_DIR}" \
     --source_repo_id="${SOURCE_REPO_ID}" \
     --target_repo_name="${TARGET_REPO_NAME}" \
     --prediction_column="predictions" \
     --ground_truth_column="messages" \
-    --api_key="${OPENAI_API_KEY}"
+    --api_key="${OPENAI_API_KEY}" \
+    --benchmark="${BENCHMARK}"
 
 rm "${OUTPUT_DIR}/data_processing_done.txt"
 touch "${OUTPUT_DIR}/data_processing_done.txt"
