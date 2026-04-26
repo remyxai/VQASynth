@@ -125,6 +125,22 @@ def print_report(summary, benchmarks):
 def run_internal_eval(args, benchmark):
     """Evaluate model predictions stored in a VQASynth dataset."""
     dataloader = Dataloader(args.output_dir)
+    dataset = dataloader.load_dataset(args.source_repo_id)
+
+    # If --hf_model is provided, run inference to populate the predictions column
+    if args.hf_model:
+        from vqasynth.inference import run_inference_on_dataset
+
+        print(f"Running inference with model: {args.hf_model}")
+        dataset = run_inference_on_dataset(
+            model_name=args.hf_model,
+            dataset=dataset,
+            ground_truth_column=args.ground_truth_column,
+            image_column=args.image_column,
+            prediction_column=args.prediction_column,
+            max_new_tokens=args.max_new_tokens,
+        )
+        print("Inference complete, proceeding to evaluation...")
 
     evaluator = Evaluator(
         prediction_column=args.prediction_column,
@@ -135,8 +151,6 @@ def run_internal_eval(args, benchmark):
         distance_tolerance=args.distance_tolerance,
         benchmark=benchmark,
     )
-
-    dataset = dataloader.load_dataset(args.source_repo_id)
 
     for col in ["eval_scores", "eval_types", "eval_mean_score", "eval_report"]:
         if col in dataset.column_names:
@@ -165,8 +179,8 @@ def run_benchmark_eval(args, benchmark_names):
     """
     Evaluate predictions against external benchmark datasets.
 
-    Predictions are loaded from a JSON file mapping benchmark name to
-    either a dict of {item_id: prediction} or a list of predictions.
+    When --hf_model is provided, runs inference on each benchmark's items.
+    Otherwise, predictions are loaded from a JSON file.
     """
     from openai import OpenAI
 
@@ -180,16 +194,42 @@ def run_benchmark_eval(args, benchmark_names):
         llm_model=args.model,
     )
 
-    # Load predictions from JSON file
-    with open(args.predictions_file, "r") as f:
-        predictions_by_benchmark = json.load(f)
-
     # Build loader kwargs for benchmarks that need paths
     load_kwargs = {}
     if args.spatialscore_path:
         load_kwargs["spatialscore"] = {"data_path": args.spatialscore_path}
     if args.mindcube_path:
         load_kwargs["mindcube"] = {"data_path": args.mindcube_path}
+
+    if args.hf_model:
+        # Run inference on each benchmark dataset
+        from vqasynth.inference import run_inference_on_benchmark
+
+        predictions_by_benchmark = {}
+        for bname in benchmark_names:
+            kwargs = load_kwargs.get(bname, {})
+            try:
+                items = runner.load(bname, **kwargs)
+            except Exception as e:
+                print(f"Warning: Could not load benchmark '{bname}': {e}")
+                continue
+
+            print(f"Running inference on {bname} ({len(items)} items) with {args.hf_model}...")
+            preds = run_inference_on_benchmark(
+                model_name=args.hf_model,
+                benchmark_items=items,
+                max_new_tokens=args.max_new_tokens,
+            )
+            predictions_by_benchmark[bname] = preds
+            print(f"  {bname}: {len(preds)} predictions generated")
+    else:
+        # Load predictions from JSON file
+        if not args.predictions_file:
+            raise ValueError(
+                "Either --hf_model or --predictions-file is required in benchmark mode"
+            )
+        with open(args.predictions_file, "r") as f:
+            predictions_by_benchmark = json.load(f)
 
     report = runner.run(predictions_by_benchmark, load_kwargs=load_kwargs)
 
@@ -208,23 +248,22 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Evaluate VQASynth predictions using SpatialScore metrics
+  # Run inference + eval on a VQASynth dataset in one step
+  python process_eval.py --output_dir ./cache --source_repo_id user/dataset \\
+      --target_repo_name user/results --hf_model Qwen/Qwen2.5-VL-7B-Instruct
+
+  # Score pre-existing predictions using SpatialScore metrics
   python process_eval.py --output_dir ./cache --source_repo_id user/dataset \\
       --target_repo_name user/results --benchmark spatialscore
 
-  # Full report across all metric frameworks
-  python process_eval.py --output_dir ./cache --source_repo_id user/dataset \\
-      --target_repo_name user/results --benchmark all
-
-  # Evaluate against external benchmark datasets
+  # Run model on external benchmarks and generate report
   python process_eval.py --output_dir ./cache --mode benchmark \\
       --benchmark-dataset omnispatial,space10 \\
-      --predictions-file predictions.json
+      --hf_model Qwen/Qwen2.5-VL-7B-Instruct
 
-  # Evaluate against all benchmarks with LLM judge
+  # Score pre-computed predictions against external benchmarks
   python process_eval.py --output_dir ./cache --mode benchmark \\
-      --benchmark-dataset all --predictions-file predictions.json \\
-      --use_llm_judge --api_key sk-...
+      --benchmark-dataset all --predictions-file predictions.json
         """,
     )
 
@@ -250,6 +289,14 @@ Examples:
     parser.add_argument("--mindcube-path", type=str, default="",
                         help="Path to MindCube.jsonl (optional, otherwise loads from HuggingFace)")
 
+    # Inference args
+    parser.add_argument("--hf_model", type=str, default="",
+                        help="HuggingFace VLM model slug for inference (e.g., Qwen/Qwen2.5-VL-7B-Instruct). "
+                             "When set, runs the model on the dataset to generate predictions before scoring. "
+                             "When omitted, scores whatever is already in the predictions column.")
+    parser.add_argument("--image_column", type=str, default="image", help="Column with images for inference")
+    parser.add_argument("--max_new_tokens", type=int, default=256, help="Max tokens to generate per response")
+
     # Shared args
     parser.add_argument("--api_key", type=str, default="", help="OpenAI API key for LLM judge")
     parser.add_argument("--model", type=str, default="gpt-4o", help="LLM judge model")
@@ -267,8 +314,8 @@ Examples:
         else:
             benchmark_names = [args.benchmark_dataset]
 
-        if not args.predictions_file:
-            parser.error("--predictions-file is required in benchmark mode")
+        if not args.predictions_file and not args.hf_model:
+            parser.error("Either --predictions-file or --hf_model is required in benchmark mode")
 
         run_benchmark_eval(args, benchmark_names)
 

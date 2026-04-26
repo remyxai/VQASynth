@@ -15,6 +15,10 @@ BENCHMARK=$(yq e '.arguments.eval_benchmark // "all"' $CONFIG_FILE)
 # predictions, so its `output` column is not a drop-in substitute.
 PREDICTION_COLUMN=$(yq e '.arguments.prediction_column // "predictions"' $CONFIG_FILE)
 GROUND_TRUTH_COLUMN=$(yq e '.arguments.ground_truth_column // "messages"' $CONFIG_FILE)
+# Optional: HuggingFace VLM model slug for inference. When set, the eval stage
+# runs the model on (image, question) pairs to generate predictions before
+# scoring. When unset, it scores whatever is already in the predictions column.
+HF_MODEL=$(yq e '.arguments.eval_model // ""' $CONFIG_FILE)
 
 # Export these values as environment variables
 export OUTPUT_DIR
@@ -35,7 +39,12 @@ if [ -n "${OPENAI_API_KEY}" ]; then
     JUDGE_FLAG="--use_llm_judge"
 fi
 
-echo "Starting evaluation (benchmark: ${BENCHMARK}, prediction_column: ${PREDICTION_COLUMN})..."
+MODEL_FLAG=""
+if [ -n "${HF_MODEL}" ]; then
+    MODEL_FLAG="--hf_model=${HF_MODEL}"
+fi
+
+echo "Starting evaluation (benchmark: ${BENCHMARK}, prediction_column: ${PREDICTION_COLUMN}, model: ${HF_MODEL:-none})..."
 python3 process_eval.py \
     --output_dir="${OUTPUT_DIR}" \
     --source_repo_id="${SOURCE_REPO_ID}" \
@@ -44,7 +53,8 @@ python3 process_eval.py \
     --ground_truth_column="${GROUND_TRUTH_COLUMN}" \
     --api_key="${OPENAI_API_KEY}" \
     --benchmark="${BENCHMARK}" \
-    ${JUDGE_FLAG}
+    ${JUDGE_FLAG} \
+    ${MODEL_FLAG}
 
 rm "${OUTPUT_DIR}/data_processing_done.txt"
 touch "${OUTPUT_DIR}/data_processing_done.txt"
