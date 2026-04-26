@@ -64,6 +64,10 @@ def extract_yes_no(text):
         return True
     if re.match(no_patterns, first_word):
         return False
+    # VQASynth dataset convention: "Actually, ..." precedes a contradiction of
+    # the question's premise, i.e. the answer is "no".
+    if first_word == "actually":
+        return False
 
     # Search full text
     has_yes = bool(re.search(yes_patterns, text_lower))
@@ -790,6 +794,14 @@ class Evaluator:
         """
         messages = example.get(self.ground_truth_column)
         predictions = example.get(self.prediction_column)
+
+        if predictions is not None and isinstance(predictions, str):
+            raise TypeError(
+                f"Expected '{self.prediction_column}' to contain a list of "
+                f"predictions (one per QA pair), but got a single string. "
+                f"Each row of the predictions column must be a list aligned "
+                f"with the QA pairs in '{self.ground_truth_column}'."
+            )
 
         empty = {
             "eval_scores": [],

@@ -101,13 +101,21 @@ services:
           devices:
           - capabilities: ["gpu"]
 
+  # The eval stage is intended to run after a separate model-inference step
+  # that populates a 'predictions' column. It is not chained directly after
+  # r1_reasoning_stage because that stage produces CoT training traces, not
+  # model predictions. Run eval_stage standalone after inference:
+  #
+  #   docker compose -f spatialvqa_eval.yaml run eval_stage
+  #
   eval_stage:
     build:
       context: ../
       dockerfile: docker/eval_stage/Dockerfile
     volumes:
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    depends_on:
-      - r1_reasoning_stage
+    # No depends_on — run manually after model inference populates predictions
     environment:
       HF_TOKEN: ${HF_TOKEN}
+    profiles:
+      - eval
