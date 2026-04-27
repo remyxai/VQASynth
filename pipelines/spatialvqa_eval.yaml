@@ -1,121 +1,31 @@
 version: '3.8'
 
+# Standalone eval pipeline. Runs a HuggingFace VLM against spatial reasoning
+# benchmarks (SpatialScore, OmniSpatial, SpaCE-10, MindCube) and produces a
+# per-benchmark accuracy report.
+#
+# This is a post-training step. It does not depend on the synthesis pipeline
+# (spatialvqa.yaml / spatialvqa_reasoning.yaml). The intended workflow is:
+#   1. Build a dataset with the synthesis pipeline.
+#   2. Fine-tune a VLM on that dataset.
+#   3. Run this compose file with the trained model's HuggingFace slug set in
+#      arguments.eval_model in config.yaml.
+#
+# Usage:
+#   docker compose -f spatialvqa_eval.yaml up --build
+
 services:
-  embeddings_stage:
-    build:
-      context: ../
-      dockerfile: docker/embeddings_stage/Dockerfile
-    volumes:
-      - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      HF_TOKEN: ${HF_TOKEN}
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - capabilities: ["gpu"]
-
-  filter_stage:
-    build:
-      context: ../
-      dockerfile: docker/filter_stage/Dockerfile
-    volumes:
-      - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    depends_on:
-      - embeddings_stage
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      HF_TOKEN: ${HF_TOKEN}
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - capabilities: ["gpu"]
-
-  location_refinement_stage:
-    build:
-      context: ../
-      dockerfile: docker/location_refinement_stage/Dockerfile
-    volumes:
-      - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    depends_on:
-      - filter_stage
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      HF_TOKEN: ${HF_TOKEN}
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - capabilities: ["gpu"]
-
-  scene_fusion_stage:
-    build:
-      context: ../
-      dockerfile: docker/scene_fusion_stage/Dockerfile
-    volumes:
-      - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    depends_on:
-      - location_refinement_stage
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      HF_TOKEN: ${HF_TOKEN}
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - capabilities: ["gpu"]
-
-  prompt_stage:
-    build:
-      context: ../
-      dockerfile: docker/prompt_stage/Dockerfile
-    volumes:
-      - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    depends_on:
-      - scene_fusion_stage
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      HF_TOKEN: ${HF_TOKEN}
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - capabilities: ["gpu"]
-
-  r1_reasoning_stage:
-    build:
-      context: ../
-      dockerfile: docker/r1_reasoning_stage/Dockerfile
-    volumes:
-      - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    depends_on:
-      - prompt_stage
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      HF_TOKEN: ${HF_TOKEN}
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - capabilities: ["gpu"]
-
-  # The eval stage is intended to run after a separate model-inference step
-  # that populates a 'predictions' column. It is not chained directly after
-  # r1_reasoning_stage because that stage produces CoT training traces, not
-  # model predictions. Run eval_stage standalone after inference:
-  #
-  #   docker compose -f spatialvqa_eval.yaml run eval_stage
-  #
   eval_stage:
     build:
       context: ../
       dockerfile: docker/eval_stage/Dockerfile
     volumes:
       - ${OUTPUT_DIR}:${OUTPUT_DIR}
-    # No depends_on — run manually after model inference populates predictions
     environment:
+      NVIDIA_VISIBLE_DEVICES: all
       HF_TOKEN: ${HF_TOKEN}
-    profiles:
-      - eval
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]

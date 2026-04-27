@@ -8,9 +8,12 @@ and MindCube into a common format for evaluation.
 import io
 import json
 import os
+import re
+import zipfile
 from collections import defaultdict
 
 from datasets import load_dataset
+from huggingface_hub import hf_hub_download
 
 from vqasynth.evaluation import (
     classify_question,
@@ -22,6 +25,23 @@ from vqasynth.evaluation import (
     score_distance_mra,
     score_yes_no,
 )
+
+
+def _ensure_zip_extracted(repo_id, filename, repo_type="dataset"):
+    """
+    Download a zip from HuggingFace (cached) and extract it next to the cached
+    file on first access. Returns the directory containing extracted contents.
+    """
+    zip_path = hf_hub_download(repo_id=repo_id, filename=filename, repo_type=repo_type)
+    extract_dir = zip_path + ".extracted"
+    marker = os.path.join(extract_dir, ".extracted_ok")
+    if not os.path.exists(marker):
+        os.makedirs(extract_dir, exist_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(extract_dir)
+        with open(marker, "w") as f:
+            f.write("ok")
+    return extract_dir
 
 
 # ---------------------------------------------------------------------------
@@ -45,35 +65,43 @@ from vqasynth.evaluation import (
 # SpatialScore Loader
 # ---------------------------------------------------------------------------
 
-def load_spatialscore(data_path):
+def load_spatialscore():
     """
-    Load SpatialScore benchmark from a local JSON file.
-
-    SpatialScore is distributed as a zip on HuggingFace (haoningwu/SpatialScore)
-    and must be downloaded manually:
-        huggingface-cli download --repo-type dataset haoningwu/SpatialScore --local-dir ./
-        unzip SpatialScore.zip
-
-    Args:
-        data_path: Path to SpatialScore.json (e.g., "./dataset/SpatialScore.json")
+    Load SpatialScore benchmark, auto-downloading the zip from HuggingFace
+    (haoningwu/SpatialScore) on first access. The zip is ~11 GB; first run
+    will be slow, subsequent runs read from the HF cache.
 
     Returns list of normalized items.
     """
-    with open(data_path, "r") as f:
+    extract_dir = _ensure_zip_extracted("haoningwu/SpatialScore", "SpatialScore.zip")
+    json_path = None
+    for root, _, files in os.walk(extract_dir):
+        if "SpatialScore.json" in files:
+            json_path = os.path.join(root, "SpatialScore.json")
+            break
+    if json_path is None:
+        raise FileNotFoundError(
+            f"SpatialScore.json not found under {extract_dir}; the zip layout may have changed"
+        )
+    dataset_root = os.path.dirname(json_path)
+
+    with open(json_path, "r") as f:
         raw_data = json.load(f)
 
     items = []
     for entry in raw_data:
         question_type = entry.get("question_type", "open-ended")
 
-        # Extract options from the question text for multi-choice
         options = []
         if question_type == "multi-choice":
             q_text = entry.get("question", "")
-            # Options are typically embedded as (A) ... (B) ... in the question
-            import re
             opt_matches = re.findall(r"\(([A-F])\)\s*([^(]+?)(?=\([A-F]\)|$)", q_text)
             options = [m[1].strip() for m in opt_matches]
+
+        # img_paths in the JSON are relative to dataset root; resolve them
+        img_paths = entry.get("img_paths", [])
+        resolved = [os.path.join(dataset_root, p) if not os.path.isabs(p) else p
+                    for p in img_paths]
 
         items.append({
             "id": str(entry.get("id", entry.get("index", len(items)))),
@@ -83,7 +111,7 @@ def load_spatialscore(data_path):
             "category": entry.get("category", "unknown"),
             "subcategory": entry.get("subcategory", "unknown"),
             "options": options,
-            "images": entry.get("img_paths", []),
+            "images": resolved,
             "source": "SpatialScore",
         })
 
@@ -94,26 +122,75 @@ def load_spatialscore(data_path):
 # OmniSpatial Loader
 # ---------------------------------------------------------------------------
 
-def load_omnispatial(split="test", streaming=False):
+def load_omnispatial(split="test"):
     """
-    Load OmniSpatial benchmark from HuggingFace.
+    Load OmniSpatial benchmark, auto-downloading the zip from HuggingFace
+    (qizekun/OmniSpatial) on first access. Test split is ~1.6 GB.
 
-    Dataset: qizekun/OmniSpatial
-
-    Args:
-        split: Dataset split ("test" or "train").
-        streaming: If True, returns an iterable dataset.
+    The zip ships a JSON metadata file plus an images/ directory; this loader
+    walks the extracted tree to find them.
 
     Returns list of normalized items.
     """
-    ds = load_dataset("qizekun/OmniSpatial", split=split, streaming=streaming)
+    zip_filename = f"OmniSpatial-{split}.zip"
+    extract_dir = _ensure_zip_extracted("qizekun/OmniSpatial", zip_filename)
+
+    json_path = None
+    for root, _, files in os.walk(extract_dir):
+        for fn in files:
+            if fn.endswith(".json") and ("test" in fn.lower() or "data" in fn.lower() or "metadata" in fn.lower()):
+                json_path = os.path.join(root, fn)
+                break
+        if json_path:
+            break
+
+    if json_path is None:
+        # Fallback: pick the largest .json in the tree
+        candidates = []
+        for root, _, files in os.walk(extract_dir):
+            for fn in files:
+                if fn.endswith(".json"):
+                    p = os.path.join(root, fn)
+                    candidates.append((os.path.getsize(p), p))
+        if not candidates:
+            raise FileNotFoundError(f"No JSON metadata found under {extract_dir}")
+        candidates.sort(reverse=True)
+        json_path = candidates[0][1]
+
+    dataset_root = os.path.dirname(json_path)
+
+    with open(json_path, "r") as f:
+        raw_data = json.load(f)
+    if isinstance(raw_data, dict):
+        # Some distributions wrap the list under a key
+        for k in ("data", "items", "questions", "test"):
+            if k in raw_data and isinstance(raw_data[k], list):
+                raw_data = raw_data[k]
+                break
 
     items = []
-    for entry in ds:
-        answer_idx = entry.get("answer", 0)
+    for entry in raw_data:
+        answer_field = entry.get("answer", entry.get("gt_answer", 0))
         options = entry.get("options", [])
-        gt_letter = chr(65 + answer_idx) if isinstance(answer_idx, int) else str(answer_idx)
-        gt_text = options[answer_idx] if isinstance(answer_idx, int) and answer_idx < len(options) else gt_letter
+
+        if isinstance(answer_field, int):
+            gt_letter = chr(65 + answer_field)
+            gt_text = options[answer_field] if answer_field < len(options) else gt_letter
+        else:
+            gt_letter = str(answer_field).strip().upper()[:1] if str(answer_field).strip() else ""
+            gt_text = str(answer_field)
+
+        # Resolve image path
+        image_field = entry.get("image", entry.get("image_path", entry.get("img_path", "")))
+        images = []
+        if isinstance(image_field, str) and image_field:
+            resolved = image_field if os.path.isabs(image_field) else os.path.join(dataset_root, image_field)
+            images = [resolved]
+        elif isinstance(image_field, list):
+            images = [
+                p if os.path.isabs(p) else os.path.join(dataset_root, p)
+                for p in image_field if isinstance(p, str)
+            ]
 
         items.append({
             "id": str(entry.get("id", len(items))),
@@ -121,10 +198,10 @@ def load_omnispatial(split="test", streaming=False):
             "answer": gt_letter,
             "answer_text": gt_text,
             "question_type": "multi-choice",
-            "category": entry.get("task_type", "unknown"),
-            "subcategory": entry.get("sub_task_type", "unknown"),
+            "category": entry.get("task_type", entry.get("category", "unknown")),
+            "subcategory": entry.get("sub_task_type", entry.get("subcategory", "unknown")),
             "options": options,
-            "images": [entry["image"]] if "image" in entry else [],
+            "images": images,
             "source": "OmniSpatial",
         })
 
@@ -226,64 +303,56 @@ def _mindcube_setting_from_id(item_id):
     return "other"
 
 
-def load_mindcube(data_path=None, split="test", streaming=False):
+def load_mindcube(jsonl_name="MindCube_tinybench.jsonl"):
     """
-    Load MindCube benchmark.
+    Load MindCube benchmark, auto-downloading data.zip from HuggingFace
+    (MLL-Lab/MindCube) on first access (~640 MB).
 
-    Can load from HuggingFace (MLL-Lab/MindCube) or from a local JSONL file.
+    The zip contains data/raw/ with three JSONL files:
+      - MindCube_tinybench.jsonl  (~570 items, default)
+      - MindCube.jsonl            (full bench, ~17 MB)
+      - MindCube_train.jsonl      (training split)
+    and data/other_all_image/ holding the referenced images.
 
     Args:
-        data_path: Path to MindCube.jsonl. If None, loads from HuggingFace.
-        split: Dataset split when loading from HuggingFace.
-        streaming: If True, returns items lazily.
+        jsonl_name: Which JSONL file to read inside data/raw/.
 
     Returns list of normalized items.
     """
+    extract_dir = _ensure_zip_extracted("MLL-Lab/MindCube", "data.zip")
+    data_dir = os.path.join(extract_dir, "data")
+    jsonl_path = os.path.join(data_dir, "raw", jsonl_name)
+    if not os.path.exists(jsonl_path):
+        raise FileNotFoundError(f"{jsonl_path} not found in extracted MindCube data")
+
     items = []
+    with open(jsonl_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            item_id = str(entry.get("id", len(items)))
+            setting = _mindcube_setting_from_id(item_id)
 
-    if data_path and os.path.exists(data_path):
-        # Load from local JSONL
-        with open(data_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                entry = json.loads(line)
-                item_id = str(entry.get("id", len(items)))
-                setting = _mindcube_setting_from_id(item_id)
+            # Resolve image paths relative to data/ directory inside zip
+            raw_images = entry.get("images", [])
+            resolved = [
+                p if os.path.isabs(p) else os.path.join(data_dir, p)
+                for p in raw_images
+            ]
 
-                items.append({
-                    "id": item_id,
-                    "question": entry.get("question", ""),
-                    "answer": entry.get("gt_answer", entry.get("answer", "")),
-                    "question_type": "multi-choice",
-                    "category": setting,
-                    "subcategory": setting,
-                    "options": [],
-                    "images": entry.get("images", []),
-                    "source": "MindCube",
-                })
-    else:
-        # Load from HuggingFace
-        try:
-            ds = load_dataset("MLL-Lab/MindCube", split=split, streaming=streaming)
-            for entry in ds:
-                item_id = str(entry.get("id", len(items)))
-                setting = _mindcube_setting_from_id(item_id)
-
-                items.append({
-                    "id": item_id,
-                    "question": entry.get("question", ""),
-                    "answer": entry.get("gt_answer", entry.get("answer", "")),
-                    "question_type": "multi-choice",
-                    "category": setting,
-                    "subcategory": setting,
-                    "options": [],
-                    "images": entry.get("images", []),
-                    "source": "MindCube",
-                })
-        except Exception as e:
-            print(f"Warning: Could not load MindCube from HuggingFace: {e}")
+            items.append({
+                "id": item_id,
+                "question": entry.get("question", ""),
+                "answer": entry.get("gt_answer", entry.get("answer", "")),
+                "question_type": "multi-choice",
+                "category": setting,
+                "subcategory": setting,
+                "options": [],
+                "images": resolved,
+                "source": "MindCube",
+            })
 
     return items
 
