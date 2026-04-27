@@ -127,81 +127,54 @@ def load_omnispatial(split="test"):
     Load OmniSpatial benchmark, auto-downloading the zip from HuggingFace
     (qizekun/OmniSpatial) on first access. Test split is ~1.6 GB.
 
-    The zip ships a JSON metadata file plus an images/ directory; this loader
-    walks the extracted tree to find them.
+    The zip extracts to OmniSpatial-{split}/ containing:
+      - data.json: list of entries with id, question, options, answer (int
+        index into options), task_type, sub_task_type
+      - {task_type}/{id_prefix}.png: image files where id_prefix is the
+        part of the entry id before the first underscore
 
     Returns list of normalized items.
     """
     zip_filename = f"OmniSpatial-{split}.zip"
     extract_dir = _ensure_zip_extracted("qizekun/OmniSpatial", zip_filename)
 
-    json_path = None
-    for root, _, files in os.walk(extract_dir):
-        for fn in files:
-            if fn.endswith(".json") and ("test" in fn.lower() or "data" in fn.lower() or "metadata" in fn.lower()):
-                json_path = os.path.join(root, fn)
-                break
-        if json_path:
-            break
-
-    if json_path is None:
-        # Fallback: pick the largest .json in the tree
-        candidates = []
-        for root, _, files in os.walk(extract_dir):
-            for fn in files:
-                if fn.endswith(".json"):
-                    p = os.path.join(root, fn)
-                    candidates.append((os.path.getsize(p), p))
-        if not candidates:
-            raise FileNotFoundError(f"No JSON metadata found under {extract_dir}")
-        candidates.sort(reverse=True)
-        json_path = candidates[0][1]
-
-    dataset_root = os.path.dirname(json_path)
+    dataset_root = os.path.join(extract_dir, f"OmniSpatial-{split}")
+    json_path = os.path.join(dataset_root, "data.json")
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"data.json not found at {json_path}")
 
     with open(json_path, "r") as f:
         raw_data = json.load(f)
-    if isinstance(raw_data, dict):
-        # Some distributions wrap the list under a key
-        for k in ("data", "items", "questions", "test"):
-            if k in raw_data and isinstance(raw_data[k], list):
-                raw_data = raw_data[k]
-                break
 
     items = []
     for entry in raw_data:
-        answer_field = entry.get("answer", entry.get("gt_answer", 0))
+        eid = str(entry.get("id", len(items)))
+        task_type = entry.get("task_type", "unknown")
         options = entry.get("options", [])
+        answer_idx = entry.get("answer", 0)
 
-        if isinstance(answer_field, int):
-            gt_letter = chr(65 + answer_field)
-            gt_text = options[answer_field] if answer_field < len(options) else gt_letter
+        if isinstance(answer_idx, int) and 0 <= answer_idx < len(options):
+            gt_letter = chr(65 + answer_idx)
+            gt_text = options[answer_idx]
         else:
-            gt_letter = str(answer_field).strip().upper()[:1] if str(answer_field).strip() else ""
-            gt_text = str(answer_field)
+            gt_letter = str(answer_idx).strip().upper()[:1] if str(answer_idx).strip() else ""
+            gt_text = str(answer_idx)
 
-        # Resolve image path
-        image_field = entry.get("image", entry.get("image_path", entry.get("img_path", "")))
-        images = []
-        if isinstance(image_field, str) and image_field:
-            resolved = image_field if os.path.isabs(image_field) else os.path.join(dataset_root, image_field)
-            images = [resolved]
-        elif isinstance(image_field, list):
-            images = [
-                p if os.path.isabs(p) else os.path.join(dataset_root, p)
-                for p in image_field if isinstance(p, str)
-            ]
+        # Image path: {task_type}/{id_prefix}.png where id_prefix is the
+        # part of id before the first underscore
+        id_prefix = eid.split("_")[0]
+        image_path = os.path.join(dataset_root, task_type, f"{id_prefix}.png")
 
         items.append({
-            "id": str(entry.get("id", len(items))),
+            "id": eid,
             "question": entry.get("question", ""),
             "answer": gt_letter,
             "answer_text": gt_text,
             "question_type": "multi-choice",
-            "category": entry.get("task_type", entry.get("category", "unknown")),
-            "subcategory": entry.get("sub_task_type", entry.get("subcategory", "unknown")),
+            "category": task_type,
+            "subcategory": entry.get("sub_task_type", "unknown"),
             "options": options,
-            "images": images,
+            "images": [image_path] if os.path.exists(image_path) else [],
             "source": "OmniSpatial",
         })
 
