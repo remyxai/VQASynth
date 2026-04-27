@@ -9,6 +9,7 @@ import io
 
 import torch
 from PIL import Image
+from tqdm.auto import tqdm
 from transformers import AutoProcessor, AutoModelForVision2Seq, AutoTokenizer
 from vqasynth.utils import pick_dtype
 
@@ -159,7 +160,7 @@ def run_inference_on_benchmark(model_name, benchmark_items, max_new_tokens=256,
     vlm = VLMInference(model_name, device=device, max_new_tokens=max_new_tokens)
     predictions = {}
 
-    for item in benchmark_items:
+    for item in tqdm(benchmark_items, desc="inference", unit="item"):
         question = item["question"]
         options = item.get("options", [])
         images = item.get("images", [])
