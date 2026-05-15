@@ -120,6 +120,10 @@ The resulting Huggingface dataset is in the cache directory and you can push to 
 dataloader.push_to_hub(final_dataset, target_repo_name)
 ```
 
+## Model Evaluation
+Report VLM spatial reasoning on [benchmarks](https://github.com/remyxai/VQASynth/blob/main/pipelines/spatialvqa_eval.yaml
+): SpatialScore, OmniSpatial, SpaCE-10, MindCube
+
 
 ## Notebooks
 We've hosted some notebooks visualizing and experimenting with the techniques included in this repo.
