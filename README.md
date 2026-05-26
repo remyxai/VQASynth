@@ -137,6 +137,41 @@ Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
 
 ![image](<https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef> "SpaceThinker-Qwen2.5VL-3B")
 
+## Can These Views Be One Scene? Integration (experimental) 🧪
+
+VQASynth's 3D scene reconstruction relies on a learned backbone (VGGT) to
+turn each image into a point cloud. The paper *"Can These Views Be One
+Scene? Evaluating Multiview 3D Consistency when 3D Foundation Models
+Hallucinate"* ([arXiv:2605.18754](https://arxiv.org/abs/2605.18754)) shows
+that VGGT, MASt3R, DUSt3R, and Fast3R can hallucinate dense geometry and
+cross-view support even for unrelated views, repeated images, or random
+noise — so a high learned-metric score does not guarantee the underlying
+3D is real. The paper proposes COLMAP-based failure-aware signals
+(matches, registration, dense support, reconstruction failure) that
+correlate up to 4× better with human judgments than MEt3R.
+
+The `vqasynth.multiview_consistency_integration` module provides a
+lightweight, dependency-free screen that approximates these signals using
+ORB features + fundamental-matrix RANSAC, plus a stubbed `evaluate_with_colmap`
+hook for the full paper metrics once COLMAP is wired in:
+
+```python
+from vqasynth.multiview_consistency_integration import (
+    MultiViewConsistencyConfig,
+    MultiViewConsistencyEvaluator,
+)
+
+evaluator = MultiViewConsistencyEvaluator(MultiViewConsistencyConfig())
+result = evaluator.evaluate([img_view_a, img_view_b, img_view_c])
+# {'registered': True, 'mean_inliers': ..., 'mean_dense_support': ..., 'pairs': [...]}
+```
+
+Use it as a pre-flight check on multi-view inputs before depth/fusion —
+inputs whose pairwise geometric support collapses to zero are exactly the
+hallucination-prone cases the paper warns about.
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
+
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
 ```
