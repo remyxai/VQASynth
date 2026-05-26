@@ -137,6 +137,53 @@ Try SpaceLLaVA in [Discord](http://discord.gg/b2yGuCNpuC)
 
 ![image](<https://github.com/remyxai/VQASynth/assets/9044907/8d99db2a-6b93-4123-85bd-8c91e795a5ef> "SpaceThinker-Qwen2.5VL-3B")
 
+## Can These Views Be One Scene? Integration (experimental) 🧪
+
+VQASynth uses [VGGT](https://vgg-t.github.io/) to lift images into point
+clouds — and recent work shows that VGGT, MASt3R, DUSt3R, and Fast3R can
+*hallucinate* dense geometry and cross-view support for unrelated
+scenes, repeated views, or pure noise ([arXiv:2605.18754](https://arxiv.org/abs/2605.18754v1)).
+That paper proposes COLMAP-grounded "failure-aware" signals — number of
+feature matches, registration outcome, dense multi-view support, and a
+hard reconstruction-failure flag — that correlate up to 4× better with
+human judgments of 3D consistency than learned reference-free metrics
+such as MEt3R.
+
+`vqasynth.multiview_consistency_integration` provides scaffolding to
+apply those ideas to VQASynth's reconstructions before they propagate
+into the synthetic VQA dataset:
+
+```python
+from vqasynth.multiview_consistency_integration import (
+    MultiviewConsistencyConfig,
+    MultiviewConsistencyEvaluator,
+)
+
+evaluator = MultiviewConsistencyEvaluator(MultiviewConsistencyConfig())
+report = evaluator.score_scene(
+    points_xyz=points,           # VGGT point cloud from scene_fusion
+    view_visibility=visibility,  # optional (N_points, N_views) bool matrix
+    num_matches=matches,         # optional from a COLMAP/LoFTR pass
+    inlier_ratio=inliers,        # optional RANSAC inlier ratio
+)
+if report["likely_hallucination"]:
+    ...  # filter this scene out of the dataset
+```
+
+What's implemented vs stubbed:
+
+* **Implemented**: config dataclass with paper-aligned defaults,
+  failure-aware aggregation (weighted geometric mean over the four
+  signals), dense-support ratio over an `(N_points, N_views)` visibility
+  matrix, point-cloud validity ratio, hallucination-threshold judgment,
+  convenience adapter for single-image VQASynth scenes.
+* **Stubbed (TODO)**: `evaluate_image_pair` returns a "reconstruction
+  failed" sentinel — wiring COLMAP / pycolmap or a LoFTR/SuperGlue
+  matcher for real match counts and RANSAC inlier ratios is left to a
+  follow-up so this module imports without those dependencies.
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
+
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
 ```
