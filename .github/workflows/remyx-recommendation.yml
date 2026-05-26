@@ -1,0 +1,37 @@
+name: Remyx Recommendation
+
+# Daily cron that uses remyxai/remyx-recommendation-action to pick a paper
+# from engine.remyx.ai for the VQASynth research interest and open a draft
+# PR with a Claude-Code-scaffolded integration.
+#
+# Secrets needed (set in Settings → Secrets and variables → Actions):
+#   REMYX_API_KEY     — engine.remyx.ai token
+#   ANTHROPIC_API_KEY — Anthropic console token (for Claude Code)
+#
+# The workflow's built-in GITHUB_TOKEN handles PR / Issue creation on
+# this repo — no PAT required since the action runs in the target.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  recommend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      REMYX_API_KEY: ${{ secrets.REMYX_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: remyxai/remyx-recommendation-action@v1
+        with:
+          interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
+          # Bypass per-day rate limit while we validate the new direct-
+          # install action. Bump back to 7 (or remove) once a few clean
+          # runs are in.
+          rate-limit-days: '0'
