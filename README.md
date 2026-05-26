@@ -161,3 +161,25 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Can These Views Be One Scene? Integration (experimental) 🧪
+
+Experimental scaffolding for COLMAP-based multi-view 3D consistency
+metrics from [Can These Views Be One Scene? Evaluating Multiview 3D
+Consistency when 3D Foundation Models Hallucinate](https://arxiv.org/abs/2605.18754v1).
+
+The paper shows that neural backbones like VGGT (used by VQASynth's
+fusion stage) can hallucinate dense geometry and cross-view support
+for unrelated scenes, repeated images, or pure noise. It introduces
+COLMAP-based failure-aware signals (matches, registration, dense
+support, reconstruction failure) that correlate up to 4x better with
+human judgments than learned metrics like MEt3R.
+
+`vqasynth.multiview_consistency_integration` provides a config
+dataclass, concrete utility functions for the parametric metric
+components, and a class scaffold that combines them. The COLMAP
+shell-out is left as a TODO so the binary is not a required
+dependency.
+
+Contributed via [Remyx Recommendation](https://github.com/remyxai/mhpd-dpo-training/tree/main/agent).
+
