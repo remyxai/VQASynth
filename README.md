@@ -161,3 +161,36 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Can These Views Be One Scene? Integration (experimental) 🧪
+
+VQASynth's scene reconstruction stage uses VGGT to lift images into a 3D
+scene. The paper *Can These Views Be One Scene? Evaluating Multiview 3D
+Consistency when 3D Foundation Models Hallucinate*
+([arXiv:2605.18754](https://arxiv.org/abs/2605.18754v1)) shows that VGGT,
+MASt3R, DUSt3R, and Fast3R can hallucinate dense geometry and cross-view
+support on unrelated scenes, repeated images, and random noise, while
+still reporting high consistency scores. It proposes COLMAP-based,
+failure-aware consistency signals (matches, registration, dense support,
+reconstruction failure) that correlate up to 4× better with human
+judgments than MEt3R.
+
+`vqasynth/multiview_consistency_integration.py` ships a scaffold of those
+signals so they can gate downstream QA generation against hallucinated
+scenes:
+
+- `MultiviewConsistencyConfig` — paper hyperparameters as defaults
+  (inlier thresholds, registration fraction, dense-support floor,
+  aggregation weights, and the `alpha`/`gamma` parameters of the
+  parametric family that recovers MEt3R as a special case).
+- Four concrete failure-aware signals (`match_ratio_score`,
+  `registration_score`, `dense_support_score`,
+  `reconstruction_failure_score`) and their weighted aggregator.
+- `parametric_consistency_score` — closed-form
+  `alpha * backbone + (1 - alpha) * residual ** gamma`.
+- `MultiviewConsistencyEvaluator.evaluate_from_counts(...)` — combines
+  the signals into a `ConsistencyReport` with a hallucination flag.
+  The end-to-end `evaluate(...)` path that runs COLMAP / a learned
+  matcher is stubbed pending a backend choice.
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
