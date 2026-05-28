@@ -161,3 +161,42 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## SegCompass Integration (experimental) 🧪
+
+`vqasynth.segcompass_integration` scaffolds the experiment proposed for
+[SegCompass](https://arxiv.org/abs/2605.22658v1) (Sparse-Autoencoder-driven
+interpretable alignment for reasoning segmentation) against VQASynth's
+existing CoT traces (`r1_reasoning`) and SAM2 mask + caption outputs
+(`localize`).
+
+The module ships a no-checkpoint `SegCompassAligner` that uses lexical
+concept overlap as a stand-in for the paper's SAE concept space. This is
+enough to inspect existing pipeline outputs for CoT/segmentation
+mismatches today (concepts the CoT mentions but the segmentor missed, or
+vice versa) without depending on weights from the SegCompass repo that
+are not yet wired into this project.
+
+```python
+from vqasynth.segcompass_integration import SegCompassAligner
+
+aligner = SegCompassAligner()
+result = aligner.align(
+    cot_text="<think>The red forklift is near the wooden pallet.</think>",
+    captions=["red forklift", "wooden pallet", "yellow ladder"],
+    masks=mask_uint8_list,   # from vqasynth.localize.Localizer.run
+)
+# result["concepts"]:           CoT-derived concept list
+# result["concept_to_caption"]: [(caption_idx, jaccard_score), ...]
+# result["inconsistencies"]:    {'cot_only': [...], 'caption_only': [...], 'shared': [...]}
+```
+
+The full neural SAE + query codebook + slot mapper + mask decoder from
+the paper are not implemented here — those require checkpoints from the
+paper authors and a training loop the repo does not yet have. The
+relevant hooks (`encode_text_concepts`, `encode_visual_concepts`, the
+checkpoint-loading path in `__init__`) are flagged as `TODO` for a
+follow-up.
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
+
