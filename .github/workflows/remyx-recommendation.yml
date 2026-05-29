@@ -31,7 +31,6 @@ jobs:
       - uses: remyxai/remyx-recommendation-action@v1
         with:
           interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
-          # Bypass per-day rate limit while we validate the new direct-
-          # install action. Bump back to 7 (or remove) once a few clean
-          # runs are in.
-          rate-limit-days: '0'
+          # Validation complete (action v1.0.6: candidate selection over a
+          # weekly pool + role-based guardrails). Rate limit restored to the
+          # action default (7 days) for a weekly cadence — drop the override.
