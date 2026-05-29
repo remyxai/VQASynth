@@ -161,3 +161,26 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Degradation-aware evaluation — adapted from [SpaceDG: Benchmarking Spatial Intelligence under Visual Degradation](https://arxiv.org/abs/2605.22536)
+
+SpaceDG shows that the spatial reasoning of MLLMs drops sharply when visual
+inputs are imperfect (motion blur, low light, fog, lens distortion, compression
+artifacts, ...). The evaluation stage can now re-run any of the existing spatial
+benchmarks on **degraded** inputs and measure the clean-vs-degraded robustness gap.
+
+`vqasynth/image_degradation.py` implements nine SpaceDG-style degradation
+operators (`motion_blur`, `defocus_blur`, `low_light`, `gaussian_noise`,
+`jpeg_compression`, `fog`, `contrast_loss`, `pixelate`, `color_shift`) on a 1-5
+severity scale. These are image-space degradation models; SpaceDG's neural 3D
+Gaussian Splatting rendering engine and its released dataset/checkpoints are not
+reproduced here. `BenchmarkRunner(degradation=..., severity=...)` applies the
+chosen corruption to every benchmark image before inference:
+
+```bash
+python docker/eval_stage/process_eval.py --output_dir ./cache \
+    --model remyxai/SpaceThinker-Qwen2.5VL-3B \
+    --benchmark omnispatial --degradation motion_blur --severity 3
+```
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
