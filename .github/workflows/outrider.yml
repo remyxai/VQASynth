@@ -1,7 +1,7 @@
-name: Remyx Recommendation
+name: Outrider
 
-# Daily cron that uses remyxai/remyx-recommendation-action to pick a paper
-# from engine.remyx.ai for the VQASynth research interest and open a draft
+# Daily cron that uses remyxai/outrider to pick a paper from
+# engine.remyx.ai for the VQASynth research interest and open a draft
 # PR with a Claude-Code-scaffolded integration.
 #
 # Secrets needed (set in Settings → Secrets and variables → Actions):
@@ -28,7 +28,7 @@ jobs:
       REMYX_API_KEY: ${{ secrets.REMYX_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
-      - uses: remyxai/remyx-recommendation-action@v1
+      - uses: remyxai/outrider@v1
         with:
           interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
           # Validation complete (action v1.0.6: candidate selection over a
