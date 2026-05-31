@@ -31,6 +31,9 @@ jobs:
       - uses: remyxai/outrider@v1
         with:
           interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
-          # Validation complete (action v1.0.6: candidate selection over a
-          # weekly pool + role-based guardrails). Rate limit restored to the
-          # action default (7 days) for a weekly cadence — drop the override.
+          # Daily-candidate evaluation: disable the per-repo rate-limit
+          # window so the cron actually fires every day. With the default
+          # 7-day floor, 6/7 daily runs would short-circuit at
+          # skipped_rate_limit. Per-paper dedup (open PR or open Issue for
+          # the same arxiv_id) still prevents duplicate work day-over-day.
+          rate-limit-days: '0'
