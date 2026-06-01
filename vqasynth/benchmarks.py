@@ -15,6 +15,7 @@ from collections import defaultdict
 from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 
+from vqasynth.cross_view_consistency import cross_view_breakdown
 from vqasynth.evaluation import (
     classify_question,
     extract_option,
@@ -547,6 +548,9 @@ class BenchmarkRunner:
             "total": len(all_scores),
             "by_category": {cat: _agg(s) for cat, s in sorted(category_scores.items())},
             "by_subcategory": {sub: _agg(s) for sub, s in sorted(subcategory_scores.items())},
+            # Cross-view stratification (adapted from CrossViewBench): expose how
+            # much accuracy degrades from single-view to multi-view items.
+            "cross_view": cross_view_breakdown(items, per_item),
             "per_item": per_item,
         }
 
@@ -583,6 +587,7 @@ class BenchmarkRunner:
                 "total": result["total"],
                 "by_category": result["by_category"],
                 "by_subcategory": result["by_subcategory"],
+                "cross_view": result["cross_view"],
             }
             report["summary"][result["benchmark"]] = result["overall_accuracy"]
 
@@ -640,6 +645,17 @@ def format_benchmark_report(report):
         lines.append("")
         lines.append(f"--- {bname} ---")
         lines.append(f"  Overall: {bdata['overall_accuracy']:.1%} ({bdata['total']} samples)")
+
+        cv = bdata.get("cross_view")
+        if cv and cv.get("by_stratum"):
+            sv = cv["by_stratum"].get("single-view", {})
+            xv = cv["by_stratum"].get("cross-view", {})
+            lines.append(
+                f"  Single-view: {sv.get('accuracy', 0):.1%} ({sv.get('count', 0)})"
+                f"   Cross-view: {xv.get('accuracy', 0):.1%} ({xv.get('count', 0)})"
+            )
+            if cv.get("cross_view_gap") is not None:
+                lines.append(f"  Cross-view gap: {cv['cross_view_gap']:+.1%}")
 
         if bdata.get("by_category"):
             lines.append("")
