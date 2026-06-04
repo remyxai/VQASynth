@@ -161,3 +161,26 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Rubric Scoring — adapted from Reinforcement Learning with Robust Rubric Rewards
+
+`vqasynth/rubric_scoring.py` adds criterion-level rubric verification as an
+evaluation primitive for the benchmark runner. Instead of a single binary
+"is this prediction correct?" judgment, a prediction is scored against a
+rubric of named criteria: verifiable criteria (metric distance, yes/no
+polarity, object choice) are routed to the existing deterministic
+extractors+checkers in `vqasynth/evaluation.py`, while non-verifiable
+criteria (object grounding, logical flow) are routed to a per-criterion
+LLM-as-a-Judge. Scores combine with **hierarchical aggregation** — essential
+criteria gate the result, additional criteria only refine within that ceiling
+— so an answer cannot earn credit for fluent reasoning while getting the
+spatial fact wrong. A **minimal exposure** strategy keeps scoring faithful:
+the deterministic path never reveals the ground truth to a model, and judges
+see text only (no image).
+
+Enable it via `BenchmarkRunner(..., use_rubric=True)`; verifiable criteria
+score without any LLM client, so much of the rubric runs deterministically.
+
+Adapted from [Reinforcement Learning with Robust Rubric Rewards](https://arxiv.org/abs/2605.30244v1).
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
