@@ -25,6 +25,7 @@ from vqasynth.evaluation import (
     score_distance_mra,
     score_yes_no,
 )
+from vqasynth.rubric_scoring import build_spatial_rubric, score_rubric
 
 
 def _ensure_zip_extracted(repo_id, filename, repo_type="dataset"):
@@ -465,12 +466,17 @@ class BenchmarkRunner:
     with benchmark-native categories and sub-categories.
     """
 
-    def __init__(self, benchmarks=None, llm_client=None, llm_model="gpt-4o"):
+    def __init__(self, benchmarks=None, llm_client=None, llm_model="gpt-4o",
+                 use_rubric=False):
         """
         Args:
             benchmarks: List of benchmark names, or "all".
             llm_client: Optional OpenAI client for LLM judge fallback.
             llm_model: Model name for LLM judge.
+            use_rubric: If True, score each item with a criterion-level rubric
+                (vqasynth.rubric_scoring) instead of a flat judge fallback.
+                Verifiable criteria score deterministically without a client;
+                non-verifiable criteria use llm_client when provided.
         """
         if benchmarks is None or benchmarks == "all":
             self.benchmarks = list(BENCHMARK_LOADERS.keys())
@@ -481,6 +487,7 @@ class BenchmarkRunner:
 
         self.llm_client = llm_client
         self.llm_model = llm_model
+        self.use_rubric = use_rubric
 
     def load(self, benchmark_name, **kwargs):
         """Load a benchmark dataset."""
@@ -517,8 +524,20 @@ class BenchmarkRunner:
             pred = pred_map.get(item["id"], "")
             score = scorer(item, pred)
 
-            # LLM judge fallback if scorer returned None
-            if score is None and self.llm_client is not None:
+            if self.use_rubric:
+                # Criterion-level rubric scoring (RLR^3): essential criteria
+                # gate, additional criteria refine. Verifiable criteria score
+                # deterministically; judge criteria use llm_client if present.
+                rubric = build_spatial_rubric(item["question"], item["answer"])
+                rubric_score = score_rubric(
+                    rubric, pred, item["answer"],
+                    question=item["question"],
+                    client=self.llm_client, model=self.llm_model,
+                )
+                if rubric_score is not None:
+                    score = rubric_score
+            elif score is None and self.llm_client is not None:
+                # Flat LLM judge fallback if scorer returned None.
                 score = llm_judge(
                     self.llm_client, self.llm_model,
                     item["question"], pred, item["answer"],
