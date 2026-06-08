@@ -25,6 +25,7 @@ from vqasynth.evaluation import (
     score_distance_mra,
     score_yes_no,
 )
+from vqasynth.procedural_grounding import generate_pgt_items, score_pgt_item
 
 
 def _ensure_zip_extracted(repo_id, filename, repo_type="dataset"):
@@ -331,6 +332,21 @@ def load_mindcube(jsonl_name="MindCube_tinybench.jsonl"):
 
 
 # ---------------------------------------------------------------------------
+# PGT Diagnostic Loader (procedurally generated, no download)
+# ---------------------------------------------------------------------------
+
+def load_pgt(num_items=60, seed=0, image_size=384):
+    """
+    Procedurally generate the PGT visual-grounding diagnostic.
+
+    Unlike the external loaders, this needs no download: it renders scenes of
+    geometric primitives with ground truth derived from their geometry. See
+    vqasynth.procedural_grounding (adapted from PGT, arXiv:2605.23883).
+    """
+    return generate_pgt_items(num_items=num_items, seed=seed, image_size=image_size)
+
+
+# ---------------------------------------------------------------------------
 # Unified Loader
 # ---------------------------------------------------------------------------
 
@@ -339,6 +355,7 @@ BENCHMARK_LOADERS = {
     "omnispatial": load_omnispatial,
     "space10": load_space10,
     "mindcube": load_mindcube,
+    "pgt": load_pgt,
 }
 
 
@@ -450,6 +467,7 @@ BENCHMARK_SCORERS = {
     "omnispatial": _score_omnispatial_item,
     "space10": _score_space10_item,
     "mindcube": _score_mindcube_item,
+    "pgt": score_pgt_item,
 }
 
 

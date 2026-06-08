@@ -159,3 +159,31 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Procedural Grounding Diagnostic — adapted from [PGT: Procedurally Generated Tasks for improving visual grounding in MLLMs](https://arxiv.org/abs/2605.23883)
+
+PGT overlays unambiguous geometric primitives on images to create dense
+spatial-grounding supervision that disentangles visual grounding from semantic
+priors, and doubles as a low-cost diagnostic for locating perception failures.
+
+`vqasynth/procedural_grounding.py` ports the data-generation / diagnostic half
+of PGT (no trainer or checkpoint required). It procedurally renders scenes of
+colored shapes, phrases relational (yes/no and choice) and quantitative (count)
+questions by reusing VQASynth's existing prompt templates, and derives ground
+truth directly from the scene geometry. The items follow the same normalized
+schema as the external benchmarks, so PGT is registered as a benchmark in
+`vqasynth/benchmarks.py` and scores through the existing `BenchmarkRunner`:
+
+```python
+from vqasynth.benchmarks import BenchmarkRunner
+
+runner = BenchmarkRunner(benchmarks="pgt")
+items = runner.load("pgt", num_items=60)            # no download required
+report = runner.run({"pgt": model_predictions})     # same entrypoint as the others
+```
+
+Because the supervision is synthetic and unambiguous, a low PGT score isolates a
+genuine grounding failure rather than a gap in semantic knowledge — making it a
+fast sanity check on the perception signal feeding VQASynth's pipeline.
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
