@@ -5,6 +5,8 @@ import random
 from PIL import Image
 from openai import OpenAI
 
+from vqasynth.grounded_cot import build_scaffold_system_prompt
+
 class R1Reasoner:
     def __init__(
         self,
@@ -109,17 +111,19 @@ class R1Reasoner:
         # Encode image
         base64_image = self.encode_image(image)
 
-        # Example system prompt
-        system_prompt = (
+        # Domain framing, then the DRScaffold four-stage grounded structure so
+        # the trace grounds entities and relations before reasoning toward the
+        # answer (still emits <think>/<answer> for format compatibility).
+        base_instructions = (
             "Please see the quantitative distance question-answer pair given and use the remaining information "
             "to formulate a reasoning trace to support the answer. Some information may be partially incorrect, "
             "so you will need to reason about the scene and its scale to ensure high-quality, consistent, and robust responses. "
-            "Make sure to generate a CoT trace in the first-person voice, as though revealing an internal monologue, "
-            "inside of <think> tokens before providing the final answer inside <answer> tokens. Don't refer to the information "
+            "Generate the trace in the first-person voice, as though revealing an internal monologue. Don't refer to the information "
             "as if it were stated, mentioned, previously referenced, or provided, but rather inferred or directly observed as if "
             "you were an embodied AI tasked with making these judgements after some thought about what you see in the scene. "
-            "Feel free to simplify the way objects in the scene are referenced for a more colloquial description.\n"
+            "Feel free to simplify the way objects in the scene are referenced for a more colloquial description."
         )
+        system_prompt = build_scaffold_system_prompt(base_instructions)
 
         qa_pair = f"Question: {question} Answer: {answer}"
         response = self.client.chat.completions.create(
