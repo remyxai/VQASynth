@@ -159,3 +159,24 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Grounded CoT Scaffolding — adapted from DRScaffold: Boosting Dense-Scene Reasoning in Lightweight Vision Language Models
+
+The optional chain-of-thought reasoning stage (`R1Reasoner`) now structures each
+generated trace into four causally ordered stages — **Entity Grounding →
+Relation Modeling → Stepwise Reasoning → Answer** — so that every reasoning step
+is explicitly anchored to the visual entities and relations it depends on,
+rather than a free-form monologue that can drift into fluent-but-unanchored
+text. The trace still emits the existing `<think>`/`<answer>` tags for format
+compatibility, with `<entities>`/`<relations>` added ahead of them to enforce
+grounding.
+
+`vqasynth/grounded_cot.py` builds the staged system prompt and also scores a
+returned trace for how well its reasoning anchors back to the grounded entities
+(`scaffold_grounding_score` / `is_well_grounded`), usable as a downstream
+quality filter on synthetic CoT. This adapts the supervision decomposition from
+[DRScaffold](https://arxiv.org/abs/2605.26038v1) to VQASynth's data-generation
+stage (the paper's staged gradient masking is a training-time detail outside the
+data pipeline's scope).
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
