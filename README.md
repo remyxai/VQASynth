@@ -159,3 +159,21 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Cross-view stratification — adapted from CrossView Suite: Harnessing Cross-view Spatial Intelligence of MLLMs with Dataset, Model and Benchmark
+
+The benchmark evaluation stage now stratifies results by viewpoint structure.
+For every scored benchmark, `BenchmarkRunner.score` splits items into
+**single-view** and **cross-view** (multi-image / multi-viewpoint) strata and
+reports the **cross-view gap** — single-view accuracy minus cross-view
+accuracy. This surfaces the core finding of CrossViewBench: models that perceive
+isolated images well still fail to reason consistently about the same objects
+across views. The gap appears in the report dict and the formatted report; see
+`vqasynth/cross_view_consistency.py`.
+
+Scoped to the metric/stratification layer that VQASynth's eval pipeline can
+host — the paper's CrossViewer model (region tokenizer, explicit multi-view
+object alignment) and its 1.6M-sample CrossViewSet training corpus are out of
+scope for this data/evaluation repo.
+
+Contributed via [Remyx Recommendation](https://engine.remyx.ai).
