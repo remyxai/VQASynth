@@ -25,6 +25,7 @@ from vqasynth.evaluation import (
     score_distance_mra,
     score_yes_no,
 )
+from vqasynth.image_degradation import degrade_images
 
 
 def _ensure_zip_extracted(repo_id, filename, repo_type="dataset"):
@@ -465,12 +466,20 @@ class BenchmarkRunner:
     with benchmark-native categories and sub-categories.
     """
 
-    def __init__(self, benchmarks=None, llm_client=None, llm_model="gpt-4o"):
+    def __init__(self, benchmarks=None, llm_client=None, llm_model="gpt-4o",
+                 degradation=None, severity=3):
         """
         Args:
             benchmarks: List of benchmark names, or "all".
             llm_client: Optional OpenAI client for LLM judge fallback.
             llm_model: Model name for LLM judge.
+            degradation: Optional SpaceDG-style visual degradation to apply to
+                every benchmark image before inference (e.g. "motion_blur",
+                "low_light"); see vqasynth.image_degradation.DEGRADATION_TYPES.
+                When set, get_benchmark_items() returns degraded images, so the
+                same eval can be run on clean vs. degraded inputs and the
+                robustness gap measured. None means pristine images.
+            severity: Degradation severity in [1, 5] (ImageNet-C scale).
         """
         if benchmarks is None or benchmarks == "all":
             self.benchmarks = list(BENCHMARK_LOADERS.keys())
@@ -481,10 +490,31 @@ class BenchmarkRunner:
 
         self.llm_client = llm_client
         self.llm_model = llm_model
+        self.degradation = degradation
+        self.severity = severity
 
     def load(self, benchmark_name, **kwargs):
         """Load a benchmark dataset."""
         return load_benchmark(benchmark_name, **kwargs)
+
+    def degrade_items(self, items):
+        """
+        Apply the configured SpaceDG-style visual degradation to a list of
+        full benchmark item dicts, returning new dicts with degraded images.
+
+        No-op (returns items unchanged) when self.degradation is None, so the
+        same eval loop covers both the pristine and degraded conditions.
+        """
+        if not self.degradation:
+            return items
+        out = []
+        for item in items:
+            degraded = dict(item)
+            degraded["images"] = degrade_images(
+                item.get("images", []), self.degradation, self.severity
+            )
+            out.append(degraded)
+        return out
 
     def score(self, benchmark_name, items, predictions):
         """
@@ -595,7 +625,7 @@ class BenchmarkRunner:
         Returns list of dicts with 'id', 'question', 'options', 'images'
         that can be passed to a model. Ground truth is excluded.
         """
-        items = self.load(benchmark_name, **kwargs)
+        items = self.degrade_items(self.load(benchmark_name, **kwargs))
         return [
             {
                 "id": item["id"],

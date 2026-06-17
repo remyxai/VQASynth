@@ -24,7 +24,12 @@ def run_eval(args, benchmark_names):
         benchmarks=benchmark_names,
         llm_client=llm_client,
         llm_model=args.judge_model,
+        degradation=args.degradation or None,
+        severity=args.severity,
     )
+    if runner.degradation:
+        print(f"Applying '{runner.degradation}' degradation (severity {runner.severity}) "
+              f"to benchmark images before inference.")
 
     report = {"summary": {}, "benchmarks": {}}
     for bname in benchmark_names:
@@ -36,6 +41,10 @@ def run_eval(args, benchmark_names):
 
         if args.max_items > 0:
             items = items[: args.max_items]
+
+        # Degradation-aware eval (SpaceDG): perturb inputs before inference so
+        # the report reflects robustness under imperfect visual observations.
+        items = runner.degrade_items(items)
 
         print(f"Running inference on {bname} ({len(items)} items) with {args.model}...")
         preds = run_inference_on_benchmark(
@@ -105,6 +114,13 @@ Examples:
                         help="LLM judge model")
     parser.add_argument("--use_llm_judge", action="store_true",
                         help="Enable LLM judge fallback for ambiguous outputs")
+
+    parser.add_argument("--degradation", type=str, default="",
+                        help="SpaceDG-style visual degradation to apply to inputs "
+                             "before inference (e.g. motion_blur, low_light, fog). "
+                             "Empty = pristine images.")
+    parser.add_argument("--severity", type=int, default=3,
+                        help="Degradation severity in [1, 5] (ImageNet-C scale)")
 
     args = parser.parse_args()
 
