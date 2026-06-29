@@ -1,6 +1,6 @@
 name: Outrider
 
-# Daily cron that uses remyxai/outrider to pick a paper from
+# Weekly cron that uses remyxai/outrider to pick a paper from
 # engine.remyx.ai for this research interest and open a draft PR with a
 # Claude-Code-scaffolded integration.
 #
@@ -13,8 +13,8 @@ name: Outrider
 
 on:
   schedule:
-    # Daily at 14:00 UTC
-    - cron: '0 14 * * *'
+    # Weekly Mondays 14:00 UTC
+    - cron: '0 14 * * 1'   # Mondays 14:00 UTC
   workflow_dispatch:
 
 jobs:
