@@ -16,6 +16,31 @@ on:
     # Weekly Mondays 14:00 UTC
     - cron: '0 14 * * 1'   # Mondays 14:00 UTC
   workflow_dispatch:
+    inputs:
+      provider:
+        description: 'Which model provider to route Claude Code at.'
+        type: choice
+        required: false
+        default: 'anthropic'
+        options:
+          - anthropic
+          - zai
+      model:
+        description: 'Specific model name (empty = provider default).'
+        required: false
+        default: ''
+      search-method:
+        description: 'Optional method query — top hit of an engine search overrides the ranker pool.'
+        required: false
+        default: ''
+      pin-arxiv:
+        description: 'Optional arxiv_id to implement directly (bypasses selection).'
+        required: false
+        default: ''
+      claude-timeout:
+        description: 'Wall-clock seconds for the Claude Code agent calls.'
+        required: false
+        default: '900'
 
 jobs:
   recommend:
@@ -27,8 +52,22 @@ jobs:
       issues: write
     env:
       REMYX_API_KEY: ${{ secrets.REMYX_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
+      - name: Configure provider auth
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY_SECRET: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_API_KEY_SECRET: ${{ secrets.ZAI_API_KEY }}
+          MODEL_INPUT: ${{ inputs.model }}
+        run: |
+          if [ "${{ inputs.provider }}" = "zai" ]; then
+            echo "ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY_SECRET" >> "$GITHUB_ENV"
+          else
+            echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY_SECRET" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$MODEL_INPUT" ]; then
+            echo "ANTHROPIC_MODEL=$MODEL_INPUT" >> "$GITHUB_ENV"
+          fi
       # Mint a remyx[bot] token from Remyx so the PR / Issue is authored by
       # the Remyx GitHub App (not github-actions[bot]). The App private key
       # stays on Remyx's side; this uses the REMYX_API_KEY already in secrets.
@@ -52,3 +91,8 @@ jobs:
           # (e.g. a manual re-run after the first auto-PR). Per-paper dedup
           # (open PR / Issue for the same arxiv_id) still prevents duplicates.
           rate-limit-days: '0'
+          search-method: ${{ inputs.search-method }}
+          pin-arxiv: ${{ inputs.pin-arxiv }}
+          claude-timeout: ${{ inputs.claude-timeout }}
+          model-base-url: ${{ inputs.provider == 'zai' && 'https://api.z.ai/api/anthropic' || '' }}
+
