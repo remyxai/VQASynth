@@ -12,10 +12,7 @@ name: Outrider
 # this repo — no PAT required since the action runs in the target.
 
 on:
-  schedule:
-    # Weekly Mondays 14:00 UTC
-    # - cron: '0 14 * * 1'   # Mondays 14:00 UTC  # disabled 2026-07-10 in favor of outrider-daily.yml (branch-mode GLM)
-  workflow_dispatch:
+    workflow_dispatch:
     inputs:
       provider:
         description: 'Which model provider to route Claude Code at.'
