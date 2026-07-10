@@ -12,7 +12,7 @@ name: Outrider
 # this repo — no PAT required since the action runs in the target.
 
 on:
-    workflow_dispatch:
+  workflow_dispatch:
     inputs:
       provider:
         description: 'Which model provider to route Claude Code at.'
@@ -102,4 +102,3 @@ jobs:
           lead-content: ${{ inputs.lead-content }}
           claude-timeout: ${{ inputs.claude-timeout }}
           model-base-url: ${{ inputs.provider == 'zai' && 'https://api.z.ai/api/anthropic' || '' }}
-
