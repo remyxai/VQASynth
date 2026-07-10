@@ -1,0 +1,36 @@
+name: Outrider daily (branch-mode, GLM)
+
+# Continuous exploration companion to outrider.yml. Dispatches once daily
+# under publish=branch on the z.ai GLM backend — no PR, no Issue, no
+# maintainer notification. Preflight-passed candidates land as fork branches
+# that the team reviews at its own cadence. Complementary to the weekly
+# Anthropic Opus run in outrider.yml, which stays the committed-tier
+# deployment.
+
+on:
+  schedule:
+    - cron: '30 6 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: outrider-daily
+  cancel-in-progress: false
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      REMYX_API_KEY: ${{ secrets.REMYX_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_API_KEY }}
+      ANTHROPIC_MODEL: glm-5.2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: remyxai/outrider@v1
+        with:
+          interest-id: '8c1de057-99fa-405f-a7af-7842492d2873'
+          publish: branch
+          model-base-url: 'https://api.z.ai/api/anthropic'
