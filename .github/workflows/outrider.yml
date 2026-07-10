@@ -37,6 +37,14 @@ on:
         description: 'Optional arxiv_id to implement directly (bypasses selection).'
         required: false
         default: ''
+      publish:
+        description: 'pr (default) or branch — branch mode pushes without opening PR/Issue.'
+        required: false
+        default: 'pr'
+      lead-content:
+        description: 'Optional URL to a spec/gist that overrides suggested_experiment.'
+        required: false
+        default: ''
       claude-timeout:
         description: 'Wall-clock seconds for the Claude Code agent calls.'
         required: false
@@ -93,6 +101,8 @@ jobs:
           rate-limit-days: '0'
           search-method: ${{ inputs.search-method }}
           pin-arxiv: ${{ inputs.pin-arxiv }}
+          publish: ${{ inputs.publish }}
+          lead-content: ${{ inputs.lead-content }}
           claude-timeout: ${{ inputs.claude-timeout }}
           model-base-url: ${{ inputs.provider == 'zai' && 'https://api.z.ai/api/anthropic' || '' }}
 
