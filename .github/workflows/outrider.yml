@@ -87,6 +87,12 @@ jobs:
         with:
           interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
           rate-limit-days: '0'
+          # Coding agents routinely touch build/env metadata while adding a
+          # training pipeline (cache dirs into .gitignore, deps into
+          # requirements). Outrider's default allowlist misses these, so
+          # three consecutive dispatches were rejected on '.gitignore not in
+          # allowlist'. Extend the allowlist to cover common meta-files.
+          guardrails-allowlist: '.gitignore,.dockerignore,requirements*.txt,setup.py,setup.cfg,pyproject.toml,MANIFEST.in'
           search-method: ${{ inputs.search-method || '' }}
           pin-arxiv: ${{ inputs.pin-arxiv || '' }}
           claude-timeout: ${{ inputs.claude-timeout || '900' }}
