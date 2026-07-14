@@ -1,0 +1,12 @@
+schema_version: 1
+fork: remyxai/VQASynth
+observed_landing_zones: []
+rejected_shapes:
+- shape_tag: null
+  reason_code: null
+  reason_summary: ''
+  observed:
+  - arxiv: 2607.06553v1
+    timestamp: '2026-07-14T13:44:36Z'
+coordination_signals: []
+last_updated: '2026-07-14T13:44:36Z'
