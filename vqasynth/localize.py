@@ -2,7 +2,6 @@ import random
 import re
 import numpy as np
 import torch
-import spacy
 from PIL import Image
 
 from transformers import (
@@ -57,7 +56,6 @@ def extract_captions(raw_text):
 class BaseCaptionLocalizer:
     def __init__(self, device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.nlp = spacy.load("en_core_web_sm")
         self.torch_dtype = torch.float16
         self.model = None
         self.processor = None
