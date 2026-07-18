@@ -6,7 +6,7 @@ open3d==0.18.0
 opencv-python==4.8.1.78
 tqdm==4.66.3
 matplotlib==3.6.2
-transformers==4.44.2
+transformers==4.48.0
 huggingface-hub==0.25.1
 onnx==1.13.1
 onnxruntime==1.15.1
