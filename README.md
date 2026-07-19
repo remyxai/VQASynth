@@ -12,6 +12,63 @@ VLMs trained using VQASynth 🎹
 * base responses on consistent references like floors and surfaces
 * apply CoT "thinking" for more robust reasoning and better estimates
 
+## Run a Pipeline on Your Image Dataset
+
+### Environment
+
+Before running the demo scripts, ensure you have the following installed:
+- Python 3.10 or later
+- [Docker](https://docs.docker.com/engine/install/), [Docker Compose V2](https://docs.docker.com/compose/migrate/)
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- At least 24GB VRAM (A10 or larger) and 16GB RAM
+
+
+Use Docker Compose to transform Image datasets from Huggingface Hub into VQA datasets describing spatial relations between objects.
+You can process different datasets after updating the [config.yaml](config/config.yaml).
+
+Then run the spatial VQA pipeline locally with Docker:
+
+```bash
+# Authenticate to push to hub
+huggingface-cli login
+
+# Run the pipeline
+cd /path/to/VQASynth
+bash run.sh
+```
+
+You can run the colab notebook (requires A100 runtime) or compose the pipeline modules in-process to turn one image into grounded spatial VQAs:
+
+```python
+from PIL import Image
+from vqasynth.localize import Localizer
+from vqasynth.scene_fusion import SpatialSceneConstructor
+from vqasynth.prompts import PromptGenerator
+
+image = Image.open("warehouse.jpg").convert("RGB")
+
+# Detect + segment task-relevant objects
+masks, _, captions = Localizer(captioner_type="florence").run(image)
+
+# Lift to 3D — VGGT emits per-object point clouds, depth, and intrinsics in one pass
+pcd_filepaths, canonicalized, _, _ = SpatialSceneConstructor().run(
+    "warehouse_0", image, masks, output_dir="./scenes"
+)
+
+# Generate spatial VQAs from the reconstructed 3D scene
+qa_pairs = PromptGenerator().run(captions, pcd_filepaths, canonicalized)
+
+# Example output:
+#   "How close is the man in red hat walking from the wooden pallet with boxes?"
+#   → "Approximately 60.13 centimeters."
+```
+
+The resulting Huggingface dataset is in the cache directory and you can push to hub with:
+```python
+from vqasynth.datasets import Dataloader
+Dataloader(cache_dir).push_to_hub(final_dataset, target_repo_name)
+```
+
 ## Description
 
 Fusing semantic and metric data into templated VQA chat, Vision Language Models can be instruction-tuned with low-rank adapters to enhance their baseline spatial reasoning capabilities. 
@@ -55,62 +112,6 @@ Examples from [SpaceThinker](https://huggingface.co/remyxai/SpaceThinker-Qwen2.5
 
 Synthetic spatial reasoning traces suffice to train VLMs capable of grounded, quantitative spatial reasoning—inferring accurate distances, interpreting 3D scene context, and formatting open-ended answers precisely by integrating visual cues, real-world object priors, and human-centric spatial logic.
 
-
-## Run a Pipeline on Your Image Dataset
-
-### Environment
-
-Before running the demo scripts, ensure you have the following installed:
-- Python 3.10 or later
-- [Docker](https://docs.docker.com/engine/install/), [Docker Compose V2](https://docs.docker.com/compose/migrate/)
-- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-- At least 24GB VRAM (A10 or larger) and 16GB RAM
-
-
-Use Docker Compose to transform Image datasets from Huggingface Hub into VQA datasets describing spatial relations between objects. 
-You can process different datasets after updating the [config.yaml](config/config.yaml).
-
-Then run the spatial VQA pipeline locally with Docker:
-
-```bash
-# Authenticate to push to hub
-huggingface-cli login
-
-# Run the pipeline
-cd /path/to/VQASynth
-bash run.sh
-```
-You can run the colab notebook (requires A100 runtime) or customize your own pipeline:
-```python
-from vqasynth.datasets import Dataloader
-from vqasynth.embeddings import EmbeddingGenerator, TagFilter
-
-dataloader = Dataloader(cache_dir)
-dataset = dataloader.load_dataset(dataset_name)
-embedding_generator = EmbeddingGenerator()
-tag_filter = TagFilter()
-
-include_tags = include_tags.strip().split(",")
-exclude_tags = exclude_tags.strip().split(",")
-
-# Extract embeddings
-dataset = dataset.map(lambda example: embedding_generator.apply_transform(example, images))
-
-# Extract tags
-dataset = dataset.map(lambda example: tag_filter.apply_transform(example, include_tags + exclude_tags))
-
-# Filter by tags
-dataset_filtered = dataset.filter(
-    lambda example: tag_filter.filter_by_tag(
-        example['tag'], include_tags, exclude_tags
-        )
-    )
-```
-
-The resulting Huggingface dataset is in the cache directory and you can push to hub with:
-```python
-dataloader.push_to_hub(final_dataset, target_repo_name)
-```
 
 ## Model Evaluation
 Report VLM spatial reasoning on [benchmarks](https://github.com/remyxai/VQASynth/blob/main/pipelines/spatialvqa_eval.yaml
