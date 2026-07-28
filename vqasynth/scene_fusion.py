@@ -192,10 +192,13 @@ class SpatialSceneConstructor:
                 pays off most when processing multi-image scenes (S≥2) and
                 enables larger scene batches on the same VRAM budget.
         """
-        # Load weights directly in the target dtype instead of loading fp32 and
-        # relying on autocast alone — cuts weight memory in half and lets the
-        # kernel scheduler pick fp16/bf16 paths from the first call.
-        self.model = VGGT.from_pretrained("facebook/VGGT-1B", torch_dtype=dtype).to(device)
+        # Cast weights to the target dtype instead of loading fp32 and relying
+        # on autocast alone — cuts weight memory in half and lets the kernel
+        # scheduler pick fp16/bf16 paths from the first call. VGGT uses
+        # PyTorchModelHubMixin which doesn't intercept torch_dtype the way
+        # transformers.PretrainedModel does, so cast happens in the .to() call.
+        # Integer buffers are preserved (nn.Module.to only casts floating tensors).
+        self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(device=device, dtype=dtype)
         self.model.eval()
 
         if avggt_step1 or os.environ.get("VQASYNTH_AVGGT_STEP1") == "1":
