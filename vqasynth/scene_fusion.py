@@ -176,21 +176,25 @@ def restore_pointclouds(pointcloud_paths):
     return restored_pointclouds
 
 class SpatialSceneConstructor:
-    def __init__(self, compile_aggregator: bool = True, avggt_step1: bool = False):
+    def __init__(self, compile_aggregator: bool = False, avggt_step1: bool = False):
         """
         Initialize the constructor and load the VGGT model.
 
         Args:
-            compile_aggregator: if True (default), wrap ``model.aggregator`` with
-                ``torch.compile(mode="reduce-overhead")``. First call pays a
-                warmup cost (~30s); subsequent calls hit the cached graph.
-                Disable via env var ``VQASYNTH_DISABLE_COMPILE=1`` if the
-                installed torch version misbehaves.
+            compile_aggregator: if True, wrap ``model.aggregator`` with
+                ``torch.compile(mode="reduce-overhead")``. Off by default —
+                measured wins on T4 are modest (~1.09× at S=1) and VGGT's
+                rope layer triggers a dynamo graph break on the
+                ``int(positions.max())`` scalar-tensor conversion, producing
+                warmup cost + warning spam. Ampere+ users on longer-running
+                workloads may want to opt in; consider also setting
+                ``torch._dynamo.config.capture_scalar_outputs = True`` to
+                trace through the rope graph break.
             avggt_step1: if True (or env var ``VQASYNTH_AVGGT_STEP1=1``),
                 apply AVGGT Step 1 (early-global-as-frame attention). See
                 :mod:`vqasynth.vggt_speedups` for details. Off by default;
-                pays off most when processing multi-image scenes (S≥2) and
-                enables larger scene batches on the same VRAM budget.
+                measured neutral at S≤4 (VQASynth's current call pattern);
+                begins paying off at S≥15+.
         """
         # Cast weights to the target dtype instead of loading fp32 and relying
         # on autocast alone — cuts weight memory in half and lets the kernel
