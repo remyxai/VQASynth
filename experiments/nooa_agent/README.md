@@ -41,9 +41,16 @@ Future tiers not in the initial branch:
 
 ```bash
 # Python 3.12+ environment (NOOA constraint)
+pip install "numpy<2.0"                             # see note below
 pip install "nooa @ git+https://github.com/NVIDIA-NeMo/labs-OO-Agents.git@main"
 pip install -e .                                    # VQASynth itself
 ```
+
+**Why the numpy pin:** Florence-2 loads via `trust_remote_code=True`, and the
+model repo's Python code has numpy 1.x assumptions that break on numpy 2.x
+(silent tool errors like "cannot import name X" during inference). DepthPro
+similarly has 1.x deps that haven't been patched at the time of writing.
+Colab defaults to numpy 2.x and will need this override + a runtime restart.
 
 **CPU tier — DepthPro** (only needed if not using the GPU tier). No PyPI
 package exists; install from source + download weights:
