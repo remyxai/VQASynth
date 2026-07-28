@@ -67,11 +67,13 @@ class SpatialAnswer:
     """Number of tool invocations across the reasoning trace."""
 
 
-def _make_agent_class(tier: Tier):
+def _make_agent_class(tier: Tier, **class_kwargs):
     """Build the NOOA Agent subclass with tier-appropriate tool backends.
 
-    Constructed at import time so NOOA's schema inspection works normally; the
-    class is parameterized by tier because the backend field types differ.
+    Constructed at call time so NOOA's schema inspection sees the tool methods.
+    ``class_kwargs`` (e.g. ``llm=...``) are forwarded to NOOA's class-level
+    configuration hook (``class Agent(Base, llm=llm):``), matching the NOOA
+    quickstart pattern.
     """
     if Agent is None:
         raise ImportError(
@@ -80,9 +82,7 @@ def _make_agent_class(tier: Tier):
             f"(requires Python 3.12+). Original error: {_NOOA_IMPORT_ERROR}"
         )
 
-    DepthTool = VggtEstimator if tier == "gpu" else DepthProEstimator
-
-    class _SpatialAnnotator(Agent):
+    class _SpatialAnnotator(Agent, **class_kwargs):
         """You are a spatial annotation agent. Given an image and a question,
         use the available tools to ground your answer in real geometry rather
         than guessing from the image. Prefer metric-3D tools when the question
@@ -94,10 +94,18 @@ def _make_agent_class(tier: Tier):
         return low confidence — do not fabricate.
         """
 
-        detector: FlorenceDetector
-        segmenter: FlorenceSegmenter
-        depth: Any  # DepthProEstimator or VggtEstimator depending on tier
         tier_name: str = tier
+
+        def __init__(
+            self,
+            detector: FlorenceDetector,
+            segmenter: FlorenceSegmenter,
+            depth: Any,
+        ):
+            super().__init__()
+            self.detector = detector
+            self.segmenter = segmenter
+            self.depth = depth
 
         # --- Tool methods (auto-derived by NOOA into an OpenAI-tool-schema
         # list; the model sees signature + docstring + return-type annotation).
@@ -167,12 +175,14 @@ def _make_agent_class(tier: Tier):
     return _SpatialAnnotator
 
 
-def SpatialAnnotator(tier: Tier | None = None, **agent_kwargs):
+def SpatialAnnotator(tier: Tier | None = None, **class_kwargs):
     """Construct a SpatialAnnotator for the given (or auto-detected) tier.
 
     Args:
         tier: 'cpu' or 'gpu'. If None, uses :func:`detect_tier` heuristic.
-        **agent_kwargs: forwarded to the NOOA Agent constructor (e.g., ``llm=...``).
+        **class_kwargs: forwarded to NOOA's class-level configuration hook
+            (e.g. ``llm=...``, matching NOOA's ``class Agent(Base, llm=llm):``
+            quickstart pattern).
     """
     if tier is None:
         tier = detect_tier()
@@ -181,13 +191,8 @@ def SpatialAnnotator(tier: Tier | None = None, **agent_kwargs):
     segmenter = FlorenceSegmenter(detector=detector)
     depth = VggtEstimator() if tier == "gpu" else DepthProEstimator(device="cpu")
 
-    AgentCls = _make_agent_class(tier)
-    return AgentCls(
-        detector=detector,
-        segmenter=segmenter,
-        depth=depth,
-        **agent_kwargs,
-    )
+    AgentCls = _make_agent_class(tier, **class_kwargs)
+    return AgentCls(detector=detector, segmenter=segmenter, depth=depth)
 
 
 __all__ = ["SpatialAnnotator", "SpatialAnswer", "Tier"]
