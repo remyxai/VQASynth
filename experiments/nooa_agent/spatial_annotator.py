@@ -22,8 +22,9 @@ Design references:
 """
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from PIL import Image
 
@@ -60,6 +61,37 @@ from experiments.nooa_agent.tools.depth import (
     depth_at_point,
     distance_3d_meters,
 )
+
+
+def _scene_cached(method: Callable) -> Callable:
+    """Per-image memoization decorator for tool methods.
+
+    Uses object identity (``is``) to detect scene changes, and holds a strong
+    reference to the current image so its identity stays valid until a new
+    image is bound. Using ``id()`` alone would be unsafe: a freed PIL Image
+    can be replaced by a new one at the same memory address, causing false
+    cache hits on unrelated images.
+
+    Cache key is ``(method.__name__, repr(args), sorted kwargs)``.
+
+    ``functools.wraps`` preserves ``__doc__`` / ``__annotations__`` / signature
+    via ``__wrapped__`` so NOOA's schema derivation (which uses
+    ``inspect.signature`` with the default ``follow_wrapped=True``) still sees
+    the underlying tool's real signature.
+    """
+    @functools.wraps(method)
+    def wrapper(self, image, *args, **kwargs):
+        if not hasattr(self, "_scene_cache"):
+            self._scene_cache = {}
+            self._scene_image_ref = None
+        if self._scene_image_ref is not image:
+            self._scene_cache.clear()
+            self._scene_image_ref = image
+        key = (method.__name__, repr(args), repr(sorted(kwargs.items())))
+        if key not in self._scene_cache:
+            self._scene_cache[key] = method(self, image, *args, **kwargs)
+        return self._scene_cache[key]
+    return wrapper
 
 
 @dataclass
@@ -139,34 +171,51 @@ def _make_agent_class(tier: Tier, max_iterations: int = DEFAULT_MAX_ITERATIONS, 
             self.detector = detector
             self.segmenter = segmenter
             self.depth = depth
+            self._scene_cache: dict = {}
+            self._scene_image_ref: Any = None
+
+        def clear_scene(self) -> None:
+            """Drop the per-image tool cache. Called automatically on new image."""
+            self._scene_cache.clear()
+            self._scene_image_ref = None
 
         # --- Tool methods (auto-derived by NOOA into an OpenAI-tool-schema
         # list; the model sees signature + docstring + return-type annotation).
+        # @_scene_cached on any image-taking tool memoizes on image identity,
+        # so a SceneContext binding the same image across N questions incurs
+        # each expensive backend call at most once.
 
+        @_scene_cached
         def detect_objects(self, image: Image.Image, phrase: str) -> list[Box]:
             """Localize objects matching a natural-language phrase."""
             return self.detector.detect_objects(image, phrase)
 
+        @_scene_cached
         def detect_all_objects(self, image: Image.Image) -> list[Box]:
             """Return all objects Florence-2 finds — full scene inventory."""
             return self.detector.detect_all_objects(image)
 
+        @_scene_cached
         def describe_region(self, image: Image.Image, box: Box) -> str:
             """Caption a specific rectangular region of the image."""
             return self.detector.describe_region(image, box)
 
+        @_scene_cached
         def caption_scene(self, image: Image.Image, detail: str = "short") -> str:
             """Caption the whole image. `detail`: 'short' | 'detailed'."""
             return self.detector.caption(image, detail=detail)
 
+        @_scene_cached
         def dense_region_captions(self, image: Image.Image) -> list[dict]:
             """Cover the scene with per-region captions + bboxes."""
             return self.detector.dense_region_captions(image)
 
+        @_scene_cached
         def read_text(self, image: Image.Image, with_regions: bool = False) -> dict:
             """OCR the image. Set `with_regions=True` for per-text-region boxes."""
             return self.detector.read_text(image, with_regions=with_regions)
 
+        @_scene_cached
         def segment(self, image: Image.Image, referring_expression: str) -> list[dict]:
             """Return polygon regions for the object matching a phrase."""
             return self.segmenter.segment(image, referring_expression)
@@ -177,6 +226,7 @@ def _make_agent_class(tier: Tier, max_iterations: int = DEFAULT_MAX_ITERATIONS, 
 
         # --- metric-3D tools (both tiers expose the same interface)
 
+        @_scene_cached
         def metric_depth(self, image: Image.Image) -> DepthResult:
             """Compute metric depth map + focal length + point cloud for the image."""
             return self.depth.metric_depth(image)
@@ -266,4 +316,49 @@ def SpatialAnnotator(
     return AgentCls(detector=detector, segmenter=segmenter, depth=depth)
 
 
-__all__ = ["SpatialAnnotator", "SpatialAnswer", "Tier"]
+class SceneContext:
+    """Bind one image to an agent, ask N questions cheaply.
+
+    Every image-taking tool method on the agent is memoized on image identity
+    (see :func:`_scene_cached`), so the second question against the same image
+    reuses the first question's Florence-2 outputs and metric-depth compute.
+    Depth is the dominant per-image cost (VGGT-1B forward pass or DepthPro
+    inference), so this cuts wall-clock for multi-question workloads roughly
+    proportional to the fraction of questions that need depth.
+
+    Usage::
+
+        agent = SpatialAnnotator(llm=llm)
+        img = Image.open("warehouse.jpg").convert("RGB")
+
+        scene = SceneContext(agent, img)
+        await scene.warmup()                       # optional — eager depth+detect
+        r1 = await scene.annotate("Q1")            # first question
+        r2 = await scene.annotate("Q2")            # reuses cached tools
+        r3 = await scene.annotate("Q3")            # ...
+
+    Loading a new image auto-invalidates the cache. To reset explicitly, call
+    ``scene.agent.clear_scene()``.
+    """
+
+    def __init__(self, agent: Any, image: Image.Image):
+        self.agent = agent
+        self.image = image
+
+    async def annotate(self, question: str) -> SpatialAnswer:
+        """Ask a question about the bound image. Reuses cached tool outputs."""
+        return await self.agent.annotate(self.image, question)
+
+    async def warmup(self) -> None:
+        """Eagerly precompute the tools most questions need.
+
+        Runs metric_depth, detect_all_objects, and caption_scene on the bound
+        image. Optional — subsequent ``annotate()`` calls will lazy-populate
+        the cache on demand anyway.
+        """
+        _ = self.agent.metric_depth(self.image)
+        _ = self.agent.detect_all_objects(self.image)
+        _ = self.agent.caption_scene(self.image)
+
+
+__all__ = ["SceneContext", "SpatialAnnotator", "SpatialAnswer", "Tier"]

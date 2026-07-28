@@ -100,6 +100,31 @@ The `annotate(image, question) -> SpatialAnswer` method is the LLM-driven
 entry point: the model decides which tools to call and in what order to
 ground its answer in real geometry.
 
+## Multi-question workloads: `SceneContext`
+
+For batch labeling — many questions per image — bind the image once and
+memoize the expensive tool outputs (metric depth, Florence-2 forward passes):
+
+```python
+from experiments.nooa_agent.spatial_annotator import SpatialAnnotator, SceneContext
+
+agent = SpatialAnnotator(llm=llm)
+img = Image.open("warehouse.jpg").convert("RGB")
+
+scene = SceneContext(agent, img)
+await scene.warmup()                        # optional: eager depth + detect + caption
+r1 = await scene.annotate("How far apart are the two workers?")
+r2 = await scene.annotate("Which forklift is closest to the doorway?")
+r3 = await scene.annotate("What products are on the middle shelf?")
+```
+
+The second and third calls reuse cached tool outputs from the first — depth
+is by far the dominant per-image cost (VGGT-1B forward or DepthPro inference),
+so this cuts wall-clock roughly proportional to the fraction of questions
+that touch depth.
+
+Binding a different image to the same agent auto-invalidates the cache.
+
 ## Testing
 
 Structural smoke tests (no models required, work on Python 3.10):

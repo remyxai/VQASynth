@@ -146,3 +146,109 @@ def test_florence_segmenter_shares_detector():
     d = FlorenceDetector(device="cpu")
     s = FlorenceSegmenter(detector=d)
     assert s._detector is d
+
+
+# ── _scene_cached decorator ────────────────────────────────────────────
+
+def test_scene_cache_hits_on_repeated_call():
+    from experiments.nooa_agent.spatial_annotator import _scene_cached
+
+    call_count = 0
+
+    class Fake:
+        @_scene_cached
+        def compute(self, image, x):
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+    fake = Fake()
+    img = object()
+    assert fake.compute(img, 5) == 10
+    assert fake.compute(img, 5) == 10
+    assert call_count == 1  # second call hit cache
+
+def test_scene_cache_misses_on_different_args():
+    from experiments.nooa_agent.spatial_annotator import _scene_cached
+
+    call_count = 0
+
+    class Fake:
+        @_scene_cached
+        def compute(self, image, x):
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+    fake = Fake()
+    img = object()
+    fake.compute(img, 5)
+    fake.compute(img, 6)   # different arg → miss
+    assert call_count == 2
+
+def test_scene_cache_invalidates_on_new_image():
+    from experiments.nooa_agent.spatial_annotator import _scene_cached
+
+    call_count = 0
+
+    class Fake:
+        @_scene_cached
+        def compute(self, image, x):
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+    fake = Fake()
+    # Bind both objects to locals so neither is GC'd — a freed object() can
+    # be re-issued at the same id, which would give a false cache hit.
+    img_a = object()
+    img_b = object()
+    fake.compute(img_a, 5)
+    fake.compute(img_b, 5)   # different object → miss
+    assert call_count == 2
+    assert fake._scene_image_ref is img_b   # strong ref pins the current image
+
+def test_scene_cache_id_reuse_footgun_avoided():
+    """Regression: if the decorator compared by id() alone, freeing img A and
+    allocating img B could reuse A's address → false cache hit. The strong
+    ref should prevent this.
+    """
+    from experiments.nooa_agent.spatial_annotator import _scene_cached
+
+    call_count = 0
+
+    class Fake:
+        @_scene_cached
+        def compute(self, image, x):
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+    fake = Fake()
+    fake.compute(object(), 5)   # ephemeral A — GC'd immediately
+    fake.compute(object(), 5)   # ephemeral B — may reuse A's id
+    # Even with id reuse, we should have missed cache on B (identity, not id)
+    assert call_count == 2
+
+def test_scene_cache_preserves_signature_for_nooa():
+    """NOOA introspects tool signatures via inspect.signature; verify the
+    decorator doesn't shadow the wrapped function's signature/annotations.
+
+    Note: this module uses ``from __future__ import annotations`` (PEP 563)
+    so annotations are stored as strings, not the actual types. NOOA-side
+    resolution via ``typing.get_type_hints`` would materialize them; we just
+    verify parameter names + docstring survive the decorator.
+    """
+    import inspect
+    from experiments.nooa_agent.spatial_annotator import _scene_cached
+
+    class Fake:
+        @_scene_cached
+        def compute(self, image: object, x: int) -> int:
+            """A tool docstring NOOA will use."""
+            return x * 2
+
+    sig = inspect.signature(Fake.compute)
+    assert list(sig.parameters) == ["self", "image", "x"]
+    assert sig.parameters["x"].annotation in (int, "int")   # PEP 563 tolerant
+    assert Fake.compute.__doc__ == "A tool docstring NOOA will use."
