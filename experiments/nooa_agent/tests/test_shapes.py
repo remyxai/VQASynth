@@ -148,6 +148,46 @@ def test_florence_segmenter_shares_detector():
     assert s._detector is d
 
 
+# ── device / dtype plumbing ────────────────────────────────────────────
+
+def test_florence_detector_accepts_device_and_dtype():
+    from experiments.nooa_agent.tools.florence import FlorenceDetector
+    d = FlorenceDetector(device="cuda:1", dtype="fp16")
+    assert d.device == "cuda:1"
+    assert d.dtype == "fp16"
+
+def test_depth_pro_accepts_device_and_dtype():
+    from experiments.nooa_agent.tools.depth import DepthProEstimator
+    d = DepthProEstimator(device="cuda", dtype="fp16")
+    assert d.device == "cuda"
+    assert d.dtype == "fp16"
+
+def test_vggt_accepts_device_and_dtype_advisory():
+    """VGGT's device/dtype are stored but advisory — SpatialSceneConstructor
+    controls the actual placement. Verify the constructor accepts them so
+    call-site signatures stay uniform across tiers."""
+    from experiments.nooa_agent.tools.depth import VggtEstimator
+    v = VggtEstimator(device="cuda:2", dtype="fp16")
+    assert v.device == "cuda:2"
+    assert v.dtype == "fp16"
+
+def test_resolve_torch_dtype_aliases():
+    import torch
+    from experiments.nooa_agent.tools.florence import _resolve_torch_dtype
+    assert _resolve_torch_dtype("fp16") is torch.float16
+    assert _resolve_torch_dtype("float16") is torch.float16
+    assert _resolve_torch_dtype("half") is torch.float16
+    assert _resolve_torch_dtype("bf16") is torch.bfloat16
+    assert _resolve_torch_dtype("fp32") is torch.float32
+    assert _resolve_torch_dtype(torch.float16) is torch.float16
+    assert _resolve_torch_dtype(None) is None
+
+def test_resolve_torch_dtype_rejects_unknown_string():
+    from experiments.nooa_agent.tools.florence import _resolve_torch_dtype
+    with pytest.raises(ValueError, match="fp32"):
+        _resolve_torch_dtype("not-a-dtype")
+
+
 # ── DepthResult repr — pinned compact so NOOA traces don't bloat ───────
 
 def test_depth_result_repr_is_compact_not_full_array():

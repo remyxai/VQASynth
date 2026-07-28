@@ -21,6 +21,30 @@ from PIL import Image
 DEGENERATE_AREA_THRESHOLD = 0.6
 
 
+def _resolve_torch_dtype(dtype: Any):
+    """Accept a torch dtype, a string alias (fp32/fp16/bf16), or None.
+
+    Returns a torch.dtype or None (meaning "let the caller pick its default").
+    Doesn't import torch when dtype is None → keeps CPU/import cost off the
+    hot path for callers that don't care about precision.
+    """
+    if dtype is None:
+        return None
+    import torch
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    if isinstance(dtype, str):
+        alias = {
+            "fp32": torch.float32, "float32": torch.float32,
+            "fp16": torch.float16, "float16": torch.float16, "half": torch.float16,
+            "bf16": torch.bfloat16, "bfloat16": torch.bfloat16,
+        }.get(dtype.lower())
+        if alias is None:
+            raise ValueError(f"Unknown dtype alias {dtype!r}; use fp32/fp16/bf16")
+        return alias
+    raise TypeError(f"dtype must be a torch.dtype, string alias, or None; got {type(dtype)}")
+
+
 @dataclass
 class Box:
     """Bounding box in pixel coordinates: x1, y1 top-left; x2, y2 bottom-right."""
@@ -43,17 +67,29 @@ class Box:
 
 
 class FlorenceDetector:
-    """CPU-tier detector: Florence-2-base with Florence-2-large escalation.
+    """Detector: Florence-2-base with Florence-2-large escalation.
 
     Escalation triggers when the base tier's detection is degenerate (single
     box > 60% of image area — the observed whole-image-fallback pattern).
+
+    Precision + device: ``dtype`` controls model precision (default fp32 for
+    safety). On GPU, ``dtype="fp16"`` roughly halves VRAM at negligible
+    accuracy cost for detection/captioning workloads. ``device`` selects the
+    specific accelerator (e.g. ``"cuda:1"``) so multi-GPU nodes can pin
+    Florence separately from the depth model.
     """
 
     BASE_MODEL = "microsoft/Florence-2-base"
     LARGE_MODEL = "microsoft/Florence-2-large"
 
-    def __init__(self, device: str = "cpu", enable_cascade: bool = True):
+    def __init__(
+        self,
+        device: str = "cpu",
+        dtype: Any = None,
+        enable_cascade: bool = True,
+    ):
         self.device = device
+        self.dtype = dtype   # torch dtype or str alias (fp32/fp16/bf16); None → fp32
         self.enable_cascade = enable_cascade
         self._base = None
         self._large = None
@@ -64,9 +100,10 @@ class FlorenceDetector:
         import torch
         from transformers import AutoModelForCausalLM, AutoProcessor
 
+        torch_dtype = _resolve_torch_dtype(self.dtype) or torch.float32
         processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(
-            model_id, trust_remote_code=True, torch_dtype=torch.float32
+            model_id, trust_remote_code=True, torch_dtype=torch_dtype
         ).to(self.device)
         model.eval()
         return processor, model

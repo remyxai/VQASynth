@@ -19,8 +19,13 @@ failure mode entirely — the tool returns real meters, no scale invention neede
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+
+# Reuse the same dtype alias resolver as the Florence tools so calling
+# conventions match across the whole tool surface.
+from experiments.nooa_agent.tools.florence import _resolve_torch_dtype
 
 
 @dataclass
@@ -49,15 +54,21 @@ class DepthResult:
 # ────────────────────────────────────────────────────────────────
 
 class DepthProEstimator:
-    """CPU-tier metric depth via Apple DepthPro.
+    """Metric depth via Apple DepthPro (works on CPU or GPU).
 
     Requires: ``pip install depth_pro`` (or install from
     ``https://github.com/apple/ml-depth-pro``).
+
+    ``device`` chooses the accelerator (e.g. ``"cuda:1"``). ``dtype`` sets
+    precision — fp16 on GPU roughly halves VRAM for the ~330M-param model
+    at negligible accuracy loss for metric depth. On CPU, dtype only affects
+    the load footprint; inference is fp32-equivalent regardless.
     """
     MODEL_ID = "apple/DepthPro"
 
-    def __init__(self, device: str = "cpu"):
+    def __init__(self, device: str = "cpu", dtype: Any = None):
         self.device = device
+        self.dtype = dtype
         self._model = None
         self._transform = None
 
@@ -65,9 +76,10 @@ class DepthProEstimator:
         # Lazy import — depth_pro isn't a mandatory VQASynth dep
         import depth_pro
         import torch
+        precision = _resolve_torch_dtype(self.dtype) or torch.float32
         self._model, self._transform = depth_pro.create_model_and_transforms(
             device=torch.device(self.device),
-            precision=torch.float32,
+            precision=precision,
         )
         self._model.eval()
 
@@ -112,9 +124,17 @@ class VggtEstimator:
     Reuses ``vqasynth.scene_fusion.SpatialSceneConstructor`` so the tool
     inherits any perf work (dtype cast, compile, AVGGT step 1) that lands
     on that surface.
+
+    Device + dtype: ``SpatialSceneConstructor`` handles its own device
+    placement + fp16 cast internally (via PR #115). ``device`` and ``dtype``
+    kwargs here are accepted for symmetry with the other tools but may not
+    take effect — pin VGGT to a specific GPU via ``CUDA_VISIBLE_DEVICES``
+    at process start if the multi-GPU case matters.
     """
 
-    def __init__(self):
+    def __init__(self, device: str | None = None, dtype: Any = None):
+        self.device = device      # advisory; SpatialSceneConstructor picks its own
+        self.dtype = dtype        # advisory; same
         self._constructor = None
 
     def _load(self):

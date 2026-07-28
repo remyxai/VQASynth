@@ -294,6 +294,11 @@ def _make_agent_class(tier: Tier, max_iterations: int = DEFAULT_MAX_ITERATIONS, 
 def SpatialAnnotator(
     tier: Tier | None = None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    *,
+    florence_device: str | None = None,
+    florence_dtype: Any = None,
+    depth_device: str | None = None,
+    depth_dtype: Any = None,
     **class_kwargs,
 ):
     """Construct a SpatialAnnotator for the given (or auto-detected) tier.
@@ -302,16 +307,41 @@ def SpatialAnnotator(
         tier: 'cpu' or 'gpu'. If None, uses :func:`detect_tier` heuristic.
         max_iterations: cap on the CodeAct reasoning loop for ``annotate()``.
             Bump if you see the agent hitting the limit on complex scenes.
+        florence_device: device string (e.g. ``"cuda:1"``) for Florence-2.
+            Defaults to the tier's canonical device (cpu / cuda:0).
+        florence_dtype: precision for Florence-2. Accepts a torch dtype or
+            string alias (``"fp32"`` / ``"fp16"`` / ``"bf16"``). Defaults to
+            fp32 for safety. On GPU, ``"fp16"`` roughly halves VRAM.
+        depth_device: device for the depth backend. CPU-tier depth uses
+            DepthPro; GPU-tier uses VGGT (VGGT device is controlled by
+            ``CUDA_VISIBLE_DEVICES`` — this kwarg is advisory for VGGT).
+        depth_dtype: precision for the depth backend. Same aliases as above.
         **class_kwargs: forwarded to NOOA's class-level configuration hook
-            (e.g. ``llm=...``, matching NOOA's ``class Agent(Base, llm=llm):``
-            quickstart pattern).
+            (e.g. ``llm=...``).
+
+    Multi-GPU pattern (put Florence on cuda:1, VGGT on cuda:0)::
+
+        # Pin VGGT to a specific GPU via env at process start
+        # $ CUDA_VISIBLE_DEVICES=0,1 python ...
+        agent = SpatialAnnotator(
+            tier="gpu",
+            florence_device="cuda:1",     # detection on second GPU
+            florence_dtype="fp16",         # save VRAM on both
+            depth_dtype="fp16",
+        )
     """
     if tier is None:
         tier = detect_tier()
 
-    detector = FlorenceDetector(device="cpu" if tier == "cpu" else "cuda")
+    fd_device = florence_device or ("cpu" if tier == "cpu" else "cuda")
+    detector = FlorenceDetector(device=fd_device, dtype=florence_dtype)
     segmenter = FlorenceSegmenter(detector=detector)
-    depth = VggtEstimator() if tier == "gpu" else DepthProEstimator(device="cpu")
+
+    if tier == "gpu":
+        depth = VggtEstimator(device=depth_device, dtype=depth_dtype)
+    else:
+        dd_device = depth_device or "cpu"
+        depth = DepthProEstimator(device=dd_device, dtype=depth_dtype)
 
     AgentCls = _make_agent_class(tier, max_iterations=max_iterations, **class_kwargs)
     return AgentCls(detector=detector, segmenter=segmenter, depth=depth)

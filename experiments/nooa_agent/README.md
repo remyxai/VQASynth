@@ -166,6 +166,76 @@ def anthropic_serialize(trace):
 writer = TraceWriter("/data/traces.jsonl", serializer=anthropic_serialize)
 ```
 
+## Device + precision control
+
+By default the CPU tier lands everything on `cpu` fp32 (~6-7 GB RAM peak
+after cascade + depth are warm), and the GPU tier lands everything on
+`cuda:0` fp32 (~8 GB VRAM peak). For multi-GPU pinning or fp16 to halve
+VRAM, pass per-tool overrides:
+
+```python
+agent = SpatialAnnotator(
+    tier="gpu",
+    florence_device="cuda:1",     # detection on second GPU
+    florence_dtype="fp16",         # ~1 GB → ~0.5 GB base, ~3 GB → ~1.5 GB large
+    depth_dtype="fp16",            # halves DepthPro / VGGT VRAM likewise
+)
+```
+
+`dtype` accepts `torch.float32` / `torch.float16` / `torch.bfloat16` or
+their string aliases (`"fp32"` / `"fp16"` / `"bf16"`). VGGT device placement
+is controlled by ``SpatialSceneConstructor`` — pin via
+``CUDA_VISIBLE_DEVICES=<n>`` at process start when the multi-GPU case matters.
+
+## End-to-end example: batch labeling with trace capture
+
+Ties together the whole surface — auto-tier detection, per-image caching,
+tool-driven answering, and JSONL-per-annotate capture in Qwen VL format:
+
+```python
+from PIL import Image
+from experiments.nooa_agent.spatial_annotator import SpatialAnnotator, SceneContext
+from experiments.nooa_agent.trace import TraceWriter
+from nooa.unifiedllm.registry import get_llm_client
+
+# Auto-tier (CPU→DepthPro, GPU→VGGT). Half-precision on GPU cuts VRAM ~2×.
+llm = get_llm_client("gemini/gemini-2.5-pro")
+agent = SpatialAnnotator(
+    llm=llm,
+    max_iterations=20,
+    florence_dtype="fp16",   # ignored on CPU tier (no VRAM to save)
+    depth_dtype="fp16",
+)
+
+QUESTIONS_PER_IMAGE = [
+    "How far apart are the two workers in the foreground?",   # → detect + depth + distance_3d
+    "Which forklift is closest to the doorway?",              # → detect + depth ordering
+    "What items are visible on the middle shelves?",          # → dense_region_captions
+    "Is the taller worker on the left or right?",             # → detect + pixel_relative_position
+]
+
+image_paths = ["/data/warehouse_01.jpg", "/data/warehouse_02.jpg"]
+
+with TraceWriter("/data/spatial_traces.jsonl") as writer:
+    for img_path in image_paths:
+        img = Image.open(img_path).convert("RGB")
+        # Bind the image ONCE; each question below reuses cached Florence
+        # outputs + metric depth from the first question that computed them.
+        scene = SceneContext(agent, img, trace_writer=writer, image_ref=img_path)
+
+        for q in QUESTIONS_PER_IMAGE:
+            result = await scene.annotate(q)
+            print(f"[{img_path}]  Q: {q}")
+            print(f"  A: {result.answer}")
+            print(f"  confidence: {result.confidence}, {result.tool_calls_used} tool calls")
+
+        agent.clear_scene()   # optional — SceneContext binding auto-invalidates
+```
+
+Each `annotate()` call appends one Qwen-shaped JSONL row to
+``/data/spatial_traces.jsonl``, ready to feed
+``tokenizer.apply_chat_template()`` for fine-tuning Qwen2.5-VL or Qwen3-VL.
+
 ## Testing
 
 Structural smoke tests (no models required, work on Python 3.10):
