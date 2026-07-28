@@ -123,6 +123,36 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Evaluate SpaceThinker on QSpatial++ | Assess SpaceThinker's quantitative spatial reasoning on the QSpatial++ benchmark | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1buEe2QC4_pnrJwQ9XyRAH7RfaIa6pbex?usp=sharing) |
 | SpaceLLaVA Attention with TransformerLens | Visualize SpaceLLaVA-7B attention patterns using TransformerLens | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/19H_hOL8gc1nFQKpDoioJR8nDWX1lsNZM?usp=sharing) |
 
+## Agent with VQASynth Tools
+
+The VQASynth tool inventory — Florence-2 detection/OCR, DepthPro/VGGT metric depth, 3D distance measurement — is also exposed as an [NOOA](https://github.com/NVIDIA-NeMo/labs-OO-Agents)-based agent (`experiments/nooa_agent/`) that composes tool calls dynamically per prompt rather than following a pre-templated pipeline. Useful when the input question isn't known at pipeline-design time.
+
+- **Dynamic tool composition** — the LLM decides which tools to call and in what order per question. `detect_objects → metric_depth → distance_3d` for a "how far apart" query; `caption_scene → dense_region_captions` for a scene inventory. No pre-coded question types.
+- **Dense reward annotation** — plug into a robot-learning pipeline as a per-frame reward or CoT source. The agent satisfies [`lerobot`](https://github.com/huggingface/lerobot)'s `VlmClient` protocol via `SpatialAnnotatorVlmClient`, so it drops into any annotation module (VQA, plan, ECoT) as a tool-grounded alternative to a raw VLM call.
+- **Traces grounded on tool calls** — every `annotate()` streams a JSONL row in OpenAI-messages format (ready for Qwen2.5-VL / Qwen3-VL fine-tuning) preserving the full tool-call chain, not just the final answer. Reasoning stays auditable.
+
+Quick example:
+
+```python
+from PIL import Image
+from experiments.nooa_agent.spatial_annotator import SpatialAnnotator, SceneContext
+from experiments.nooa_agent.trace import TraceWriter
+from nooa.unifiedllm.registry import get_llm_client
+
+agent = SpatialAnnotator(llm=get_llm_client("gemini/gemini-2.5-pro"))
+img = Image.open("warehouse.jpg").convert("RGB")
+
+with TraceWriter("traces.jsonl") as writer:
+    scene = SceneContext(agent, img, trace_writer=writer, image_ref="warehouse.jpg")
+    result = await scene.annotate("How far apart are the two workers in the foreground?")
+
+print(result.answer)            # "The two workers in the foreground are 2.04 meters apart."
+print(result.confidence)        # "high"
+print(result.tool_calls_used)   # 4
+```
+
+See `experiments/nooa_agent/README.md` for install, resource tiers (CPU with DepthPro / GPU with VGGT), the full tool inventory, and the lerobot integration path.
+
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
 ```
