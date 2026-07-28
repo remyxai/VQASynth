@@ -236,6 +236,57 @@ Each `annotate()` call appends one Qwen-shaped JSONL row to
 ``/data/spatial_traces.jsonl``, ready to feed
 ``tokenizer.apply_chat_template()`` for fine-tuning Qwen2.5-VL or Qwen3-VL.
 
+## Using as a lerobot `VlmClient`
+
+`SpatialAnnotator` satisfies lerobot's steerable-annotation `VlmClient`
+protocol via a thin adapter, so it drops into any annotation module that
+consumes a `VlmClient` — the existing `Vqa`/`Plan` modules, the pending
+`EcotReasoningModule` in [huggingface/lerobot#4036](https://github.com/huggingface/lerobot/pull/4036),
+or any future module built on the same protocol. Every call routes through
+the full CodeAct + tool-grounded loop (detect + metric depth + distance_3d
+as the LLM composes them) before the JSON response is returned.
+
+**Standalone example — no lerobot required:**
+
+```python
+from PIL import Image
+from experiments.nooa_agent.spatial_annotator import SpatialAnnotator
+from experiments.nooa_agent.lerobot_adapter import SpatialAnnotatorVlmClient
+from nooa.unifiedllm.registry import get_llm_client
+
+llm = get_llm_client("gemini/gemini-2.5-pro")
+agent = SpatialAnnotator(llm=llm, max_iterations=12)
+vlm = SpatialAnnotatorVlmClient(annotator=agent)
+
+image = Image.open("frame.jpg").convert("RGB")
+result = vlm.generate_json([[{
+    "role": "user", "content": [
+        {"type": "image", "image": image},
+        {"type": "text", "text": (
+            "Reply with strictly valid JSON: "
+            '{"scene_perception": "<text>", "objects": [<name>, ...], '
+            '"gripper_target_distance_cm": <number>}'
+        )},
+    ],
+}]])
+# → [{"scene_perception": "...", "objects": [...], "gripper_target_distance_cm": 8.3}]
+```
+
+The `generate_json` signature (`messages_batch → list[Any]`) is the entire
+`VlmClient` protocol — the same surface every module in lerobot's steerable
+pipeline calls. Whatever JSON schema the calling prompt specifies, the
+adapter returns that JSON parsed. We intentionally hard-code **no**
+schema-specific handling here: if PR #4036's ECoT 4-field format is
+restructured in review, or if a different module wants a different schema
+tomorrow, this adapter still works unchanged.
+
+**To use with lerobot's pipeline:** configure the pipeline's `VlmClient`
+factory to construct `SpatialAnnotatorVlmClient` instead of the default
+Qwen backend. Every anchor's contact sheet + prompt goes through our
+agent; the reasoning stays auditable via `agent.event_manager.values()`
+and (if a `trace_writer` is bound to the `SceneContext`) streams to JSONL
+alongside whatever the pipeline writes.
+
 ## Testing
 
 Structural smoke tests (no models required, work on Python 3.10):
