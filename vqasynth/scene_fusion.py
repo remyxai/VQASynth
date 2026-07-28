@@ -176,12 +176,46 @@ def restore_pointclouds(pointcloud_paths):
     return restored_pointclouds
 
 class SpatialSceneConstructor:
-    def __init__(self):
+    def __init__(self, compile_aggregator: bool = False, avggt_step1: bool = False):
         """
         Initialize the constructor and load the VGGT model.
+
+        Args:
+            compile_aggregator: if True, wrap ``model.aggregator`` with
+                ``torch.compile(mode="reduce-overhead")``. Off by default —
+                measured wins on T4 are modest (~1.09× at S=1) and VGGT's
+                rope layer triggers a dynamo graph break on the
+                ``int(positions.max())`` scalar-tensor conversion, producing
+                warmup cost + warning spam. Ampere+ users on longer-running
+                workloads may want to opt in; consider also setting
+                ``torch._dynamo.config.capture_scalar_outputs = True`` to
+                trace through the rope graph break.
+            avggt_step1: if True (or env var ``VQASYNTH_AVGGT_STEP1=1``),
+                apply AVGGT Step 1 (early-global-as-frame attention). See
+                :mod:`vqasynth.vggt_speedups` for details. Off by default;
+                measured neutral at S≤4 (VQASynth's current call pattern);
+                begins paying off at S≥15+.
         """
-        self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
+        # Cast weights to the target dtype instead of loading fp32 and relying
+        # on autocast alone — cuts weight memory in half and lets the kernel
+        # scheduler pick fp16/bf16 paths from the first call. VGGT uses
+        # PyTorchModelHubMixin which doesn't intercept torch_dtype the way
+        # transformers.PretrainedModel does, so cast happens in the .to() call.
+        # Integer buffers are preserved (nn.Module.to only casts floating tensors).
+        self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(device=device, dtype=dtype)
         self.model.eval()
+
+        if avggt_step1 or os.environ.get("VQASYNTH_AVGGT_STEP1") == "1":
+            from vqasynth.vggt_speedups import apply_avggt_step1
+            apply_avggt_step1(self.model, early_g2f=9)
+
+        if compile_aggregator and os.environ.get("VQASYNTH_DISABLE_COMPILE") != "1":
+            try:
+                self.model.aggregator = torch.compile(
+                    self.model.aggregator, mode="reduce-overhead"
+                )
+            except Exception as e:  # older torch, unsupported backend, etc.
+                print(f"[SpatialSceneConstructor] torch.compile disabled ({type(e).__name__}: {e})")
 
     def save_pointcloud(self, pcd, file_path):
         o3d.io.write_point_cloud(file_path, pcd)
