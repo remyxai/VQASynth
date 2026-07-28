@@ -102,8 +102,35 @@ def _dump_answer(answer: Any) -> dict:
 # by path (``image_ref``); the training data loader resolves them.
 
 
+# NOOA event_type strings are the CLASS NAME (auto-derived via
+# EventBase.model_post_init from type(self).__name__). Verified against
+# nooa/context_blocks/events.py + nooa/events.py — no explicit overrides.
+# The codeact_event_sequence.py example uses lowercase strings that would
+# never match; treat that example as broken and match source-of-truth.
+
+_TASK = "Task"
+_TOOL_CALL = "ToolCallEvent"
+_PYTHON_OUTPUT = "PythonOutput"
+_ASSISTANT_TEXT_EVENTS = frozenset({"Message", "LLMOutput", "TextOnlyReply", "AssistantEvent"})
+# Skipped: DebugTrace (METADATA), Error (retry signal shown to LLM for retry
+# but not canonical dialog), Feedback (execution-feedback nudge), Reasoning
+# (legacy — no longer emitted), lifecycle hooks (BeforeTurn/AfterTurn/
+# BeforeAgentCall/AfterAgentCall/LLMCallStart/LLMCallEnd), Notification,
+# Summary (compaction artifact), TuiSession*, Metadata subclasses.
+
+
 def qwen_vl_serialize(trace: AnnotateTrace) -> dict:
-    """Serialize AnnotateTrace → OpenAI-messages dict for Qwen VL fine-tuning."""
+    """Serialize AnnotateTrace → OpenAI-messages dict for Qwen VL fine-tuning.
+
+    NOOA specifics that shape this transform:
+    - ``ToolCallEvent`` holds its ``result: ToolResult | None`` INLINE, not
+      as a separate event. We emit both the assistant tool_call and the tool
+      tool_result from the one ToolCallEvent.
+    - ``PythonOutput`` is a separate event, ONLY emitted for the CodeAct
+      ``execute_python`` path. For our SpatialAnnotator (typed tool methods,
+      no CodeAct), we'll see ToolCallEvent-with-inline-result, not PythonOutput.
+      Handled both ways so a CodeAct-enabled variant would just work.
+    """
     messages: list[dict] = []
 
     if trace.system_prompt or trace.tool_schema:
@@ -115,53 +142,60 @@ def qwen_vl_serialize(trace: AnnotateTrace) -> dict:
     for ev in trace.events:
         etype = ev.get("event_type", "")
 
-        if etype == "task":
-            # Initial user turn: image + question
-            content: list[dict] = []
-            for _ in ev.get("images", []):
-                content.append({"type": "image", "image": trace.image_ref})
-            if not content:  # no images captured — synthesize one from image_ref
-                content.append({"type": "image", "image": trace.image_ref})
+        if etype == _TASK:
+            # Initial user turn: image + question. NOOA's Task.images is
+            # list[dict] of multimodal content blocks (opaque to us — could
+            # be data URLs, file refs, or PIL wrappers). We ignore the inline
+            # blocks and reference the image by path via trace.image_ref.
+            content: list[dict] = [{"type": "image", "image": trace.image_ref}]
             content.append({"type": "text", "text": ev.get("prompt", trace.question)})
             messages.append({"role": "user", "content": content})
 
-        elif etype == "tool_call":
+        elif etype == _TOOL_CALL:
+            # Assistant emits the tool_call
+            call_id = ev.get("tool_call_id", "")
             args = ev.get("arguments", {})
             args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args)
             messages.append({
                 "role": "assistant",
-                "content": ev.get("reasoning") or None,
+                "content": None,
                 "tool_calls": [{
-                    "id": ev.get("tool_call_id", ""),
+                    "id": call_id,
                     "type": "function",
                     "function": {
-                        "name": ev.get("name") or ev.get("tool_name", "unknown"),
+                        "name": ev.get("name", "unknown"),
                         "arguments": args_str,
                     },
                 }],
             })
+            # Then emit the tool result from the NESTED result field
+            nested = ev.get("result")
+            if isinstance(nested, dict):
+                # ToolResult carries `content: str` + `result_status`
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": nested.get("tool_call_id", call_id),
+                    "content": nested.get("content", ""),
+                })
 
-        elif etype in ("tool_result", "python_output"):
-            # Prefer error over value if the call failed
-            error = ev.get("error")
-            value = ev.get("value")
-            if value is None:
-                value = ev.get("stdout") or ev.get("content") or ""
-            content_str = str(error) if error else str(value)
+        elif etype == _PYTHON_OUTPUT:
+            # CodeAct execute_python output — separate event, ResultStatus
+            # enum + stdout/stderr fields. Prefer stderr if execution errored.
+            call_id = ev.get("tool_call_id", "")
+            status = ev.get("execution_status", "")
+            stdout = ev.get("stdout", "") or ""
+            stderr = ev.get("stderr", "") or ""
+            content = stderr if str(status).lower().endswith("error") and stderr else stdout
             messages.append({
                 "role": "tool",
-                "tool_call_id": ev.get("tool_call_id", ""),
-                "content": content_str,
+                "tool_call_id": call_id,
+                "content": str(content),
             })
 
-        elif etype == "message":
+        elif etype in _ASSISTANT_TEXT_EVENTS:
             text = ev.get("content", "")
             if text:
                 messages.append({"role": "assistant", "content": text})
-
-        # Silently skip: debug_trace (METADATA role), error (retry signal),
-        # feedback (execution feedback shown to the LLM but not part of the
-        # canonical dialog for training).
 
     return {
         "messages": messages,

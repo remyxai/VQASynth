@@ -24,30 +24,44 @@ from experiments.nooa_agent.trace import (
 
 
 # ── Mock NOOA event shapes ─────────────────────────────────────────────
-# Match NOOA's pydantic BaseModel + event_type attribute pattern.
+# Match NOOA's actual event schemas verified against nooa/context_blocks/
+# events.py + nooa/events.py:
+# - event_type is the CLASS NAME (auto-derived, PascalCase)
+# - ToolCallEvent holds its result INLINE via a nested `result` field
+#   (ToolResult with tool_call_id + content + result_status)
+# - PythonOutput is a SEPARATE event (only for CodeAct execute_python)
 
 class _MockTask(BaseModel):
-    event_type: str = "task"
+    event_type: str = "Task"
     prompt: str
     images: list[dict] = []
 
 
-class _MockToolCall(BaseModel):
-    event_type: str = "tool_call"
+class _MockToolCallEvent(BaseModel):
+    """Mirrors nooa.context_blocks.events.ToolCallEvent — result is nested."""
+    event_type: str = "ToolCallEvent"
     tool_call_id: str
     name: str
     arguments: dict
+    result: dict | None = None    # ToolResult dict: {tool_call_id, content, result_status}
 
 
-class _MockToolResult(BaseModel):
-    event_type: str = "tool_result"
+class _MockPythonOutput(BaseModel):
+    """CodeAct execute_python output — only relevant if CodeAct is enabled."""
+    event_type: str = "PythonOutput"
     tool_call_id: str
-    value: Any = None
-    error: str | None = None
+    execution_status: str = "complete"   # ResultStatus enum's str form
+    stdout: str = ""
+    stderr: str = ""
 
 
 class _MockMessage(BaseModel):
-    event_type: str = "message"
+    event_type: str = "Message"
+    content: str
+
+
+class _MockLLMOutput(BaseModel):
+    event_type: str = "LLMOutput"
     content: str
 
 
@@ -78,9 +92,12 @@ def test_capture_trace_grabs_only_delta_since_index():
     only include events at/after since_event_idx."""
     events = [
         _MockTask(prompt="old task"),
-        _MockToolCall(tool_call_id="a1", name="old_tool", arguments={}),
+        _MockToolCallEvent(tool_call_id="a1", name="old_tool", arguments={}),
         _MockTask(prompt="current task"),                          # index 2
-        _MockToolCall(tool_call_id="b1", name="detect_objects", arguments={"phrase": "worker"}),
+        _MockToolCallEvent(tool_call_id="b1", name="detect_objects",
+                           arguments={"phrase": "worker"},
+                           result={"tool_call_id": "b1", "content": "[Box(...)]",
+                                   "result_status": "complete"}),
         _MockMessage(content="Done."),
     ]
     agent = _MockAgent(events)
@@ -94,10 +111,12 @@ def test_capture_trace_grabs_only_delta_since_index():
         since_event_idx=2,  # skip the first two "old" events
     )
     assert len(trace.events) == 3
-    assert trace.events[0]["event_type"] == "task"
+    assert trace.events[0]["event_type"] == "Task"
     assert trace.events[0]["prompt"] == "current task"
-    assert trace.events[1]["event_type"] == "tool_call"
+    assert trace.events[1]["event_type"] == "ToolCallEvent"
     assert trace.events[1]["arguments"] == {"phrase": "worker"}
+    # Nested result carries through the dump
+    assert trace.events[1]["result"]["content"] == "[Box(...)]"
     assert trace.events[2]["content"] == "Done."
 
 
@@ -119,22 +138,26 @@ def test_capture_trace_serializes_answer_fields():
 # ── qwen_vl_serialize ──────────────────────────────────────────────────
 
 def test_qwen_serialize_emits_openai_messages_shape():
+    """ToolCallEvent has result NESTED — one event, two output messages."""
     trace = AnnotateTrace(
         image_ref="/data/warehouse.jpg",
         question="How far apart are the two workers?",
         system_prompt="You are a spatial annotation agent.",
         events=[
-            {"event_type": "task", "prompt": "How far apart are the two workers?",
+            {"event_type": "Task", "prompt": "How far apart are the two workers?",
              "images": [{"placeholder": "yes"}]},
-            {"event_type": "tool_call", "tool_call_id": "c1",
-             "name": "detect_objects", "arguments": {"phrase": "worker"}},
-            {"event_type": "tool_result", "tool_call_id": "c1",
-             "value": "[Box(x1=100, ...), Box(x1=400, ...)]"},
-            {"event_type": "tool_call", "tool_call_id": "c2",
-             "name": "distance_3d", "arguments": {"box_a": "...", "box_b": "..."}},
-            {"event_type": "tool_result", "tool_call_id": "c2",
-             "value": "{'distance_m': 2.04}"},
-            {"event_type": "message",
+            {"event_type": "ToolCallEvent", "tool_call_id": "c1",
+             "name": "detect_objects", "arguments": {"phrase": "worker"},
+             "result": {"tool_call_id": "c1",
+                        "content": "[Box(x1=100, ...), Box(x1=400, ...)]",
+                        "result_status": "complete"}},
+            {"event_type": "ToolCallEvent", "tool_call_id": "c2",
+             "name": "distance_3d",
+             "arguments": {"box_a": "...", "box_b": "..."},
+             "result": {"tool_call_id": "c2",
+                        "content": "{'distance_m': 2.04}",
+                        "result_status": "complete"}},
+            {"event_type": "LLMOutput",
              "content": "The two workers are 2.04 meters apart."},
         ],
         final_answer={"answer": "...", "confidence": "medium",
@@ -144,64 +167,107 @@ def test_qwen_serialize_emits_openai_messages_shape():
     out = qwen_vl_serialize(trace)
     msgs = out["messages"]
 
-    # System first, then user, then alternating assistant/tool, ending assistant
+    # System first, then user, then two assistant+tool pairs, then final assistant
     assert msgs[0]["role"] == "system"
     assert msgs[1]["role"] == "user"
-    # User content should be a list with image + text blocks
     user_content = msgs[1]["content"]
     assert any(b.get("type") == "image" and b.get("image") == "/data/warehouse.jpg"
                for b in user_content)
     assert any(b.get("type") == "text" and "workers" in b.get("text", "")
                for b in user_content)
 
-    # Two tool_call/tool_result cycles + final assistant
+    # Two ToolCallEvents → 2 assistant + 2 tool messages
     tool_call_msgs = [m for m in msgs if m["role"] == "assistant" and m.get("tool_calls")]
     assert len(tool_call_msgs) == 2
-    # Arguments should be JSON-string, per OpenAI format
     args_str = tool_call_msgs[0]["tool_calls"][0]["function"]["arguments"]
     assert json.loads(args_str) == {"phrase": "worker"}
 
     tool_result_msgs = [m for m in msgs if m["role"] == "tool"]
     assert len(tool_result_msgs) == 2
     assert tool_result_msgs[0]["tool_call_id"] == "c1"
+    assert "Box" in tool_result_msgs[0]["content"]
+
+    # LLMOutput becomes the final assistant text (no tool_calls key)
+    final = [m for m in msgs if m["role"] == "assistant" and not m.get("tool_calls")][-1]
+    assert "2.04 meters" in final["content"]
 
     # Meta block carries the summary — useful for filtering the dataset later
     assert out["meta"]["confidence"] == "medium"
     assert out["meta"]["image_ref"] == "/data/warehouse.jpg"
 
 
-def test_qwen_serialize_tool_result_prefers_error_over_value():
-    """If a tool errored, the error message should surface to the LLM
-    (that's how NOOA feeds it back for retry), not the empty/None value."""
+def test_qwen_serialize_python_output_from_codeact_path():
+    """PythonOutput is only emitted for CodeAct execute_python. Verify we
+    still handle it correctly so a CodeAct-enabled variant would just work."""
     trace = AnnotateTrace(
         image_ref="x", question="q", system_prompt="",
         events=[
-            {"event_type": "tool_result", "tool_call_id": "c1",
-             "value": None, "error": "ImportError: numpy 2.0 incompat"},
+            {"event_type": "PythonOutput", "tool_call_id": "c1",
+             "execution_status": "complete",
+             "stdout": "median distance: 3.42m", "stderr": ""},
         ],
         final_answer={"answer": "", "confidence": "low",
-                      "supporting_evidence": [], "tool_calls_used": 0},
+                      "supporting_evidence": [], "tool_calls_used": 1},
         wall_clock_s=0.0,
     )
     out = qwen_vl_serialize(trace)
     tool_msg = [m for m in out["messages"] if m["role"] == "tool"][0]
-    assert "numpy" in tool_msg["content"]
+    assert "3.42m" in tool_msg["content"]
 
 
-def test_qwen_serialize_synthesizes_image_block_when_task_has_no_images():
-    """Even if the task event didn't carry an image block, the trace's
-    image_ref means there WAS an image — surface it in the user turn so
-    the training row is complete."""
+def test_qwen_serialize_python_output_prefers_stderr_on_error_status():
+    """When execute_python errored, stderr carries the useful diagnostic."""
+    trace = AnnotateTrace(
+        image_ref="x", question="q", system_prompt="",
+        events=[
+            {"event_type": "PythonOutput", "tool_call_id": "c1",
+             "execution_status": "error",
+             "stdout": "", "stderr": "NameError: name 'foo' is not defined"},
+        ],
+        final_answer={"answer": "", "confidence": "low",
+                      "supporting_evidence": [], "tool_calls_used": 1},
+        wall_clock_s=0.0,
+    )
+    out = qwen_vl_serialize(trace)
+    tool_msg = [m for m in out["messages"] if m["role"] == "tool"][0]
+    assert "NameError" in tool_msg["content"]
+
+
+def test_qwen_serialize_always_emits_image_block_from_image_ref():
+    """We ignore NOOA's opaque Task.images and reference by image_ref."""
     trace = AnnotateTrace(
         image_ref="/data/warehouse.jpg", question="q", system_prompt="",
-        events=[{"event_type": "task", "prompt": "q", "images": []}],
+        events=[{"event_type": "Task", "prompt": "q", "images": []}],
         final_answer={"answer": "", "confidence": "low",
                       "supporting_evidence": [], "tool_calls_used": 0},
         wall_clock_s=0.0,
     )
     out = qwen_vl_serialize(trace)
     user_content = out["messages"][0]["content"]  # no system → user is first
-    assert any(b.get("type") == "image" for b in user_content)
+    image_blocks = [b for b in user_content if b.get("type") == "image"]
+    assert len(image_blocks) == 1
+    assert image_blocks[0]["image"] == "/data/warehouse.jpg"
+
+
+def test_qwen_serialize_tool_call_without_nested_result_still_emits_call():
+    """ToolCallEvent.result is Optional — an in-flight call (result not yet
+    filled) should still emit the assistant tool_call message, just no tool
+    tool_result. Rare but possible if annotate() is captured mid-stream."""
+    trace = AnnotateTrace(
+        image_ref="x", question="q", system_prompt="",
+        events=[
+            {"event_type": "ToolCallEvent", "tool_call_id": "c1",
+             "name": "detect_objects", "arguments": {"phrase": "worker"},
+             "result": None},
+        ],
+        final_answer={"answer": "", "confidence": "low",
+                      "supporting_evidence": [], "tool_calls_used": 1},
+        wall_clock_s=0.0,
+    )
+    out = qwen_vl_serialize(trace)
+    roles = [m["role"] for m in out["messages"]]
+    assert "assistant" in roles
+    assert "tool" not in roles
 
 
 # ── TraceWriter ────────────────────────────────────────────────────────
