@@ -40,13 +40,25 @@ Future tiers not in the initial branch:
 ## Install
 
 ```bash
-# Python 3.12+ environment
+# Python 3.12+ environment (NOOA constraint)
 pip install "nooa @ git+https://github.com/NVIDIA-NeMo/labs-OO-Agents.git@main"
 pip install -e .                                    # VQASynth itself
-pip install depth_pro                               # CPU tier only
-# Or install from source:
-# pip install git+https://github.com/apple/ml-depth-pro
 ```
+
+**CPU tier — DepthPro** (only needed if not using the GPU tier). No PyPI
+package exists; install from source + download weights:
+
+```bash
+pip install git+https://github.com/apple/ml-depth-pro
+huggingface-cli download --local-dir checkpoints apple/DepthPro
+```
+
+The `depth_pro.create_model_and_transforms()` call defaults to loading
+weights from `./checkpoints/depth_pro.pt`, so run subsequent commands
+from the directory containing `checkpoints/`.
+
+**GPU tier — VGGT** is installed transitively via `vqasynth[all]` — no
+extra step; see the VQASynth root README for the CUDA install path.
 
 ## Quick start
 
