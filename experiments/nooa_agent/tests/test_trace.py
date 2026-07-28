@@ -184,7 +184,9 @@ def test_qwen_serialize_emits_openai_messages_shape():
 
     tool_result_msgs = [m for m in msgs if m["role"] == "tool"]
     assert len(tool_result_msgs) == 2
-    assert tool_result_msgs[0]["tool_call_id"] == "c1"
+    # ids are shortened; verify each tool_result matches its preceding call
+    assert tool_result_msgs[0]["tool_call_id"] == tool_call_msgs[0]["tool_calls"][0]["id"]
+    assert tool_result_msgs[1]["tool_call_id"] == tool_call_msgs[1]["tool_calls"][0]["id"]
     assert "Box" in tool_result_msgs[0]["content"]
 
     # LLMOutput becomes the final assistant text (no tool_calls key)
@@ -247,6 +249,158 @@ def test_qwen_serialize_always_emits_image_block_from_image_ref():
     image_blocks = [b for b in user_content if b.get("type") == "image"]
     assert len(image_blocks) == 1
     assert image_blocks[0]["image"] == "/data/warehouse.jpg"
+
+
+def test_qwen_serialize_skips_prefill_events():
+    """CodeAct emits input-inspection code as a 'prefill_*' ToolCallEvent +
+    matching PythonOutput at the top of every generation. It's noise, not
+    substantive reasoning — must not appear in training rows."""
+    trace = AnnotateTrace(
+        image_ref="/data/img.jpg", question="q", system_prompt="",
+        events=[
+            {"event_type": "Task", "prompt": "system-formatted task", "images": []},
+            {"event_type": "ToolCallEvent",
+             "tool_call_id": "prefill_abc123",
+             "name": "execute_python",
+             "arguments": {"code": "pprint(image)"},
+             "result": {"content": "status: complete", "result_status": "complete"}},
+            {"event_type": "PythonOutput",
+             "tool_call_id": "prefill_abc123",
+             "execution_status": "complete", "stdout": "<PIL...>", "stderr": ""},
+            {"event_type": "ToolCallEvent",
+             "tool_call_id": "call_real_thing",
+             "name": "execute_python",
+             "arguments": {"code": "workers = self.detect_objects(image, phrase='worker')"},
+             "result": {"content": "status: complete", "result_status": "complete"}},
+            {"event_type": "PythonOutput",
+             "tool_call_id": "call_real_thing",
+             "execution_status": "complete", "stdout": "[Box(...)]", "stderr": ""},
+        ],
+        final_answer={"answer": "", "confidence": "high",
+                      "supporting_evidence": [], "tool_calls_used": 1},
+        wall_clock_s=0.0,
+    )
+    out = qwen_vl_serialize(trace)
+    # No prefill code, no prefill output should surface
+    joined = json.dumps(out)
+    assert "pprint(image)" not in joined
+    assert "<PIL..." not in joined
+    assert "detect_objects" in joined  # the real call did make it
+
+
+def test_qwen_serialize_execute_python_pairs_with_python_output_only():
+    """execute_python's nested ToolResult is just 'status: complete' — the
+    real output arrives in the subsequent PythonOutput event. Emitting both
+    would double-count."""
+    trace = AnnotateTrace(
+        image_ref="x", question="q", system_prompt="",
+        events=[
+            {"event_type": "ToolCallEvent",
+             "tool_call_id": "c1", "name": "execute_python",
+             "arguments": {"code": "print('hi')"},
+             "result": {"tool_call_id": "c1", "content": "status: complete",
+                        "result_status": "complete"}},
+            {"event_type": "PythonOutput", "tool_call_id": "c1",
+             "execution_status": "complete", "stdout": "hi\n", "stderr": ""},
+        ],
+        final_answer={"answer": "", "confidence": "low",
+                      "supporting_evidence": [], "tool_calls_used": 1},
+        wall_clock_s=0.0,
+    )
+    out = qwen_vl_serialize(trace)
+    tool_msgs = [m for m in out["messages"] if m["role"] == "tool"]
+    # Exactly ONE tool result — from PythonOutput, not the nested "status: complete"
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["content"].strip() == "hi"
+    assert "status: complete" not in tool_msgs[0]["content"]
+
+
+def test_qwen_serialize_return_result_has_no_paired_tool_result():
+    """return_result is the completion signal; its nested 'Result accepted'
+    is protocol chatter, not training-useful. The final assistant tool_call
+    should stand alone."""
+    trace = AnnotateTrace(
+        image_ref="x", question="q", system_prompt="",
+        events=[
+            {"event_type": "ToolCallEvent",
+             "tool_call_id": "final", "name": "return_result",
+             "arguments": {"result": "SpatialAnswer(answer='...', ...)"},
+             "result": {"tool_call_id": "final",
+                        "content": "Result accepted (inline).",
+                        "result_status": "complete"}},
+        ],
+        final_answer={"answer": "...", "confidence": "high",
+                      "supporting_evidence": [], "tool_calls_used": 1},
+        wall_clock_s=0.0,
+    )
+    out = qwen_vl_serialize(trace)
+    roles = [m["role"] for m in out["messages"]]
+    assert "assistant" in roles     # return_result did emit
+    assert "tool" not in roles       # no paired tool result
+
+
+def test_qwen_serialize_short_ids_replace_thought_token_ids():
+    """NOOA embeds Gemini's thinking-model reasoning tokens in tool_call_ids.
+    They're hundreds of chars of opaque base64. Remap to sequential call_1,
+    call_2, ... within one trace so training rows are readable + consistent."""
+    long_id_1 = "call_5ed555abb9__thought__" + "x" * 200
+    long_id_2 = "call_ae0de849__thought__" + "y" * 200
+    trace = AnnotateTrace(
+        image_ref="x", question="q", system_prompt="",
+        events=[
+            {"event_type": "ToolCallEvent", "tool_call_id": long_id_1,
+             "name": "execute_python", "arguments": {"code": "a=1"}},
+            {"event_type": "PythonOutput", "tool_call_id": long_id_1,
+             "execution_status": "complete", "stdout": "", "stderr": ""},
+            {"event_type": "ToolCallEvent", "tool_call_id": long_id_2,
+             "name": "execute_python", "arguments": {"code": "b=2"}},
+            {"event_type": "PythonOutput", "tool_call_id": long_id_2,
+             "execution_status": "complete", "stdout": "", "stderr": ""},
+        ],
+        final_answer={"answer": "", "confidence": "low",
+                      "supporting_evidence": [], "tool_calls_used": 2},
+        wall_clock_s=0.0,
+    )
+    out = qwen_vl_serialize(trace)
+    # No long id survives anywhere in the output
+    joined = json.dumps(out)
+    assert long_id_1 not in joined
+    assert long_id_2 not in joined
+    # Sequential short ids appear
+    assert "call_1" in joined
+    assert "call_2" in joined
+    # Pairs match: the first assistant tool_call's id equals the first tool msg's id
+    asst_msgs = [m for m in out["messages"] if m["role"] == "assistant" and m.get("tool_calls")]
+    tool_msgs = [m for m in out["messages"] if m["role"] == "tool"]
+    assert asst_msgs[0]["tool_calls"][0]["id"] == tool_msgs[0]["tool_call_id"]
+    assert asst_msgs[1]["tool_calls"][0]["id"] == tool_msgs[1]["tool_call_id"]
+
+
+def test_qwen_serialize_uses_trace_question_not_task_prompt():
+    """NOOA's Task.prompt is a runtime-formatted template (starts with
+    '## Task: <method_name>' and dumps the docstring). The actual user
+    question is passed as a Python variable and never lives in Task.prompt.
+    For clean Qwen training input, use trace.question."""
+    trace = AnnotateTrace(
+        image_ref="/data/img.jpg",
+        question="How far apart are the two workers?",
+        system_prompt="",
+        events=[
+            {"event_type": "Task",
+             "prompt": "## Task: annotate\n\n[whole docstring template here]",
+             "images": []},
+        ],
+        final_answer={"answer": "", "confidence": "low",
+                      "supporting_evidence": [], "tool_calls_used": 0},
+        wall_clock_s=0.0,
+    )
+    out = qwen_vl_serialize(trace)
+    text_blocks = [b for m in out["messages"] if m["role"] == "user"
+                   for b in m["content"] if b.get("type") == "text"]
+    assert text_blocks[0]["text"] == "How far apart are the two workers?"
+    # The NOOA template text must NOT appear
+    joined = json.dumps(out)
+    assert "## Task: annotate" not in joined
 
 
 def test_qwen_serialize_tool_call_without_nested_result_still_emits_call():

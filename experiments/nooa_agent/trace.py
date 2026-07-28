@@ -118,6 +118,34 @@ _ASSISTANT_TEXT_EVENTS = frozenset({"Message", "LLMOutput", "TextOnlyReply", "As
 # BeforeAgentCall/AfterAgentCall/LLMCallStart/LLMCallEnd), Notification,
 # Summary (compaction artifact), TuiSession*, Metadata subclasses.
 
+# CodeAct-specific conventions verified against a real event dump:
+# - Prefill events (tool_call_id starts with "prefill_") are input-inspection
+#   noise emitted at the top of every generation — not substantive reasoning.
+# - execute_python's nested ToolResult carries only "status: complete"; the
+#   real code output arrives in a subsequent PythonOutput event. Emitting
+#   both would produce doubled tool-result messages.
+# - return_result signals completion inline; its nested "Result accepted"
+#   ToolResult is protocol chatter, not training-useful.
+_PREFILL_ID_PREFIX = "prefill_"
+_TOOL_NAMES_WITH_SEPARATE_OUTPUT_EVENT = frozenset({"execute_python"})
+_TOOL_NAMES_SKIP_NESTED_RESULT = (
+    frozenset({"return_result"}) | _TOOL_NAMES_WITH_SEPARATE_OUTPUT_EVENT
+)
+
+
+def _make_id_shortener():
+    """Remap NOOA's long, thought-token-embedded tool_call_ids to short
+    monotonic ids stable within one trace. The originals contain the LLM's
+    reasoning tokens as opaque base64 and are hundreds of chars long."""
+    remap: dict[str, str] = {}
+
+    def short(original: str) -> str:
+        if original not in remap:
+            remap[original] = f"call_{len(remap) + 1}"
+        return remap[original]
+
+    return short
+
 
 def qwen_vl_serialize(trace: AnnotateTrace) -> dict:
     """Serialize AnnotateTrace → OpenAI-messages dict for Qwen VL fine-tuning.
@@ -132,6 +160,7 @@ def qwen_vl_serialize(trace: AnnotateTrace) -> dict:
       Handled both ways so a CodeAct-enabled variant would just work.
     """
     messages: list[dict] = []
+    shorten = _make_id_shortener()
 
     if trace.system_prompt or trace.tool_schema:
         sys_content = trace.system_prompt or ""
@@ -139,21 +168,37 @@ def qwen_vl_serialize(trace: AnnotateTrace) -> dict:
             sys_content += "\n\n# Tools\n" + json.dumps(trace.tool_schema, indent=2)
         messages.append({"role": "system", "content": sys_content})
 
+    # Emit the user turn once (image + question). NOOA's Task event carries
+    # a NOOA-formatted prompt template (not the user's question) and empty
+    # Task.images; instead we synthesize the training-shape input from
+    # trace.image_ref + trace.question. Skip further Task events below.
+    saw_task = False
+
     for ev in trace.events:
         etype = ev.get("event_type", "")
+        tid = ev.get("tool_call_id", "") or ""
+
+        # Skip CodeAct's input-inspection prefill — always emitted, never
+        # substantive. Applies to both the ToolCallEvent and the paired
+        # PythonOutput; both share the "prefill_*" id.
+        if tid.startswith(_PREFILL_ID_PREFIX):
+            continue
 
         if etype == _TASK:
-            # Initial user turn: image + question. NOOA's Task.images is
-            # list[dict] of multimodal content blocks (opaque to us — could
-            # be data URLs, file refs, or PIL wrappers). We ignore the inline
-            # blocks and reference the image by path via trace.image_ref.
-            content: list[dict] = [{"type": "image", "image": trace.image_ref}]
-            content.append({"type": "text", "text": ev.get("prompt", trace.question)})
-            messages.append({"role": "user", "content": content})
+            if not saw_task:
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": trace.image_ref},
+                        {"type": "text", "text": trace.question},
+                    ],
+                })
+                saw_task = True
+            continue
 
-        elif etype == _TOOL_CALL:
-            # Assistant emits the tool_call
-            call_id = ev.get("tool_call_id", "")
+        if etype == _TOOL_CALL:
+            name = ev.get("name", "unknown")
+            call_id = shorten(tid) if tid else f"call_{len(messages)}"
             args = ev.get("arguments", {})
             args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args)
             messages.append({
@@ -162,26 +207,25 @@ def qwen_vl_serialize(trace: AnnotateTrace) -> dict:
                 "tool_calls": [{
                     "id": call_id,
                     "type": "function",
-                    "function": {
-                        "name": ev.get("name", "unknown"),
-                        "arguments": args_str,
-                    },
+                    "function": {"name": name, "arguments": args_str},
                 }],
             })
-            # Then emit the tool result from the NESTED result field
-            nested = ev.get("result")
-            if isinstance(nested, dict):
-                # ToolResult carries `content: str` + `result_status`
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": nested.get("tool_call_id", call_id),
-                    "content": nested.get("content", ""),
-                })
+            # Only emit nested result for direct-tool-call events. For
+            # execute_python + return_result the nested result is protocol
+            # chatter — the real output arrives via PythonOutput (or in the
+            # case of return_result, the trace simply ends).
+            if name not in _TOOL_NAMES_SKIP_NESTED_RESULT:
+                nested = ev.get("result")
+                if isinstance(nested, dict):
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": nested.get("content", ""),
+                    })
+            continue
 
-        elif etype == _PYTHON_OUTPUT:
-            # CodeAct execute_python output — separate event, ResultStatus
-            # enum + stdout/stderr fields. Prefer stderr if execution errored.
-            call_id = ev.get("tool_call_id", "")
+        if etype == _PYTHON_OUTPUT:
+            call_id = shorten(tid) if tid else f"call_{len(messages)}"
             status = ev.get("execution_status", "")
             stdout = ev.get("stdout", "") or ""
             stderr = ev.get("stderr", "") or ""
@@ -191,11 +235,13 @@ def qwen_vl_serialize(trace: AnnotateTrace) -> dict:
                 "tool_call_id": call_id,
                 "content": str(content),
             })
+            continue
 
-        elif etype in _ASSISTANT_TEXT_EVENTS:
+        if etype in _ASSISTANT_TEXT_EVENTS:
             text = ev.get("content", "")
             if text:
                 messages.append({"role": "assistant", "content": text})
+            continue
 
     return {
         "messages": messages,
