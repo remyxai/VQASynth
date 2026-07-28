@@ -287,6 +287,36 @@ agent; the reasoning stays auditable via `agent.event_manager.values()`
 and (if a `trace_writer` is bound to the `SceneContext`) streams to JSONL
 alongside whatever the pipeline writes.
 
+**Single-frame anchors are required for tool grounding.** Our metric-depth
+tool (DepthPro / VGGT) produces geometrically meaningless output on a tiled
+contact sheet — pixel coordinates don't map to a real camera geometry, so
+`distance_3d` returns nonsense. Florence detection also degrades (labels
+duplicate across tiles). When plugging into `EcotReasoningModule`, set
+`contact_sheet_size=1` (or the equivalent config once PR #4036 finalizes)
+so each anchor is a single frame. Temporal context is better recovered
+through multi-turn chat history (see next section) than through tiled inputs.
+
+## Aloha ECoT smoke test — bypass the pipeline, iterate frames directly
+
+Fastest way to validate the agent on real robot data before doing the full
+lerobot integration. See ``example_lerobot_aloha_ecot.py`` in this directory:
+
+```bash
+export GEMINI_API_KEY=...
+python -m experiments.nooa_agent.example_lerobot_aloha_ecot \
+    --repo-id lerobot/aloha_static_coffee \
+    --episodes 0 \
+    --anchor-stride 30 \
+    --output /data/aloha_ecot.jsonl
+```
+
+Loads the aloha dataset, iterates at your chosen anchor cadence (every 30
+frames at fps=50 → every 0.6s), runs our tool-grounded agent on each
+single-frame anchor with the ECoT prompt, and writes one JSONL row per
+anchor. Each row carries the 4-field ECoT JSON, per-anchor confidence,
+tool-call count, wall clock, and supporting evidence. Ready to hand to a
+reward-extraction script downstream.
+
 ## Testing
 
 Structural smoke tests (no models required, work on Python 3.10):
