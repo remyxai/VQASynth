@@ -23,6 +23,7 @@ Design references:
 from __future__ import annotations
 
 import functools
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -339,15 +340,61 @@ class SceneContext:
 
     Loading a new image auto-invalidates the cache. To reset explicitly, call
     ``scene.agent.clear_scene()``.
+
+    Optionally capture each annotate() as a JSONL trace for downstream
+    fine-tuning::
+
+        from experiments.nooa_agent.trace import TraceWriter
+        with TraceWriter("traces.jsonl") as writer:
+            scene = SceneContext(agent, img, trace_writer=writer,
+                                 image_ref="/data/warehouse.jpg")
+            await scene.annotate("How far apart are the two workers?")
+            await scene.annotate("Which forklift is closest to the doorway?")
     """
 
-    def __init__(self, agent: Any, image: Image.Image):
+    def __init__(
+        self,
+        agent: Any,
+        image: Image.Image,
+        *,
+        trace_writer: Any = None,
+        image_ref: str | None = None,
+    ):
         self.agent = agent
         self.image = image
+        self._trace_writer = trace_writer
+        # image_ref defaults to PIL's filename if available (Image.open sets it);
+        # otherwise falls back to a sentinel so the trace still round-trips.
+        self._image_ref = image_ref or getattr(image, "filename", None) or "in_memory"
 
     async def annotate(self, question: str) -> SpatialAnswer:
-        """Ask a question about the bound image. Reuses cached tool outputs."""
-        return await self.agent.annotate(self.image, question)
+        """Ask a question about the bound image. Reuses cached tool outputs.
+
+        If a ``trace_writer`` was passed at construction time, appends this
+        call's structured trace to the writer's output (on successful
+        completion only — inspect ``agent.event_manager`` directly to debug
+        a failed call).
+        """
+        if self._trace_writer is None:
+            return await self.agent.annotate(self.image, question)
+
+        # Snapshot event log length so the trace captures only THIS call's
+        # events, not the agent's cumulative history across annotate() calls.
+        before = len(list(self.agent.event_manager.values()))
+        t0 = time.time()
+        result = await self.agent.annotate(self.image, question)
+        from experiments.nooa_agent.trace import capture_trace
+        trace = capture_trace(
+            agent=self.agent,
+            image_ref=self._image_ref,
+            question=question,
+            system_prompt=(self.agent.__class__.__doc__ or "").strip(),
+            answer=result,
+            elapsed_s=time.time() - t0,
+            since_event_idx=before,
+        )
+        self._trace_writer.write(trace)
+        return result
 
     async def warmup(self) -> None:
         """Eagerly precompute the tools most questions need.

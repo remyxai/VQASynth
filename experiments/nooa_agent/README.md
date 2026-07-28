@@ -132,6 +132,40 @@ that touch depth.
 
 Binding a different image to the same agent auto-invalidates the cache.
 
+## Trace capture for synthetic-VQA fine-tuning
+
+Each `annotate()` call can be captured as a structured JSONL row consumable by
+Qwen2.5-VL / Qwen3-VL fine-tuning (OpenAI-messages format with `<tool_call>`
+and `<tool_response>` cycles preserved). Serializer is pluggable — add a
+transform function for any other target model.
+
+```python
+from experiments.nooa_agent.trace import TraceWriter
+
+with TraceWriter("/data/traces.jsonl") as writer:
+    for img_path in image_paths:
+        img = Image.open(img_path).convert("RGB")
+        scene = SceneContext(agent, img, trace_writer=writer, image_ref=img_path)
+        for question in questions_for(img):
+            await scene.annotate(question)          # auto-appends to writer
+```
+
+Each JSONL row contains a `messages` field (ready for
+`tokenizer.apply_chat_template()`) and a `meta` block with `image_ref`,
+`question`, `confidence`, `tool_calls_used`, `wall_clock_s` for downstream
+filtering / quality gating.
+
+**To target a different model family:**
+
+```python
+def anthropic_serialize(trace):
+    """Emit Anthropic tool_use / tool_result blocks instead."""
+    ...  # transform trace.events → Anthropic format
+    return {"messages": ...}
+
+writer = TraceWriter("/data/traces.jsonl", serializer=anthropic_serialize)
+```
+
 ## Testing
 
 Structural smoke tests (no models required, work on Python 3.10):
