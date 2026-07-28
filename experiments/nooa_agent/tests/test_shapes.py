@@ -148,6 +148,27 @@ def test_florence_segmenter_shares_detector():
     assert s._detector is d
 
 
+# ── DepthResult repr — pinned compact so NOOA traces don't bloat ───────
+
+def test_depth_result_repr_is_compact_not_full_array():
+    """Regression: default dataclass repr would dump the entire depth array
+    + point cloud (~7 MB text for 768×768). NOOA logs return values into
+    trace events; a heavy repr scales trace size linearly with question count.
+    """
+    depth = np.zeros((768, 768), dtype=np.float32)
+    xyz = np.zeros((768, 768, 3), dtype=np.float32)
+    K = np.eye(3, dtype=np.float32)
+    r = DepthResult(depth_m=depth, focal_px=1450.7, intrinsics_3x3=K,
+                    point_cloud_xyz=xyz, backend="vggt")
+    text = repr(r)
+    # A compact summary should be well under 200 chars regardless of image size
+    assert len(text) < 200, f"repr is {len(text)} chars — probably dumping arrays"
+    assert "vggt" in text
+    assert "1450.7" in text
+    assert "(768, 768)" in text
+    assert "has_pointcloud=True" in text
+
+
 # ── _scene_cached decorator ────────────────────────────────────────────
 
 def test_scene_cache_hits_on_repeated_call():

@@ -32,6 +32,17 @@ class DepthResult:
     point_cloud_xyz: np.ndarray | None   # (H, W, 3) or None if not computed
     backend: str                         # e.g. "depthpro" or "vggt"
 
+    def __repr__(self) -> str:
+        # Default dataclass repr dumps the full point cloud + depth array as
+        # text — for a 768×768 image that's ~7 MB per line in any log or
+        # NOOA trace event. Return a compact summary instead. Full arrays
+        # remain accessible via the named fields.
+        H, W = self.depth_m.shape
+        return (
+            f"DepthResult(backend={self.backend!r}, focal_px={self.focal_px:.1f}, "
+            f"shape=({H}, {W}), has_pointcloud={self.point_cloud_xyz is not None})"
+        )
+
 
 # ────────────────────────────────────────────────────────────────
 # CPU tier — DepthPro
