@@ -250,6 +250,19 @@ def _make_agent_class(tier: Tier, max_iterations: int = DEFAULT_MAX_ITERATIONS, 
             answer clarifying questions. Your job is to produce the best
             possible grounded answer using the tools available. Iterate.
 
+            COMPOSITION VIA CODE. Every tool call you emit is Python code
+            that runs in a REPL alongside the tool methods below and the
+            standard library — you can import numpy / math / statistics /
+            itertools / etc., write loops and comprehensions, and compose
+            the named tools with arbitrary Python. Do not refuse a task
+            because the arithmetic looks complex; attempt it in code. If a
+            specific step falls outside the named tool surface, implement
+            that step in Python (numeric aggregation, geometric predicates,
+            grid enumeration, etc.) and cite the composition in
+            ``supporting_evidence``. Refusal is appropriate only when the
+            input data itself is unavailable (e.g., audio, temporal frames,
+            hidden metadata).
+
             Recommended reasoning loop:
 
             1. Start broad if the target isn't obvious: ``caption_scene`` or
