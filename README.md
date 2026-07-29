@@ -151,6 +151,7 @@ print(result.answer)            # "The two workers in the foreground are 2.04 me
 print(result.confidence)        # "high"
 print(result.tool_calls_used)   # 4
 ```
+<img width="2752" height="1536" alt="complex_image_reasoning_20x" src="https://github.com/user-attachments/assets/4edc92cf-0bff-461d-8f4e-f94a174f4b14" />
 
 See `experiments/nooa_agent/README.md` for install, resource tiers (CPU with DepthPro / GPU with VGGT), the full tool inventory, and the lerobot integration path.
 
