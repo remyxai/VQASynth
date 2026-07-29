@@ -176,7 +176,12 @@ def restore_pointclouds(pointcloud_paths):
     return restored_pointclouds
 
 class SpatialSceneConstructor:
-    def __init__(self, compile_aggregator: bool = False, avggt_step1: bool = False):
+    def __init__(
+        self,
+        compile_aggregator: bool = False,
+        avggt_step1: bool = False,
+        metric_calibration: bool = False,
+    ):
         """
         Initialize the constructor and load the VGGT model.
 
@@ -195,6 +200,12 @@ class SpatialSceneConstructor:
                 :mod:`vqasynth.vggt_speedups` for details. Off by default;
                 measured neutral at S≤4 (VQASynth's current call pattern);
                 begins paying off at S≥15+.
+            metric_calibration: if True (or env var
+                ``VQASYNTH_METRIC_CALIBRATION=1``), replace the raw pinhole
+                depth→point-map back-projection with a pixel-wise metric
+                calibration pass (spatially-varying scale + ray-direction
+                correction fields). Adapted from FoundationGeo (arXiv:2607.11588);
+                see :mod:`vqasynth.pointmap_calibration`. Off by default.
         """
         # Cast weights to the target dtype instead of loading fp32 and relying
         # on autocast alone — cuts weight memory in half and lets the kernel
@@ -204,6 +215,11 @@ class SpatialSceneConstructor:
         # Integer buffers are preserved (nn.Module.to only casts floating tensors).
         self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(device=device, dtype=dtype)
         self.model.eval()
+
+        self.metric_calibration = (
+            metric_calibration
+            or os.environ.get("VQASYNTH_METRIC_CALIBRATION") == "1"
+        )
 
         if avggt_step1 or os.environ.get("VQASYNTH_AVGGT_STEP1") == "1":
             from vqasynth.vggt_speedups import apply_avggt_step1
@@ -332,7 +348,17 @@ class SpatialSceneConstructor:
         # Safely extract focal
         focal_val = self.extract_focal_from_intrinsic(intrinsic_1)
 
-        point_map = unproject_depth_map_to_point_map(depth_map_2d, extrinsic_1, intrinsic_1)
+        if self.metric_calibration:
+            # Pixel-wise metric calibration (FoundationGeo Stage-2 scale +
+            # ray-direction correction fields) as an analytic post-hoc pass on
+            # VGGT's back-projection. See vqasynth.pointmap_calibration.
+            from vqasynth.pointmap_calibration import calibrate_point_map
+
+            point_map = calibrate_point_map(
+                depth_map_2d, extrinsic_1, intrinsic_1
+            )
+        else:
+            point_map = unproject_depth_map_to_point_map(depth_map_2d, extrinsic_1, intrinsic_1)
         if isinstance(point_map, torch.Tensor):
             point_map = point_map.cpu().numpy()
 
