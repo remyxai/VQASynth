@@ -126,8 +126,6 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 
 ## Agent with VQASynth Tools
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1nEWs0eVJPW-mmh5PMJFWx8kenPILRlvE?usp=sharing)
-
 The VQASynth tool inventory — Florence-2 detection/OCR, DepthPro/VGGT metric depth, 3D distance measurement — is also exposed as an [NOOA](https://github.com/NVIDIA-NeMo/labs-OO-Agents)-based agent (`experiments/nooa_agent/`) that composes tool calls dynamically per prompt rather than following a pre-templated pipeline. Useful when the input question isn't known at pipeline-design time.
 
 - **Dynamic tool composition** — the LLM decides which tools to call and in what order per question. `detect_objects → metric_depth → distance_3d` for a "how far apart" query; `caption_scene → dense_region_captions` for a scene inventory. No pre-coded question types.
