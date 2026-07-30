@@ -208,6 +208,12 @@ class FoundationGeoEstimator:
             paper default and matches ``foundationgeo infer``'s CLI default.
     """
     MODEL_ID = "mxliu-hku/FoundationGeo-1.1"
+    # HF repo hosts the checkpoint as `FoundationGeo.pt`, but the upstream
+    # ``FoundationGeo.from_pretrained`` hardcodes ``filename="model.pt"`` in
+    # its ``hf_hub_download`` call — that fails silently as "model not found".
+    # Download the actual filename ourselves and hand ``from_pretrained`` a
+    # local path so its ``Path(...).exists()`` branch takes over.
+    MODEL_FILENAME = "FoundationGeo.pt"
 
     def __init__(
         self,
@@ -215,11 +221,13 @@ class FoundationGeoEstimator:
         dtype: Any = None,
         fov_x_deg: float | None = None,
         resolution_level: int = 9,
+        model_path: str | None = None,
     ):
         self.device = device
         self.dtype = dtype
         self.fov_x_deg = fov_x_deg
         self.resolution_level = resolution_level
+        self.model_path = model_path
         self._model = None
         self._use_fp16 = False
 
@@ -235,8 +243,20 @@ class FoundationGeoEstimator:
                 f"Original error: {e}"
             )
         import torch
+
+        # Resolve the checkpoint path: use caller-supplied local path if given,
+        # else fetch the correct filename from HF Hub. Works around the
+        # filename mismatch in the upstream from_pretrained.
+        model_path = self.model_path
+        if model_path is None:
+            from huggingface_hub import hf_hub_download
+            model_path = hf_hub_download(
+                repo_id=self.MODEL_ID,
+                filename=self.MODEL_FILENAME,
+            )
+
         precision = _resolve_torch_dtype(self.dtype)
-        model = FoundationGeo.from_pretrained(self.MODEL_ID).to(
+        model = FoundationGeo.from_pretrained(model_path).to(
             torch.device(self.device)
         ).eval()
         if precision == torch.float16:
