@@ -126,6 +126,13 @@ class FlorenceDetector:
         processor, model = backend
         prompt = task + extra
         inputs = processor(text=prompt, images=image, return_tensors="pt").to(self.device)
+        # Florence-2's trust_remote_code inference path does NOT auto-cast the
+        # input pixel tensor to match the model's weight dtype — fp16 weights
+        # + fp32 pixel_values raises "Input type (float) and bias type
+        # (c10::Half) should be the same". Match dtypes explicitly. input_ids
+        # is an integer tensor and stays as-is.
+        if inputs["pixel_values"].dtype != model.dtype:
+            inputs["pixel_values"] = inputs["pixel_values"].to(model.dtype)
         with torch.no_grad():
             generated = model.generate(
                 input_ids=inputs["input_ids"],
