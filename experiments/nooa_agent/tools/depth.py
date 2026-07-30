@@ -259,9 +259,17 @@ class FoundationGeoEstimator:
         model = FoundationGeo.from_pretrained(model_path).to(
             torch.device(self.device)
         ).eval()
-        if precision == torch.float16:
-            model.half()
-            self._use_fp16 = True
+        # bf16 has fp32's dynamic range with fp16's VRAM footprint. fp16 alone
+        # produces NaN through FG on some scenes (ops overflow/underflow at
+        # fp16 precision). Prefer bf16 as the default fast path; fall back to
+        # fp32 if bf16 also NaNs.
+        if precision in (torch.float16, torch.bfloat16):
+            model = model.to(precision)
+        # ``use_fp16`` inside FG's infer() only enables autocast, and only when
+        # model params are fp32. Once we've cast to fp16/bf16 the autocast is
+        # a no-op — pass False so infer doesn't try to open a mixed-precision
+        # context on already-cast weights.
+        self._use_fp16 = False
         self._model = model
 
     def metric_depth(self, image) -> DepthResult:
