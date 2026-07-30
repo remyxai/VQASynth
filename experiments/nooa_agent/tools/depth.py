@@ -1,8 +1,9 @@
 """Metric depth + intrinsics + 3D point cloud tools, resource-tier aware.
 
-Both tiers produce the same interface: `(depth_map_2d, focal_length, point_cloud_xyz)`.
-Downstream tools (distance-in-meters, height, "on top of") consume the interface
-uniformly regardless of which model produced it.
+All backends produce the same interface: ``DepthResult(depth_m, focal_px,
+intrinsics_3x3, point_cloud_xyz, backend)``. Downstream tools (distance-in-meters,
+height, "on top of") consume the interface uniformly regardless of which
+model produced it.
 
 - CPU tier: **Apple DepthPro** (~330M) — metric depth + predicted focal length.
   ~1-3 s per image on modern CPUs. Continuity with VQASynth's pre-VGGT default
@@ -10,6 +11,10 @@ uniformly regardless of which model produced it.
 - GPU tier: **VGGT-1B** (via ``vqasynth.scene_fusion.SpatialSceneConstructor``).
   Matches the current VQASynth production path; also produces multi-view fusion
   if the annotator ever passes more than one image per call.
+- GPU tier (alternative): **FoundationGeo v1.1** (~314M) — learned pixel-wise
+  scale + ray-direction correction fields. ECCV 2026 (arXiv:2607.11588). Metric
+  depth trained with wide focal-length coverage; paper's headline result is
+  metric robustness across camera-intrinsic OOD.
 
 Notes on the CPU-tier choice: Depth Anything V2 produces RELATIVE depth and would
 require a scale-calibration step we saw hallucinate 5cm→pattern in the
@@ -169,6 +174,133 @@ class VggtEstimator:
             intrinsics_3x3=K,
             point_cloud_xyz=xyz,
             backend="vggt",
+        )
+
+
+# ────────────────────────────────────────────────────────────────
+# GPU tier (alternative) — FoundationGeo v1.1
+# ────────────────────────────────────────────────────────────────
+
+class FoundationGeoEstimator:
+    """Metric depth via FoundationGeo (arXiv:2607.11588, ECCV 2026).
+
+    Stage-2 model produces metric depth + a *learned* pixel-wise scale field
+    + ray-direction correction field. The paper's headline finding is that
+    focal-length OOD is the dominant driver of zero-shot metric error;
+    FoundationGeo trains on wide focal coverage and learns per-pixel
+    corrections rather than relying on a global scale.
+
+    Model: ``mxliu-hku/FoundationGeo-1.1`` (~314M params on HF Hub).
+    License: composite MIT (Microsoft upstream) + Apache-2.0 (their code).
+
+    Requires: ``pip install 'foundationgeo @ git+https://github.com/mx-liu6/FoundationGeo.git'``
+    plus ``pip install 'utils3d @ git+https://github.com/EasternJournalist/utils3d.git'``.
+
+    Args:
+        device: torch device string (e.g. ``"cuda:0"``, ``"cpu"``).
+        dtype: torch dtype or alias resolved by ``_resolve_torch_dtype``.
+            fp16 halves VRAM at negligible accuracy loss.
+        fov_x_deg: optional horizontal FOV in degrees. When known (e.g. from
+            EXIF), skip FoundationGeo's FOV estimation and pass the true value
+            — this is exactly the focal-OOD case the paper's Stage-2 fields
+            target. ``None`` (default) lets the model estimate FOV.
+        resolution_level: integer 0-9; higher = finer detail, slower. 9 is the
+            paper default and matches ``foundationgeo infer``'s CLI default.
+    """
+    MODEL_ID = "mxliu-hku/FoundationGeo-1.1"
+
+    def __init__(
+        self,
+        device: str = "cuda",
+        dtype: Any = None,
+        fov_x_deg: float | None = None,
+        resolution_level: int = 9,
+    ):
+        self.device = device
+        self.dtype = dtype
+        self.fov_x_deg = fov_x_deg
+        self.resolution_level = resolution_level
+        self._model = None
+        self._use_fp16 = False
+
+    def _load(self):
+        # Lazy imports — FoundationGeo isn't a mandatory VQASynth dep.
+        try:
+            from foundationgeo.model.v1 import FoundationGeo  # Stage-2 metric
+        except ImportError as e:
+            raise ImportError(
+                "foundationgeo is required — install via `pip install "
+                "'foundationgeo @ git+https://github.com/mx-liu6/FoundationGeo.git'` "
+                "(plus utils3d from git+https://github.com/EasternJournalist/utils3d.git). "
+                f"Original error: {e}"
+            )
+        import torch
+        precision = _resolve_torch_dtype(self.dtype)
+        model = FoundationGeo.from_pretrained(self.MODEL_ID).to(
+            torch.device(self.device)
+        ).eval()
+        if precision == torch.float16:
+            model.half()
+            self._use_fp16 = True
+        self._model = model
+
+    def metric_depth(self, image) -> DepthResult:
+        """Predict metric depth + intrinsics + point cloud via FoundationGeo v1.
+
+        Returns the Stage-2 ``depth_metric`` and ``points_metric`` outputs
+        directly (already in meters, no manual unprojection needed). The
+        learned scale + ray-direction correction fields are applied inside
+        ``model.infer`` — they show up in the model's output dict as
+        ``scalefield`` and ``delta`` and could be exposed on the DepthResult
+        if downstream tools need them.
+        """
+        import torch
+
+        if self._model is None:
+            self._load()
+
+        # PIL Image (or ndarray) → (C, H, W) float32 tensor in [0, 1],
+        # matching what ``foundationgeo/scripts/infer.py`` expects.
+        if hasattr(image, "convert"):  # PIL.Image
+            arr = np.asarray(image.convert("RGB"))
+        else:
+            arr = np.asarray(image)
+        img_tensor = torch.from_numpy(arr.astype(np.float32) / 255.0).permute(2, 0, 1)
+        img_tensor = img_tensor.to(next(self._model.parameters()).device)
+
+        with torch.no_grad():
+            output = self._model.infer(
+                img_tensor,
+                fov_x=self.fov_x_deg,          # None → FG estimates FOV
+                resolution_level=self.resolution_level,
+                num_tokens=None,
+                use_fp16=self._use_fp16,
+            )
+
+        # Prefer Stage-2 metric outputs; fall back to Stage-1 if the checkpoint
+        # is a base (non-metric) build.
+        depth_key = "depth_metric" if "depth_metric" in output else "depth"
+        points_key = "points_metric" if "points_metric" in output else "points"
+
+        depth_m = output[depth_key].cpu().numpy().astype(np.float32)
+        intrinsics = output["intrinsics"].cpu().numpy().astype(np.float32)
+        # Intrinsics can arrive as (3, 3) or (1, 3, 3) — drop any leading batch dim.
+        while intrinsics.ndim > 2:
+            intrinsics = intrinsics[0]
+        focal_px = float(intrinsics[0, 0])
+
+        # FG returns metric points directly; use them instead of re-unprojecting.
+        try:
+            xyz = output[points_key].cpu().numpy().astype(np.float32)
+        except KeyError:
+            xyz = _unproject(depth_m, intrinsics)
+
+        return DepthResult(
+            depth_m=depth_m,
+            focal_px=focal_px,
+            intrinsics_3x3=intrinsics,
+            point_cloud_xyz=xyz,
+            backend="foundationgeo",
         )
 
 
