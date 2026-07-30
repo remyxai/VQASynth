@@ -106,6 +106,18 @@ class FlorenceDetector:
             model_id, trust_remote_code=True, torch_dtype=torch_dtype
         ).to(self.device)
         model.eval()
+        # transformers >= 4.50 reads several generation-config attributes off
+        # the language config unconditionally (forced_bos_token_id, etc).
+        # Florence-2's Florence2LanguageConfig doesn't set them, so generate()
+        # crashes with AttributeError inside the LLM's tool-call, surfacing
+        # as "detect_all_objects failed". Backfill defaults so generate()'s
+        # getattr chain finds a value.
+        text_config = getattr(getattr(model, "config", None), "text_config", None)
+        if text_config is not None:
+            for attr in ("forced_bos_token_id", "forced_eos_token_id",
+                         "suppress_tokens", "begin_suppress_tokens"):
+                if not hasattr(text_config, attr):
+                    setattr(text_config, attr, None)
         return processor, model
 
     def _base_backend(self):
