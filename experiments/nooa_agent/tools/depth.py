@@ -315,28 +315,35 @@ class FoundationGeoEstimator:
         except KeyError:
             xyz = _unproject(depth_m, intrinsics)
 
-        # Fill invalid pixels (FG masks unreliable regions with nan/inf; the
-        # ``mask`` output also flags them). Downstream sampling at bbox
-        # centroids can otherwise land on nan and propagate to distance calcs.
-        # Fill with the median of valid depth so distance_3d degrades to a
-        # reasonable rather than NaN answer.
+        # Fill invalid pixels (FG masks unreliable regions with nan/inf/<=0;
+        # the ``mask`` output also flags them). Downstream sampling at bbox
+        # centroids can otherwise land on nan/0 and propagate to distance
+        # calcs. Fill with the median of valid depth so distance_3d degrades
+        # to a reasonable rather than NaN answer.
+        # Invalid = non-finite OR non-positive (metric depth must be > 0).
+        invalid = ~np.isfinite(depth_m) | (depth_m <= 0.0)
         mask_output = output.get("mask")
-        invalid = ~np.isfinite(depth_m)
         if mask_output is not None:
-            mask_np = mask_output.cpu().numpy().astype(bool)
-            # broadcast/align to depth_m shape if needed
+            mask_np = mask_output.cpu().numpy().astype(bool).squeeze()
             if mask_np.shape == depth_m.shape:
                 invalid = invalid | ~mask_np
         if invalid.any():
             valid_depths = depth_m[~invalid]
-            fill = float(np.median(valid_depths)) if valid_depths.size else 0.0
+            if valid_depths.size:
+                fill = float(np.median(valid_depths))
+            else:
+                # All pixels invalid — fall back to a nominal indoor depth so
+                # downstream distance calcs still produce a number the LLM
+                # can flag as low-confidence rather than NaN or 0.
+                fill = 5.0
             depth_m = np.where(invalid, fill, depth_m).astype(np.float32)
-            # xyz has the same invalid columns/rows; sanitize consistently.
             if xyz is not None and xyz.ndim == 3:
                 xyz_invalid = ~np.isfinite(xyz).all(axis=-1) | invalid
                 if xyz_invalid.any():
                     xyz = np.where(
-                        xyz_invalid[..., None], np.array([0.0, 0.0, fill], dtype=np.float32), xyz
+                        xyz_invalid[..., None],
+                        np.array([0.0, 0.0, fill], dtype=np.float32),
+                        xyz,
                     ).astype(np.float32)
 
         return DepthResult(
