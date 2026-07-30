@@ -307,6 +307,17 @@ class FoundationGeoEstimator:
         # Intrinsics can arrive as (3, 3) or (1, 3, 3) — drop any leading batch dim.
         while intrinsics.ndim > 2:
             intrinsics = intrinsics[0]
+
+        # FoundationGeo returns intrinsics in NORMALIZED image coordinates
+        # (fx/W, fy/H, cx/W, cy/H) — matches utils3d's convention. DepthPro
+        # and VGGT return pixel-space intrinsics, and downstream tools
+        # (distance_3d, unproject) assume pixels. Rescale to pixel space so
+        # the DepthResult contract is uniform across backends.
+        H, W = depth_m.shape[-2:]
+        # Top row (fx, 0, cx) scaled by width; middle row (0, fy, cy) by height.
+        intrinsics = intrinsics.copy()
+        intrinsics[0, :] *= W
+        intrinsics[1, :] *= H
         focal_px = float(intrinsics[0, 0])
 
         # FG returns metric points directly; use them instead of re-unprojecting.
