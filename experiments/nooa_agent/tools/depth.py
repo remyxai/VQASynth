@@ -295,6 +295,11 @@ class FoundationGeoEstimator:
                 resolution_level=self.resolution_level,
                 num_tokens=None,
                 use_fp16=self._use_fp16,
+                # apply_mask=True (FG default) fills masked pixels with
+                # torch.inf, which propagates as zeros through our
+                # invalid-pixel fill. Get raw metric depth here and let
+                # downstream tools decide how to use the ``mask`` output.
+                apply_mask=False,
             )
 
         # Prefer Stage-2 metric outputs; fall back to Stage-1 if the checkpoint
