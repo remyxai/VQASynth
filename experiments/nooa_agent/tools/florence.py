@@ -106,6 +106,18 @@ class FlorenceDetector:
             model_id, trust_remote_code=True, torch_dtype=torch_dtype
         ).to(self.device)
         model.eval()
+        # transformers >= 4.50 reads several generation-config attributes off
+        # the language config unconditionally (forced_bos_token_id, etc).
+        # Florence-2's Florence2LanguageConfig doesn't set them, so generate()
+        # crashes with AttributeError inside the LLM's tool-call, surfacing
+        # as "detect_all_objects failed". Backfill defaults so generate()'s
+        # getattr chain finds a value.
+        text_config = getattr(getattr(model, "config", None), "text_config", None)
+        if text_config is not None:
+            for attr in ("forced_bos_token_id", "forced_eos_token_id",
+                         "suppress_tokens", "begin_suppress_tokens"):
+                if not hasattr(text_config, attr):
+                    setattr(text_config, attr, None)
         return processor, model
 
     def _base_backend(self):
@@ -126,6 +138,16 @@ class FlorenceDetector:
         processor, model = backend
         prompt = task + extra
         inputs = processor(text=prompt, images=image, return_tensors="pt").to(self.device)
+        # Florence-2's trust_remote_code inference path does NOT auto-cast the
+        # input pixel tensor to match the model's weight dtype — fp16 weights
+        # + fp32 pixel_values raises "Input type (float) and bias type
+        # (c10::Half) should be the same". Match dtypes explicitly. input_ids
+        # is an integer tensor and stays as-is.
+        # ``model.dtype`` isn't reliably exposed on AutoModelForCausalLM
+        # wrappers with trust_remote_code; read the actual parameter dtype.
+        model_dtype = next(model.parameters()).dtype
+        if inputs["pixel_values"].dtype != model_dtype:
+            inputs["pixel_values"] = inputs["pixel_values"].to(model_dtype)
         with torch.no_grad():
             generated = model.generate(
                 input_ids=inputs["input_ids"],
