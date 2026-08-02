@@ -1,9 +1,10 @@
 """Metric depth + intrinsics + 3D point cloud tools, resource-tier aware.
 
 All backends produce the same interface: ``DepthResult(depth_m, focal_px,
-intrinsics_3x3, point_cloud_xyz, backend)``. Downstream tools (distance-in-meters,
-height, "on top of") consume the interface uniformly regardless of which
-model produced it.
+intrinsics_3x3, point_cloud_xyz, backend[, normal_map])``. Downstream tools
+(distance-in-meters, height, "on top of") consume the interface uniformly
+regardless of which model produced it. The optional ``normal_map`` is
+populated only by backends with a surface-normal head (Metric3D v2).
 
 - CPU tier: **Apple DepthPro** (~330M) — metric depth + predicted focal length.
   ~1-3 s per image on modern CPUs. Continuity with VQASynth's pre-VGGT default
@@ -15,6 +16,10 @@ model produced it.
   scale + ray-direction correction fields. ECCV 2026 (arXiv:2607.11588). Metric
   depth trained with wide focal-length coverage; paper's headline result is
   metric robustness across camera-intrinsic OOD.
+- GPU tier (alternative): **Metric3D v2** — metric depth WITHOUT scale
+  calibration (canonical-intrinsic resize decouples the metric scale from the
+  unknown real focal length) PLUS a surface-normal head. See ``tools/metric3d.py``;
+  the only backend that populates ``DepthResult.normal_map``.
 
 Notes on the CPU-tier choice: Depth Anything V2 produces RELATIVE depth and would
 require a scale-calibration step we saw hallucinate 5cm→pattern in the
@@ -31,6 +36,10 @@ import numpy as np
 # Reuse the same dtype alias resolver as the Florence tools so calling
 # conventions match across the whole tool surface.
 from experiments.nooa_agent.tools.florence import _resolve_torch_dtype
+# Metric3D v2 backend lives in its own module (canonicalization + normals) and
+# is re-exported here so the whole depth-tool surface is reachable from one
+# import. It imports DepthResult/_unproject lazily to avoid a cycle.
+from experiments.nooa_agent.tools.metric3d import Metric3DEstimator
 
 
 @dataclass
@@ -41,6 +50,10 @@ class DepthResult:
     intrinsics_3x3: np.ndarray           # (3, 3) camera intrinsic matrix
     point_cloud_xyz: np.ndarray | None   # (H, W, 3) or None if not computed
     backend: str                         # e.g. "depthpro" or "vggt"
+    # (H, W, 3) unit surface normals — populated by backends with a normal head
+    # (Metric3D v2). None for depth-only backends, so the field is optional and
+    # existing constructors are unaffected.
+    normal_map: np.ndarray | None = None
 
     def __repr__(self) -> str:
         # Default dataclass repr dumps the full point cloud + depth array as
@@ -50,7 +63,8 @@ class DepthResult:
         H, W = self.depth_m.shape
         return (
             f"DepthResult(backend={self.backend!r}, focal_px={self.focal_px:.1f}, "
-            f"shape=({H}, {W}), has_pointcloud={self.point_cloud_xyz is not None})"
+            f"shape=({H}, {W}), has_pointcloud={self.point_cloud_xyz is not None}, "
+            f"has_normals={self.normal_map is not None})"
         )
 
 
@@ -444,6 +458,7 @@ __all__ = [
     "DepthResult",
     "DepthProEstimator",
     "VggtEstimator",
+    "Metric3DEstimator",
     "depth_at_point",
     "distance_3d_meters",
 ]

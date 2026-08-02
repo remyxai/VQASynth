@@ -178,4 +178,11 @@ This project was inspired by or utilizes concepts discussed in the following res
   url={https://arxiv.org/abs/2408.00714},
   year={2024}
 }
+@article{yin2024metric3dv2,
+  title={Metric3D v2: A Versatile Monocular Geometric Foundation Model for Zero-shot Metric Depth and Surface Normal Estimation},
+  author={Yin, Wei and Mi, Mu and Xie, Xiaotao and Hou, Song and Yu, Chuhui and Huang, Caixia and Gao, Xiaofei and Shen, Chunhua},
+  journal={arXiv preprint arXiv:2404.15506},
+  url={https://arxiv.org/abs/2404.15506},
+  year={2024}
+}
 ```
