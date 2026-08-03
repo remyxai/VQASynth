@@ -179,3 +179,48 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## 3D object detection (pointing-VLM training data)
+
+VQASynth can also emit **3D object-detection** QA pairs — the 3D analog of the
+Molmo `<point>` pointing data the pipeline already produces. Given the per-object
+point clouds that the scene-fusion stage emits, `vqasynth.detection_3d` computes
+each object's axis-aligned 3D bounding box (center + extent, with an optional
+oriented box for elongated / diagonal objects) and formats it as Molmo-style
+`<point3d>` tags (or SpatialRGPT-style bracketed `[center, extent]` region
+descriptors) for downstream pointing-VLM distillation.
+
+```python
+from vqasynth.localize import Localizer
+from vqasynth.scene_fusion import SpatialSceneConstructor
+from vqasynth.detection_3d import Detection3DGenerator
+
+image = ...  # PIL.Image
+
+# Upstream: detect + segment objects, then lift to per-object point clouds.
+masks, _, captions = Localizer(captioner_type="florence").run(image)
+pcd_filepaths, _, _, _ = SpatialSceneConstructor().run(
+    "scene_0", image, masks, output_dir="./scenes"
+)
+
+# 3D object-detection QA pairs (reuses the depth + segmentation upstream —
+# no new model, just box math + formatting on the existing point clouds).
+qa_pairs = Detection3DGenerator().run(captions, pcd_filepaths)
+
+# Example output:
+#   "Where is the wooden crate located in 3D space?"
+#   -> 'wooden crate: <point3d x="0.30" y="0.25" z="0.40" extent="0.60,0.50,0.80" alt="wooden crate"/>.'
+```
+
+The stage reuses the bounding-box helpers prototyped in
+`tests/data_processing/clipseg_data_processing.py`
+(`get_axis_aligned_bounding_box`) and is shipped as `vqasynth/detection_3d.py`
+plus the `docker/detection_3d_stage/` Docker stage. The box math and QA-pair
+formatting are pure-Python standard library, so they are unit-tested without
+CUDA, depth models, SAM, numpy, or open3d (those are runtime-only deps of the
+`.pcd` I/O path). See `examples/detection_3d_example.py` for a runnable,
+GPU-free demo and `tests/test_detection_3d.py` for the test suite.
+
+Refs: [issue #47](https://github.com/remyxai/VQASynth/issues/47),
+[SpatialRGPT](https://www.anjiecheng.me/assets/SpatialRGPT/Spatial_RGPT.pdf)
+(format design anchor for region-level 3D descriptors).
