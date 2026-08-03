@@ -123,6 +123,7 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Evaluate SpaceThinker on QSpatial++ | Assess SpaceThinker's quantitative spatial reasoning on the QSpatial++ benchmark | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1buEe2QC4_pnrJwQ9XyRAH7RfaIa6pbex?usp=sharing) |
 | SpaceLLaVA Attention with TransformerLens | Visualize SpaceLLaVA-7B attention patterns using TransformerLens | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/19H_hOL8gc1nFQKpDoioJR8nDWX1lsNZM?usp=sharing) |
 | Agent with VQASynth Tools | Dynamic tool composition for spatial questions beyond template + VLM ceilings | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1nEWs0eVJPW-mmh5PMJFWx8kenPILRlvE?usp=sharing) |
+| 3D Object-Detection QA Synthesis | Synthesize Molmo `<point3d>` training pairs from per-object point clouds (CPU-only) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb) |
 
 ## Agent with VQASynth Tools
 
@@ -182,6 +183,8 @@ This project was inspired by or utilizes concepts discussed in the following res
 
 ## 3D object detection (pointing-VLM training data)
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb)
+
 VQASynth can also emit **3D object-detection** QA pairs — the 3D analog of the
 Molmo `<point>` pointing data the pipeline already produces. Given the per-object
 point clouds that the scene-fusion stage emits, `vqasynth.detection_3d` computes
@@ -218,7 +221,8 @@ The stage reuses the bounding-box helpers prototyped in
 plus the `docker/detection_3d_stage/` Docker stage. The box math and QA-pair
 formatting are pure-Python standard library, so they are unit-tested without
 CUDA, depth models, SAM, numpy, or open3d (those are runtime-only deps of the
-`.pcd` I/O path). See `examples/detection_3d_example.py` for a runnable,
+`.pcd` I/O path). See `examples/detection_3d_example.py`
+(or the [Colab notebook](examples/detection_3d_example.ipynb)) for a runnable,
 GPU-free demo and `tests/test_detection_3d.py` for the test suite.
 
 Refs: [issue #47](https://github.com/remyxai/VQASynth/issues/47),
