@@ -45,7 +45,11 @@ on:
         required: false
         default: ''
       mode:
-        description: 'Run mode. recommend (default) runs the ranker+paper flow; brief runs the paper-less lead-content-only flow.'
+        description: 'Run mode. recommend (default) runs the ranker+paper flow; brief runs the paper-less lead-content-only flow; convention/fidelity/test run the corresponding refinement pass on an open PR.'
+        required: false
+        default: ''
+      pr-number:
+        description: 'PR number to audit — required by mode=convention / fidelity / test refinement passes.'
         required: false
         default: ''
       start-from-ref:
@@ -98,6 +102,7 @@ jobs:
         with:
           interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
           mode: ${{ inputs.mode || '' }}
+          pr-number: ${{ inputs.pr-number || '' }}
           rate-limit-days: '0'
           # Coding agents routinely touch build/env metadata while adding a
           # training pipeline (cache dirs into .gitignore, deps into
