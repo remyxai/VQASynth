@@ -96,9 +96,9 @@ jobs:
           if [ -n "$MODEL_INPUT" ]; then
             echo "ANTHROPIC_MODEL=$MODEL_INPUT" >> "$GITHUB_ENV"
           fi
-      # TEMP: pinned to feat/lead-content-mode for pre-merge integration test
-      # of brief mode against issue #53. Revert to @v1 once the branch merges.
-      - uses: remyxai/outrider@feat/lead-content-mode
+      # Brief-mode + parser fix merged as v1.7.48 / v1.7.47 — re-pinned to @v1
+      # so the floating pointer picks up future outrider releases automatically.
+      - uses: remyxai/outrider@v1
         with:
           interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
           mode: ${{ inputs.mode || '' }}
