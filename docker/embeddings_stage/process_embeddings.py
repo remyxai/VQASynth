@@ -4,15 +4,19 @@ import argparse
 import pandas as pd
 from PIL import Image
 from vqasynth.datasets import Dataloader
-from vqasynth.embeddings import EmbeddingGenerator
+from vqasynth.embeddings import EmbeddingGenerator, list_embedding_backends
 from vqasynth.utils import filter_null
 
-def main(output_dir, source_repo_id, images):
+def main(output_dir, source_repo_id, images, backend="clip", model_name=None):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     dataloader = Dataloader(output_dir)
-    embedding_generator = EmbeddingGenerator()
+    # Only forward model_name when explicitly set so each backend keeps its own default.
+    kwargs = {"backend": backend}
+    if model_name:
+        kwargs["model_name"] = model_name
+    embedding_generator = EmbeddingGenerator(**kwargs)
 
     # Load dataset
     dataset = dataloader.load_dataset(source_repo_id)
@@ -52,5 +56,20 @@ if __name__ == "__main__":
         required=True,
         help="Column containing PIL.Image images",
     )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="clip",
+        choices=list_embedding_backends(),
+        help="Multimodal embedding backend (clip | transformers). "
+        "Use 'transformers' to load CLIP/SigLIP/LLM2CLIP checkpoints from HuggingFace.",
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default=None,
+        help="Model name/checkpoint for the backend (defaults to backend default, "
+        "e.g. microsoft/LLM2CLIP-OpenAI-B-16 with --backend transformers).",
+    )
     args = parser.parse_args()
-    main(args.output_dir, args.source_repo_id, args.images)
+    main(args.output_dir, args.source_repo_id, args.images, args.backend, args.model_name)

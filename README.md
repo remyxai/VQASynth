@@ -179,3 +179,36 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Embedding backends
+
+The embeddings and filter stages accept a pluggable multimodal embedding
+backend ([#33](https://github.com/remyxai/VQASynth/issues/33)):
+
+| Backend | Loader | Example checkpoint |
+| :--- | :--- | :--- |
+| `clip` (default) | OpenAI `clip` package | `ViT-B/32` |
+| `transformers` | HuggingFace `transformers` | `openai/clip-vit-base-patch32`, `google/siglip-base-patch16-224`, `microsoft/LLM2CLIP-OpenAI-B-16` |
+
+The `transformers` backend loads any model exposing `get_image_features` /
+`get_text_features`, so LLM2CLIP and SigLIP checkpoints drop in without code
+changes (LLM2CLIP needs `trust_remote_code=True`). Pick the same backend +
+checkpoint for both stages so stored embeddings and tag scores are comparable.
+
+```bash
+# Embeddings stage — LLM2CLIP text encoder
+python docker/embeddings_stage/process_embeddings.py \
+    --backend transformers --model_name microsoft/LLM2CLIP-OpenAI-B-16 ...
+
+# Or programmatically
+from vqasynth.embeddings import EmbeddingGenerator, TagFilter
+gen = EmbeddingGenerator(backend="transformers", model_name="google/siglip-base-patch16-224")
+flt = TagFilter(backend="transformers", model_name="google/siglip-base-patch16-224")
+```
+
+MagicLens is intentionally **not** wired here: it encodes a (query image,
+free-form text instruction) pair rather than a shared image/text embedding
+space, so it does not fit the tag-similarity contract `TagFilter` relies on.
+The backend registry (`register_embedding_backend`) is the extension point
+for adding it behind a dedicated retrieval stage.
+

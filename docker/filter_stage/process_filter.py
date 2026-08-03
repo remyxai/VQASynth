@@ -4,12 +4,17 @@ import argparse
 import pandas as pd
 from PIL import Image
 from vqasynth.datasets import Dataloader
-from vqasynth.embeddings import TagFilter
+from vqasynth.embeddings import TagFilter, list_embedding_backends
 from vqasynth.utils import filter_null
 
 
-def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_threshold=0.7):
-    tag_filter = TagFilter()
+def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_threshold=0.7,
+         backend="clip", model_name=None):
+    # Only forward model_name when explicitly set so each backend keeps its own default.
+    kwargs = {"backend": backend}
+    if model_name:
+        kwargs["model_name"] = model_name
+    tag_filter = TagFilter(**kwargs)
     dataloader = Dataloader(output_dir)
 
     dataset = dataloader.load_dataset(source_repo_id)
@@ -58,5 +63,20 @@ if __name__ == "__main__":
     parser.add_argument("--source_repo_id", type=str, required=True, help="Source huggingface dataset repo id")
     parser.add_argument("--include_tags", type=str, required=False, default=None, help="Comma-separated list of tags to include (optional)")
     parser.add_argument("--exclude_tags", type=str, required=False, default=None, help="Comma-separated list of tags to exclude (optional)")
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="clip",
+        choices=list_embedding_backends(),
+        help="Multimodal embedding backend (clip | transformers). Must match the "
+        "backend used by the embeddings stage for tags to be comparable.",
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default=None,
+        help="Model name/checkpoint for the backend (defaults to backend default).",
+    )
     args = parser.parse_args()
-    main(args.output_dir, args.source_repo_id, args.include_tags, args.exclude_tags)
+    main(args.output_dir, args.source_repo_id, args.include_tags, args.exclude_tags,
+         backend=args.backend, model_name=args.model_name)
