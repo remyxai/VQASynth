@@ -179,3 +179,27 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Object Orientation
+
+🧭 Per-object 3D orientation with [Orient-Anything](https://github.com/SpatialVision/Orient-Anything) — each segmented object gets an `azimuth` / `polar` / `rotation` estimate plus an in-distribution `confidence`. The estimator mirrors `DepthEstimator` (`run` / `apply_transform`) and isolates each object from its SAM2 mask before orienting it, since the model is trained on rendered single-object images and only generalizes to in-the-wild photos when objects are cropped first (the repo's stated "Best Practice").
+
+```python
+from vqasynth.orientation import OrientationEstimator
+
+# `masks` is the per-object SAM2 mask list produced by vqasynth.localize.Localizer
+orientation = OrientationEstimator()
+per_object = orientation.run_objects(image, masks)
+# -> [{"azimuth": 312.0, "polar": 4.0, "rotation": -7.0, "confidence": 0.98}, ...]
+```
+
+In the batch pipeline this runs as the `orientation_stage` (`docker/orientation_stage/`), reading the `masks` column and adding an `orientation` column. The Orient-Anything model code is not on PyPI — clone the repo and put it on your `PYTHONPATH` (or inject `model=` / `preprocess=` into `OrientationEstimator`) to load the real weights.
+```
+@article{wang2024orient,
+  title={Orient Anything: Learning Robust Object Orientation Estimation from Rendering 3D Models},
+  author={Wang, Zehan and Zhang, Ziang and Pang, Tianyu and Du, Chao and Zhao, Hengshuang and Zhao, Zhou},
+  journal={arXiv preprint arXiv:2412.18605},
+  url={https://arxiv.org/abs/2412.18605},
+  year={2024}
+}
+```
