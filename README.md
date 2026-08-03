@@ -201,3 +201,49 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Human Pose Estimation (data-generation pipeline)
+
+> The "Human Pose Estimation" section above described the PR #124 prototype,
+> which obtained body keypoints by *parsing Molmo's `<point>` output*. That
+> inverts the intended causality: Molmo is the **target** of this
+> distillation, not the source of the keypoints. The pipeline has been
+> refactored to be **keypoint-source-first** — keypoints come from a
+> lightweight pose model (or an annotated dataset) and are rendered *into*
+> Molmo-style `<point>` SFT samples. (The inline section above is stale and
+> will be trimmed in a follow-up.)
+
+`vqasynth.pose` produces instruction-tuning samples that teach a VLM to emit
+`<point x=.. y=.. alt=..>` tags for the 17 COCO body joints
+([#31](https://github.com/remyxai/VQASynth/issues/31),
+[salma-remyx/PoseText](https://huggingface.co/datasets/salma-remyx/PoseText)).
+
+```python
+from vqasynth.pose import KeypointExtractor, pose_from_keypoints, build_pose_qa_pairs
+
+# 1. Keypoints come from a pluggable backend (default MediaPipe Pose, CPU-friendly).
+poses = KeypointExtractor(backend="mediapipe").extract(image)   # one pose dict per person
+
+#    ...or build a pose directly from an annotated dataset (COCO/MPII):
+pose = pose_from_keypoints({"left_wrist": [x, y], ...}, image_size=(image.width, image.height))
+
+# 2. Render each keypoint set as Molmo-style SFT pairs.
+qa_pairs = build_pose_qa_pairs(pose)
+#   "Where is the person's left wrist?"
+#   → "The person's left wrist is located at <point x=\"28.0\" y=\"55.0\" alt=\"left wrist\"/>."
+```
+
+- **Pluggable backend**: implement `PoseBackend.extract(image) -> (people, image_size)`
+  (per-person COCO-17 keypoint arrays) and pass an instance to `KeypointExtractor`.
+  `MediaPipePoseBackend` (Apache-2.0) is the default; `StubPoseBackend` drives the tests
+  with no model install.
+- **Licensing**: MediaPipe is Apache-2.0. YOLOv8-pose (ultralytics) is **AGPL-3.0** and is
+  opt-in only — it is never selected by name and is not installed by the pose stage; pass a
+  custom backend instance only if you accept that license.
+- **Dataset stage**: `docker/pose_stage/` runs the backend + emitter over a Hugging Face
+  dataset, appending a `pose_messages` column (the same column-append convention the other
+  stages use). `examples/pose_estimation.py` prints sample SFT pairs from a keypoint fixture
+  (no GPU required).
+
+The QA emitter and chat-message shape reuse `vqasynth.prompt_templates` and the `messages`
+column convention rather than duplicating them.

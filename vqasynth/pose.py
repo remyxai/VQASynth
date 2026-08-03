@@ -1,40 +1,59 @@
 """
-Human pose estimation for VQASynth.
+Human pose estimation for VQASynth — data-generation direction.
 
-Adds a body-keypoint estimation stage and PoseText-style VQA generation so the
-pipeline can produce instruction-tuning data for fine-tuning Molmo on body
-keypoint estimation (issue #31, salma-remyx/PoseText).
+Produces SFT training samples that teach a VLM (Molmo) to emit
+``<point x=.. y=.. alt=..>`` tags for body keypoints — the PoseText task
+(issue #31, salma-remyx/PoseText). Molmo is the *target* (student) of this
+distillation, **not** the source of the keypoints.
 
-Design
-------
-Molmo already emits ``<point x=.. y=.. alt="name">`` tokens for arbitrary
-point localization (``vqasynth.localize.MolmoCaptionLocalizer``). Estimating a
-human pose is a *constrained* instance of that: instead of free-form objects,
-we ask Molmo for a fixed set of named body joints (the COCO-17 skeleton) and
-map the names it returns onto canonical indices.
+Design (keypoint-source-first)
+------------------------------
+Keypoints come from a lightweight pose model or an annotated dataset, then
+the emitter renders them as Molmo-style answers. The pipeline:
 
-Reuse, not duplication:
-  * ``parse_pose`` calls ``vqasynth.localize.extract_points_and_descriptions``
-    (the same parser the object localizer uses). The import is lazy because
-    ``vqasynth.localize`` pulls heavyweight model deps (sam2 / transformers /
-    accelerate) at module top; in lightweight environments (tests, CPU) we fall
-    back to an equivalent local parser so the module stays importable with the
-    standard library alone. The model-backed ``MolmoPoseLocalizer`` likewise
-    imports torch / transformers only when instantiated.
-  * ``build_pose_qa_pairs`` consumes the existing spatial-predicate template
-    corpus in ``vqasynth.prompt_templates`` (pure Python) for the relative
-    keypoint questions, so pose QA reads exactly like the rest of the dataset.
+  1. Run a pluggable backend over an image — default MediaPipe Pose
+     (CPU-friendly, Apache-2.0, 33 body landmarks) — or read a
+     pre-annotated dataset (COCO Keypoints / MPII).
+  2. Extract 2D pixel coordinates per keypoint per detected person.
+  3. Format each keypoint set as SFT training samples (user: image + a
+     question; assistant: a Molmo-style ``<point>`` response carrying the
+     ground-truth pixel coordinates).
+  4. Emit the samples as a HF dataset shard (see ``docker/pose_stage``),
+     appending a ``pose_messages`` column like the other stages.
 
-No GPU, model download, or sam2 install is required to import this module or to
-run its pure-Python parsing / QA logic — that path is what the tests cover. Real
-end-to-end pose inference with Molmo belongs on a GPU host, mirroring how
-``tests/test_vggt_speedups.py`` validates wrapper mechanics against fakes.
+Pluggable backend
+-----------------
+:class:`KeypointExtractor` accepts any backend exposing
+``extract(image) -> (people, image_size)`` (see :class:`PoseBackend`), where
+each entry in ``people`` is a per-person COCO-17 keypoint array. The default
+is :class:`MediaPipePoseBackend`; :class:`StubPoseBackend` is a deterministic,
+dependency-free implementation used by the tests. Adding a backend (e.g. a
+YOLOv8-pose wrapper, or a COCO/MPII dataset reader) is a short subclass.
+
+Reuse, not duplication
+----------------------
+  * The QA-pair emitter (:func:`build_pose_qa_pairs`) renders Molmo-style
+    ``<point>`` answers and phrases relative-position questions through the
+    existing :mod:`vqasynth.prompt_templates` spatial-predicate corpus, so
+    pose QA reads exactly like the rest of a VQASynth dataset.
+  * The chat-message shape (:func:`build_pose_messages`) mirrors the nested
+    ``messages`` column convention :mod:`vqasynth.prompts` writes.
+
+No GPU, model download, or mediapipe/ultralytics install is required to
+import this module or to run its pure-Python QA / message logic — that is
+what the tests cover. Real end-to-end pose inference belongs on a host with
+the chosen backend installed.
+
+Licensing note: MediaPipe is Apache-2.0 and is the default backend.
+YOLOv8-pose (ultralytics) is AGPL-3.0 and is **opt-in only** — it is never
+selected by name and is not installed by the pose stage; users who accept
+that license shape can pass a custom backend instance to
+:class:`KeypointExtractor`.
 """
 from __future__ import annotations
 
 import itertools
 import random
-import re
 
 from vqasynth import prompt_templates
 
@@ -61,166 +80,230 @@ COCO_SKELETON = [
     (11, 13), (13, 15), (12, 14), (14, 16),    # hips -> knees -> ankles
 ]
 
-
-# ---------------------------------------------------------------------------
-# Name normalization: free-form Molmo alt text -> canonical keypoint name
-# ---------------------------------------------------------------------------
-# (substring, canonical_left, canonical_right). ``None`` marks an unpaired
-# joint (nose). Order matters: longer/more-specific tokens first.
-_PARTS = [
-    ("nose", None, None),
-    ("eye", "left_eye", "right_eye"),
-    ("ear", "left_ear", "right_ear"),
-    ("shoulder", "left_shoulder", "right_shoulder"),
-    ("elbow", "left_elbow", "right_elbow"),
-    ("wrist", "left_wrist", "right_wrist"),
-    ("hand", "left_wrist", "right_wrist"),     # Molmo often says "hand" for the wrist joint
-    ("hip", "left_hip", "right_hip"),
-    ("knee", "left_knee", "right_knee"),
-    ("ankle", "left_ankle", "right_ankle"),
-    ("foot", "left_ankle", "right_ankle"),     # foot -> ankle joint
+# MediaPipe Pose emits 33 landmarks; this maps each COCO joint (in COCO-17
+# dataset order) onto its corresponding MediaPipe landmark index. Used to
+# project MediaPipe's 33-landmark output down to the 17-name COCO skeleton
+# the QA emitter and downstream training expect.
+MEDIAPIPE_TO_COCO = [
+    0,   # nose          -> mp nose
+    2,   # left_eye      -> mp left eye
+    5,   # right_eye     -> mp right eye
+    7,   # left_ear      -> mp left ear
+    8,   # right_ear     -> mp right ear
+    11,  # left_shoulder -> mp left shoulder
+    12,  # right_shoulder-> mp right shoulder
+    13,  # left_elbow    -> mp left elbow
+    14,  # right_elbow   -> mp right elbow
+    15,  # left_wrist    -> mp left wrist
+    16,  # right_wrist   -> mp right wrist
+    23,  # left_hip      -> mp left hip
+    24,  # right_hip     -> mp right hip
+    25,  # left_knee     -> mp left knee
+    26,  # right_knee    -> mp right knee
+    27,  # left_ankle    -> mp left ankle
+    28,  # right_ankle   -> mp right ankle
 ]
 
-_FILLER_RE = re.compile(
-    r"\b(the|a|an|of|person|persons|person'?s|body|joint|joints|point|tip|location)\b"
-)
-
-
-def normalize_keypoint_name(raw):
-    """Map free-form keypoint text (e.g. "person's left shoulder") to a
-    canonical name in :data:`COCO_KEYPOINTS`, or ``None`` if it isn't a body
-    joint. Handles case, punctuation, filler words, ``l``/``r`` shorthand, and
-    common synonyms (hand->wrist, foot->ankle).
-    """
-    if not raw:
-        return None
-    text = re.sub(r"[^a-z0-9 ]", " ", raw.strip().lower())
-    text = _FILLER_RE.sub(" ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    if not text:
-        return None
-
-    side = None
-    if re.search(r"\bleft\b", text) or re.search(r"(^|\s)l(\s|$)", text):
-        side = "left"
-    elif re.search(r"\bright\b", text) or re.search(r"(^|\s)r(\s|$)", text):
-        side = "right"
-
-    for part, left, right in _PARTS:
-        if part not in text:
-            continue
-        if left is None:                      # unpaired joint (nose)
-            return part
-        if side == "left":
-            return left
-        if side == "right":
-            return right
-        return None                           # part seen but side ambiguous
-    return None
-
 
 # ---------------------------------------------------------------------------
-# Parsing Molmo <point> output into an ordered pose
+# Pose dict construction (backend output -> canonical pose)
 # ---------------------------------------------------------------------------
-_POINT_RE = re.compile(
-    r'<point\s+x="\s*([0-9]+(?:\.[0-9]+)?)"\s+y="\s*([0-9]+(?:\.[0-9]+)?)"\s+alt="([^"]+)">'
-)
+def pose_from_keypoints(keypoints, image_size):
+    """Build the canonical COCO-17 pose dict from raw per-joint pixel coords.
 
+    Args:
+        keypoints: per-joint pixel coordinates in COCO-17 order. Either:
 
-def _local_extract_points(molmo_output, image_w, image_h):
-    """Local copy of ``vqasynth.localize.extract_points_and_descriptions``.
+            * an iterable of 17 entries, each an ``(x, y)`` / ``[x, y]``
+              pixel coordinate, or ``None`` if the joint was not detected; or
+            * a mapping keyed by canonical name *or* 0-indexed COCO index,
+              with missing joints treated as not visible.
 
-    Used only when the shared parser can't be imported (sam2 / transformers not
-    installed). Kept byte-for-byte equivalent in behaviour so both paths agree.
-    """
-    results = []
-    for match in _POINT_RE.finditer(molmo_output):
-        try:
-            x_norm = float(match.group(1))
-            y_norm = float(match.group(2))
-            description = match.group(3)
-        except ValueError:
-            continue
-        if max(x_norm, y_norm) > 100:
-            continue
-        x_pixel = (x_norm / 100.0) * image_w
-        y_pixel = (y_norm / 100.0) * image_h
-        results.append({"points": [x_pixel, y_pixel], "caption": description})
-    return results
+        image_size: ``(width, height)`` of the source image, in pixels.
 
-
-def _extract_points(molmo_output, image_w, image_h):
-    """Prefer the shared object-localizer parser; fall back to the local copy."""
-    try:
-        from vqasynth.localize import extract_points_and_descriptions
-    except Exception:
-        extract_points_and_descriptions = _local_extract_points
-    return extract_points_and_descriptions(molmo_output, image_w, image_h)
-
-
-def parse_pose(molmo_output, image_w, image_h):
-    """Parse Molmo ``<point>`` output into an ordered COCO-17 pose.
-
-    Each joint is reported once (first detection wins). Coordinates are in
-    image pixels; undetected joints are reported with ``xy=None`` /
-    ``visible=False`` (the COCO convention for "not labeled").
-
-    Returns::
+    Returns the pose dict shape :func:`build_pose_qa_pairs` consumes::
 
         {
           "keypoints": [ {index, name, xy, visible}, ... x17 ],
-          "image_size": (image_w, image_h),
+          "image_size": (w, h),
           "num_detected": int,
         }
     """
-    detected = {}  # canonical index -> [x_pixel, y_pixel]
-    for entry in _extract_points(molmo_output, image_w, image_h):
-        name = normalize_keypoint_name(entry.get("caption", ""))
-        if name is None:
-            continue
-        idx = KEYPOINT_INDEX[name]
-        if idx not in detected:               # first detection wins
-            detected[idx] = list(entry["points"])
+    if isinstance(keypoints, dict):
+        resolved = [None] * len(COCO_KEYPOINTS)
+        for idx, name in enumerate(COCO_KEYPOINTS):
+            value = keypoints.get(idx, keypoints.get(name))
+            if value is not None:
+                resolved[idx] = list(value)
+        keypoints = resolved
 
-    keypoints = []
+    out = []
+    detected = 0
     for idx, name in enumerate(COCO_KEYPOINTS):
-        xy = detected.get(idx)
-        keypoints.append({
-            "index": idx,
-            "name": name,
-            "xy": xy,
-            "visible": xy is not None,
-        })
-    return {
-        "keypoints": keypoints,
-        "image_size": (image_w, image_h),
-        "num_detected": sum(1 for k in keypoints if k["visible"]),
-    }
+        xy = keypoints[idx] if idx < len(keypoints) else None
+        if xy is not None:
+            xy = [float(xy[0]), float(xy[1])]
+            detected += 1
+        out.append({"index": idx, "name": name, "xy": xy, "visible": xy is not None})
+    return {"keypoints": out, "image_size": image_size, "num_detected": detected}
+
+
+# ---------------------------------------------------------------------------
+# Pluggable keypoint backends
+# ---------------------------------------------------------------------------
+class PoseBackend:
+    """Interface for a keypoint-detection backend.
+
+    Subclasses implement :meth:`extract` to return the raw per-person
+    keypoint arrays for an image; :class:`KeypointExtractor` normalizes them
+    into canonical pose dicts. A new backend only has to map its native
+    keypoint format onto the 17-name COCO skeleton — see
+    :class:`MediaPipePoseBackend` and :class:`StubPoseBackend`.
+    """
+
+    def extract(self, image):
+        """Run the backend over ``image`` (a :class:`PIL.Image.Image`).
+
+        Returns ``(people, image_size)`` where ``image_size`` is
+        ``(width, height)`` in pixels and ``people`` is a list of per-person
+        keypoint arrays in COCO-17 order — each an iterable of 17 ``(x, y)``
+        pixel coordinates or ``None``.
+        """
+        raise NotImplementedError
+
+
+class StubPoseBackend(PoseBackend):
+    """Deterministic, dependency-free backend for tests and the CPU demo.
+
+    Always returns ``keypoints`` for a single detected person regardless of
+    the input image, so QA / message logic can be exercised without a pose
+    model installed. ``keypoints`` follows the same format as
+    :func:`pose_from_keypoints`.
+    """
+
+    def __init__(self, keypoints, image_size):
+        # Normalize to the per-person list form the backend contract expects
+        # (handles dict fixtures too, via pose_from_keypoints).
+        pose = pose_from_keypoints(keypoints, image_size)
+        self._person = [k["xy"] for k in pose["keypoints"]]  # 17 entries, [x,y] or None
+        self._image_size = image_size
+
+    def extract(self, image):
+        # Return a shallow copy so callers can't mutate the fixture.
+        return [list(self._person)], self._image_size
+
+
+class MediaPipePoseBackend(PoseBackend):
+    """Default backend: MediaPipe Pose (CPU-friendly, Apache-2.0).
+
+    MediaPipe emits 33 body landmarks per person; we project them onto the
+    17-name COCO skeleton via :data:`MEDIAPIPE_TO_COCO`. ``mediapipe`` is
+    imported lazily on construction, so importing this module (and running
+    the test suite) needs no pose-model install.
+    """
+
+    def __init__(self, model_complexity=1, min_detection_confidence=0.5,
+                 min_visibility=0.5):
+        import mediapipe as mp  # lazy: heavy, optional dep
+        self._min_visibility = min_visibility
+        self._pose = mp.solutions.pose.Pose(
+            static_image_mode=True,
+            model_complexity=model_complexity,
+            min_detection_confidence=min_detection_confidence,
+        )
+
+    def extract(self, image):
+        import numpy as np  # local import; numpy is a core vqasynth dep
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        width, height = image.size
+        result = self._pose.process(np.asarray(image))
+
+        # The legacy solutions.pose API returns one pose (most-prominent);
+        # newer Tasks builds expose pose_landmarks_list with N persons.
+        if getattr(result, "pose_landmarks_list", None):
+            landmark_sets = result.pose_landmarks_list
+        elif result.pose_landmarks is not None:
+            landmark_sets = [result.pose_landmarks]
+        else:
+            landmark_sets = []
+
+        people = []
+        for landmarks in landmark_sets:
+            kps = [None] * len(COCO_KEYPOINTS)
+            for coco_idx, mp_idx in enumerate(MEDIAPIPE_TO_COCO):
+                if mp_idx >= len(landmarks.landmark):
+                    continue
+                lm = landmarks.landmark[mp_idx]
+                # MediaPipe coords are normalized to [0, 1]; visibility is the
+                # probability the joint is unoccluded — drop low ones.
+                if getattr(lm, "visibility", 1.0) < self._min_visibility:
+                    continue
+                kps[coco_idx] = [lm.x * width, lm.y * height]
+            people.append(kps)
+        return people, (width, height)
+
+    def close(self):
+        self._pose.close()
+
+
+def _resolve_backend(backend):
+    """Resolve a backend argument to a :class:`PoseBackend` instance."""
+    if isinstance(backend, str):
+        name = backend.lower()
+        if name == "mediapipe":
+            return MediaPipePoseBackend()
+        if name in ("yolov8", "ultralytics"):
+            raise ValueError(
+                "The ultralytics (YOLOv8-pose) backend is AGPL-3.0 and is "
+                "opt-in only — it is never selected by name. Install "
+                "ultralytics and pass a backend instance to KeypointExtractor "
+                "directly if you accept that license."
+            )
+        raise ValueError(f"Unknown pose backend: {backend!r}")
+    return backend
+
+
+class KeypointExtractor:
+    """Run a pluggable pose backend and emit per-person COCO-17 pose dicts.
+
+    Args:
+        backend: a :class:`PoseBackend` instance, or a backend name string.
+            ``"mediapipe"`` (the default) selects :class:`MediaPipePoseBackend`.
+            Pass a custom instance (e.g. :class:`StubPoseBackend`) for tests
+            or to wrap an annotated-dataset reader.
+
+    The backend's heavy dependencies are imported lazily when the named
+    backend is constructed, so importing this module stays cheap and tests
+    need no pose-model install.
+    """
+
+    def __init__(self, backend="mediapipe"):
+        self.backend = _resolve_backend(backend)
+
+    def extract(self, image):
+        """Return one canonical pose dict (see :func:`pose_from_keypoints`)
+        per person detected in ``image``."""
+        people, image_size = self.backend.extract(image)
+        return [pose_from_keypoints(person, image_size) for person in people]
+
+    def extract_messages(self, image, max_questions=12, seed=None):
+        """Convenience: keypoints -> SFT chat messages for every person.
+
+        Returns a flat list of chat-message samples (see
+        :func:`build_pose_messages`), spanning every detected person.
+        """
+        samples = []
+        for pose in self.extract(image):
+            samples.extend(
+                build_pose_messages(pose, max_questions=max_questions, seed=seed)
+            )
+        return samples
 
 
 # ---------------------------------------------------------------------------
 # Pose QA generation (PoseText-style, for fine-tuning Molmo)
 # ---------------------------------------------------------------------------
-def build_pose_prompt(keypoint_names=None):
-    """Prompt asking Molmo to emit one ``<point>`` per visible body joint,
-    reusing the normalized 0-100 coordinate convention from
-    :class:`vqasynth.localize.MolmoCaptionLocalizer`.
-    """
-    joints = [n.replace("_", " ") for n in (keypoint_names or COCO_KEYPOINTS)]
-    listed = ", ".join(joints)
-    return (
-        "You are an AI assistant that estimates human body keypoints. "
-        "For the person in the image, locate each visible body joint and output "
-        'one <point> element per joint in this format: '
-        '<point x="X" y="Y" alt="joint name"/>. '
-        f"The joints are: {listed}. "
-        'Use the joint name exactly as listed for the alt text. '
-        "Use normalized coordinates from 0 to 100. "
-        "Only output points for joints that are visible; omit any you cannot see. "
-        "Only provide valid points in the specified format."
-    )
-
-
 _SINGLE_KP_QUESTIONS = [
     "Point to the {kp} of the person.",
     "Where is the person's {kp}?",
@@ -267,7 +350,7 @@ def _spatial_relation(a_xy, b_xy):
     return "above" if dy < 0 else "below"
 
 
-# relation -> (predicate questions, true responses, false responses, affirmative flag)
+# relation -> (predicate questions, true responses, false responses)
 _RELATION_TEMPLATES = {
     "left": (prompt_templates.left_predicate_questions,
              prompt_templates.left_true_responses,
@@ -289,9 +372,10 @@ def _substitute(template, a, b):
 
 
 def build_pose_qa_pairs(pose, max_questions=12, seed=None):
-    """Generate PoseText-style (question, answer) pairs from a parsed pose.
+    """Generate PoseText-style (question, answer) pairs from a pose dict.
 
-    Three families, all in forms directly usable for instruction-tuning Molmo:
+    Three families, all directly usable for instruction-tuning a VLM to emit
+    Molmo ``<point>`` tags for body keypoints:
 
       * per-keypoint point localization (answer is a Molmo ``<point>`` token);
       * whole-pose localization (one ``<point>`` per visible joint);
@@ -300,7 +384,7 @@ def build_pose_qa_pairs(pose, max_questions=12, seed=None):
         stylistically consistent with the rest of a VQASynth dataset.
 
     Args:
-        pose: output of :func:`parse_pose`.
+        pose: output of :func:`pose_from_keypoints` / :meth:`KeypointExtractor.extract`.
         max_questions: cap on the number of pairs returned.
         seed: optional int for deterministic output (tests).
 
@@ -340,7 +424,7 @@ def build_pose_qa_pairs(pose, max_questions=12, seed=None):
             templates = _RELATION_TEMPLATES.get(relation)
             if templates is None:            # "same" — skip, no clean predicate
                 continue
-            questions, true_responses, false_responses = templates
+            questions, true_responses, _false_responses = templates
             disp_a, disp_b = _disp(kp_a["name"]), _disp(kp_b["name"])
             question = _substitute(rng.choice(questions), disp_a, disp_b)
             answer = _substitute(rng.choice(true_responses), disp_a, disp_b)
@@ -351,43 +435,90 @@ def build_pose_qa_pairs(pose, max_questions=12, seed=None):
     return qa
 
 
-# ---------------------------------------------------------------------------
-# Model-backed estimator (heavy deps imported lazily on instantiation)
-# ---------------------------------------------------------------------------
-class MolmoPoseLocalizer:
-    """Estimate COCO-17 body keypoints by prompting Molmo for named joints.
+def build_pose_messages(pose, max_questions=12, seed=None):
+    """Turn a pose dict into a list of SFT chat-message samples.
 
-    Wraps :class:`vqasynth.localize.MolmoCaptionLocalizer` (same 4-bit Molmo
-    load path used for object localization) and parses its output with
-    :func:`parse_pose`. Torch / transformers / bitsandbytes are imported only
-    when the estimator is constructed, so importing this module stays cheap.
+    Each sample is ``{"messages": [...]}`` in the nested role/content
+    structure :mod:`vqasynth.prompts` writes to the ``messages`` column: the
+    user turn carries an image placeholder (``index: 0``) followed by the
+    question, and the assistant turn carries the Molmo-style ``<point>``
+    answer. One sample per (question, answer) pair from
+    :func:`build_pose_qa_pairs`.
+    """
+    samples = []
+    for qa in build_pose_qa_pairs(pose, max_questions=max_questions, seed=seed):
+        samples.append({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"index": 0, "text": None, "type": "image"},
+                        {"index": None, "text": qa["question"], "type": "text"},
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"index": None, "text": qa["answer"], "type": "text"},
+                    ],
+                },
+            ]
+        })
+    return samples
+
+
+# ---------------------------------------------------------------------------
+# Dataset transform (column-append convention used by the docker stages)
+# ---------------------------------------------------------------------------
+class PoseAnnotator:
+    """Dataset transform that appends a ``pose_messages`` column.
+
+    Mirrors the column-append convention used by the other stages (e.g.
+    :class:`vqasynth.embeddings.EmbeddingGenerator`): ``apply_transform`` is
+    meant to be passed to ``dataset.map(..., batched=True)`` and writes one
+    list of SFT chat-message samples (see :func:`build_pose_messages`) per
+    input image. Rows where pose detection yields no samples are written as
+    ``None`` and dropped downstream by :func:`vqasynth.utils.filter_null`.
     """
 
-    def __init__(self, model_name="cyan2k/molmo-7B-O-bnb-4bit", device=None):
-        from vqasynth.localize import MolmoCaptionLocalizer
-        self.model_name = model_name
-        self._localizer = MolmoCaptionLocalizer(model_name=model_name, device=device)
+    def __init__(self, backend="mediapipe", max_questions=12, seed=None):
+        self.extractor = KeypointExtractor(backend=backend)
+        self.max_questions = max_questions
+        self.seed = seed
 
-    @property
-    def device(self):
-        return self._localizer.device
+    def _samples_for(self, image):
+        samples = []
+        for pose in self.extractor.extract(image):
+            samples.extend(
+                build_pose_messages(pose, max_questions=self.max_questions, seed=self.seed)
+            )
+        return samples or None
 
-    @property
-    def processor(self):
-        return self._localizer.processor
+    def apply_transform(self, example, images):
+        """Process a single example or a batch, adding a ``pose_messages`` column."""
+        from PIL import Image  # lazy: keeps the module importable without PIL
+        is_batched = isinstance(example[images], list)
 
-    def run(self, image):
-        """Run Molmo with the pose prompt and return the parsed pose dict."""
-        import torch
-        prompt = build_pose_prompt()
-        inputs = self.processor.process(images=[image], text=prompt)
-        inputs = {
-            k: v.to(self._localizer.device).unsqueeze(0)
-            for k, v in inputs.items() if isinstance(v, torch.Tensor)
-        }
-        generated_ids = self._localizer.generate_ids(inputs)
-        text = self.processor.tokenizer.decode(
-            generated_ids[0], skip_special_tokens=True
-        )
-        image_w, image_h = image.size
-        return parse_pose(text, image_w, image_h)
+        try:
+            if is_batched:
+                results = []
+                for img_item in example[images]:
+                    image = img_item[0] if isinstance(img_item, list) else img_item
+                    if not isinstance(image, Image.Image):
+                        raise ValueError(f"Expected a PIL image but got {type(image)}")
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    results.append(self._samples_for(image))
+                example["pose_messages"] = results
+            else:
+                image = example[images][0] if isinstance(example[images], list) else example[images]
+                if not isinstance(image, Image.Image):
+                    raise ValueError(f"Expected a PIL image but got {type(image)}")
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                example["pose_messages"] = self._samples_for(image)
+        except Exception as e:  # mirror the embeddings stage: skip, don't abort the batch
+            print(f"Error processing image, skipping: {e}")
+            example["pose_messages"] = [None] * len(example[images]) if is_batched else None
+
+        return example

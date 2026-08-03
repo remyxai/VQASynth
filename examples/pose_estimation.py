@@ -1,71 +1,87 @@
-"""Generate PoseText-style VQA from a single image's body keypoints.
+"""Generate PoseText-style SFT samples from a person's body keypoints.
+
+Data-generation direction (keypoint-source-first): keypoints come from a
+lightweight pose model, and the emitter renders them as Molmo-style
+``<point>`` answers. Molmo is the *target* of this distillation, not the
+source of the keypoints. See issue #31 and salma-remyx/PoseText.
 
 Two entry points:
 
-  * ``generate_from_molmo_output`` — pure-Python: take Molmo's ``<point>`` text
-    (e.g. captured from a prior run or another model) and emit instruction-tuning
-    pairs. No GPU / model install required.
-  * ``generate_from_image`` — GPU path: load Molmo via
-    ``vqasynth.pose.MolmoPoseLocalizer`` to predict the keypoints first.
+  * ``generate_from_keypoints`` — pure-Python: take a keypoint set (e.g. from
+    an annotated dataset like COCO/MPII, or captured from a pose model) and
+    emit instruction-tuning samples. No GPU / model install required.
+  * ``generate_from_image`` — runs a pose backend over a PIL image via
+    ``vqasynth.pose.KeypointExtractor`` (default MediaPipe, CPU-friendly) to
+    predict the keypoints first.
 
-Run as a script to print a few sample pairs built from a captured Molmo output:
+Run as a script to print a few sample SFT training pairs built from a
+synthetic keypoint fixture:
 
     python examples/pose_estimation.py
-
-This produces the same kind of (question, answer) data used to fine-tune Molmo
-for body keypoint estimation — see issue #31 and salma-remyx/PoseText.
 """
 from __future__ import annotations
 
-from vqasynth.pose import build_pose_qa_pairs, parse_pose
-
-
-# Captured Molmo <point> output for one person (normalized 0-100 coordinates),
-# used by the CPU demo path so the script is runnable without a GPU.
-SAMPLE_MOLMO_OUTPUT = (
-    '<point x="50" y="12" alt="nose">'
-    '<point x="46" y="10" alt="left eye">'
-    '<point x="54" y="10" alt="right eye">'
-    '<point x="40" y="22" alt="left shoulder">'
-    '<point x="60" y="22" alt="right shoulder">'
-    '<point x="32" y="40" alt="left elbow">'
-    '<point x="68" y="40" alt="right elbow">'
-    '<point x="28" y="55" alt="left wrist">'
-    '<point x="72" y="55" alt="right wrist">'
-    '<point x="44" y="48" alt="left hip">'
-    '<point x="56" y="48" alt="right hip">'
-    '<point x="42" y="70" alt="left knee">'
-    '<point x="58" y="70" alt="right knee">'
-    '<point x="41" y="90" alt="left ankle">'
-    '<point x="59" y="90" alt="right ankle">'
+from vqasynth.pose import (
+    KeypointExtractor,
+    build_pose_messages,
+    pose_from_keypoints,
 )
-SAMPLE_IMAGE_SIZE = (512, 512)
 
 
-def generate_from_molmo_output(molmo_output, image_w, image_h, max_questions=8, seed=0):
-    """Parse Molmo ``<point>`` text into a pose and build PoseText-style QA."""
-    pose = parse_pose(molmo_output, image_w, image_h)
-    return pose, build_pose_qa_pairs(pose, max_questions=max_questions, seed=seed)
+# A synthetic 17-keypoint set for a 256x256 image, in COCO order
+# (name -> [x_pixel, y_pixel]). Only the visible joints are listed; the
+# emitter skips the rest. Used by the CPU demo path so the script runs
+# without a pose-model install.
+SAMPLE_IMAGE_SIZE = (256, 256)
+SAMPLE_KEYPOINTS = {
+    "nose": [128, 30],
+    "left_shoulder": [80, 64],
+    "right_shoulder": [176, 64],
+    "left_elbow": [56, 110],
+    "right_elbow": [200, 110],
+    "left_wrist": [44, 150],
+    "right_wrist": [212, 150],
+    "left_hip": [96, 130],
+    "right_hip": [160, 130],
+    "left_knee": [100, 190],
+    "right_knee": [156, 190],
+    "left_ankle": [96, 240],
+    "right_ankle": [160, 240],
+}
 
 
-def generate_from_image(image, model_name="cyan2k/molmo-7B-O-bnb-4bit",
-                        max_questions=8, seed=0):
-    """GPU path: predict keypoints with Molmo, then build QA pairs."""
-    from vqasynth.pose import MolmoPoseLocalizer
-    pose = MolmoPoseLocalizer(model_name=model_name).run(image)
-    return pose, build_pose_qa_pairs(pose, max_questions=max_questions, seed=seed)
+def generate_from_keypoints(keypoints, image_size, max_questions=8, seed=0):
+    """Build PoseText-style SFT chat samples from a keypoint set.
+
+    ``keypoints`` follows the format accepted by
+    :func:`vqasynth.pose.pose_from_keypoints` (a list of 17 ``(x, y)`` /
+    ``None`` in COCO order, or a ``{name: (x, y)}`` mapping).
+    """
+    pose = pose_from_keypoints(keypoints, image_size)
+    return pose, build_pose_messages(pose, max_questions=max_questions, seed=seed)
 
 
-def _format(qa):
+def generate_from_image(image, backend="mediapipe", max_questions=8, seed=0):
+    """Run a pose backend over ``image`` and build SFT samples per person."""
+    extractor = KeypointExtractor(backend=backend)
+    pose_list = extractor.extract(image)
+    samples = []
+    for pose in pose_list:
+        samples.extend(build_pose_messages(pose, max_questions=max_questions, seed=seed))
+    return pose_list, samples
+
+
+def _format(samples):
     lines = []
-    for i, pair in enumerate(qa, 1):
-        lines.append(f"Q{i}: {pair['question']}\nA{i}: {pair['answer']}")
+    for i, sample in enumerate(samples, 1):
+        msgs = sample["messages"]
+        question = next(c["text"] for c in msgs[0]["content"] if c["type"] == "text")
+        answer = msgs[1]["content"][0]["text"]
+        lines.append(f"Q{i}: {question}\nA{i}: {answer}")
     return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    pose, qa = generate_from_molmo_output(
-        SAMPLE_MOLMO_OUTPUT, SAMPLE_IMAGE_SIZE[0], SAMPLE_IMAGE_SIZE[1]
-    )
+    pose, samples = generate_from_keypoints(SAMPLE_KEYPOINTS, SAMPLE_IMAGE_SIZE)
     print(f"Detected {pose['num_detected']}/{len(pose['keypoints'])} body keypoints.\n")
-    print(_format(qa))
+    print(_format(samples))
