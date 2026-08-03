@@ -44,6 +44,10 @@ on:
         description: 'Optional hand-crafted implementation spec (landing-zone-to-PR mode). Overrides suggested_experiment.'
         required: false
         default: ''
+      mode:
+        description: 'Run mode. recommend (default) runs the ranker+paper flow; brief runs the paper-less lead-content-only flow.'
+        required: false
+        default: ''
       start-from-ref:
         description: 'Optional branch/tag/SHA to start the coding session from.'
         required: false
@@ -88,9 +92,12 @@ jobs:
           if [ -n "$MODEL_INPUT" ]; then
             echo "ANTHROPIC_MODEL=$MODEL_INPUT" >> "$GITHUB_ENV"
           fi
-      - uses: remyxai/outrider@v1
+      # TEMP: pinned to feat/lead-content-mode for pre-merge integration test
+      # of brief mode against issue #53. Revert to @v1 once the branch merges.
+      - uses: remyxai/outrider@feat/lead-content-mode
         with:
           interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
+          mode: ${{ inputs.mode || '' }}
           rate-limit-days: '0'
           # Coding agents routinely touch build/env metadata while adding a
           # training pipeline (cache dirs into .gitignore, deps into
