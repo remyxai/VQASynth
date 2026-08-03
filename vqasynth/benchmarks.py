@@ -550,6 +550,57 @@ class BenchmarkRunner:
             "per_item": per_item,
         }
 
+    def audit_visual_credit(self, items, image_predictions, vlm=None,
+                            control_predictions=None):
+        """
+        Visual Credit Audit (dependence-credited correctness) over a benchmark.
+
+        For each forced-choice item (yes/no *judgment* or letter *multi-choice*
+        items), compare the image-conditioned prediction against a blank-image
+        control to estimate whether correct answers are actually credited to
+        the image rather than recoverable from the question alone. Adapted from
+        "Visual Credit Audit for Multimodal Spatial Reasoning"
+        (arXiv:2607.27069); open-ended / numeric items are skipped.
+
+        Control predictions are taken from ``control_predictions`` (item id ->
+        text) when provided, otherwise generated on the fly by calling
+        ``vlm.predict`` with a blank control image, reusing the existing
+        inference path. Items without a usable control are skipped.
+
+        Returns an audit report dict (see
+        ``vqasynth.visual_credit_audit.audit_decisions``).
+        """
+        from vqasynth.visual_credit_audit import audit_decisions, blank_control_image
+
+        control_map = dict(control_predictions or {})
+        records = []
+        for item in items:
+            qtype = item.get("question_type")
+            if qtype == "judgment":
+                kind = "judgment"
+            elif qtype == "multi-choice":
+                kind = "multi-choice"
+            else:
+                continue
+
+            item_id = item["id"]
+            if item_id not in control_map:
+                if vlm is None:
+                    continue
+                control_map[item_id] = vlm.predict(
+                    blank_control_image(), item["question"]
+                )
+
+            records.append({
+                "image_pred": image_predictions.get(item_id, ""),
+                "control_pred": control_map[item_id],
+                "gold": item["answer"],
+                "kind": kind,
+            })
+
+        result = audit_decisions(records)
+        return {"audit": "visual_credit_dcc", **result}
+
     def run(self, predictions_by_benchmark, load_kwargs=None):
         """
         Run evaluation across configured benchmarks.

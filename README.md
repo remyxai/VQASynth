@@ -179,3 +179,7 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Visual Credit Audit
+Audit whether correct spatial answers are actually credited to the image, not just recoverable from the question alone. `BenchmarkRunner.audit_visual_credit` re-scores forced-choice (yes/no *judgment* and *multi-choice*) items with dependence-credited correctness (D-CC): a correct decision is credited only when a blank-image control would not already yield the gold answer, surfacing the "correct but uncredited" rate. The blank control is produced through the existing `VLMInference.predict` path, so no new inference machinery is required. Adapted from [Visual Credit Audit for Multimodal Spatial Reasoning](https://arxiv.org/abs/2607.27069).
+
