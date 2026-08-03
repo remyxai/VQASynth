@@ -223,7 +223,9 @@ Containerized stage (matches the `docker/*_stage/` convention; depends on the
 embeddings stage, whose `embedding` column it consumes):
 
 ```bash
-bash run.sh   # builds the base image, then: docker compose -f pipelines/<your>.yaml up --build
+# Build the base image once (run.sh does this first), then run the curation stage:
+docker build -f docker/base_image/Dockerfile -t vqasynth:base .
+docker compose -f pipelines/curate.yaml up --build
 ```
 
 The stage reads optional `curate_*` keys from `config/config.yaml` (defaults
