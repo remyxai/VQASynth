@@ -179,3 +179,76 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Data Curation — Uniform Sampling
+
+VQASynth ships a standalone **curation stage** that selects a more *uniform*
+subset of a synthetic dataset by maximizing pairwise distance between sample
+embeddings — the practical data-selection strategy surfaced in
+[issue #28](https://github.com/remyxai/VQASynth/issues/28) from
+[SafeRL-Lab/data-uniformity](https://arxiv.org/abs/2506.24120). Choosing a
+uniform subset (vs. random sampling) can improve training efficiency and final
+accuracy on datasets you iterate on continuously, like SpaceThinker.
+
+The selector greedily picks the K samples that maximize the minimum distance to
+the already-selected set (farthest-point sampling in embedding space). It is
+portable to any embedding source and ships with a random-sampling baseline in
+the same module, so a downstream ablation can run both with one flag.
+
+```python
+from datasets import load_dataset
+from vqasynth.curate import Curator, write_manifest
+
+dataset = load_dataset("remyxai/SpaceThinker")
+curator = Curator(embedding_source=None, seed=0)   # reads the `embedding` column
+
+# uniform (max-min pairwise distance) and random baseline, same size
+uniform_subset, uniform_manifest = curator.curate(dataset, fraction=0.25, strategy="farthest")
+random_subset,  random_manifest  = curator.curate(dataset, fraction=0.25, strategy="random")
+
+uniform_subset.save_to_disk("./curated/spacethinker_uniform")
+write_manifest(uniform_manifest, "./curated/spacethinker_uniform/curate_manifest.json")
+```
+
+`Curator` resolves embeddings in priority order: (1) a precomputed `embedding`
+column on the dataset (written by the embeddings stage / `EmbeddingGenerator`),
+(2) an explicit `embedding_source` callable, or (3) OpenAI CLIP ViT-B/32 image
+embeddings via `vqasynth.embeddings.EmbeddingGenerator` (CPU-friendly default).
+Each curated subset is emitted with a `curate_manifest.json` recording the
+selected sample ids, seed, strategy, metric, and embedding source.
+
+### Run it
+
+Containerized stage (matches the `docker/*_stage/` convention; depends on the
+embeddings stage, whose `embedding` column it consumes):
+
+```bash
+bash run.sh   # builds the base image, then: docker compose -f pipelines/<your>.yaml up --build
+```
+
+The stage reads optional `curate_*` keys from `config/config.yaml` (defaults
+apply if absent):
+
+```yaml
+arguments:
+  curate_strategy: "farthest"   # or "random"
+  curate_fraction: "0.25"       # mutually exclusive with curate_count
+  curate_count: ""              # absolute count, overrides fraction when set
+  curate_seed: "0"
+  curate_metric: "euclidean"    # or "cosine"
+  curate_split: "train"
+  curate_push: "false"          # push the curated variant to the Hub
+```
+
+Or run the in-process demo, which computes CLIP embeddings once and produces
+both the uniform and random 25% subsets of SpaceThinker for direct comparison:
+
+```bash
+OUTPUT_DIR=./curated python examples/curate_spacethinker.py
+```
+
+### Feeding a curated variant into training
+
+The curated subset is a standalone artifact — point a LoRA training config's
+`dataset.repo_id` at the curated variant directory (or Hub repo) to train on it.
+Curation is upstream of training; no training-side changes are required.
