@@ -26,19 +26,20 @@ Usage
 -----
 Build the judge-input JSONL (+ materialize images)::
 
-    python examples/prometheus_space_judge.py build \
+    python -m experiments.prometheus_space_judge.run build \
         --dataset remyxai/OpenSpaces --limit 1000 \
         --image-dir openspaces --output openspaces/sample_eval_data.jsonl
 
 Parse scores + build the scored dataset (+ optional histogram / Hub push)::
 
-    python examples/prometheus_space_judge.py score \
+    python -m experiments.prometheus_space_judge.run score \
         --eval openspaces/sample_eval_data.jsonl \
         --results evaluation_results.jsonl \
         --image-dir openspaces \
         --histogram score_histogram.png \
         --push-to-hub <user>/SpaceJudgeDataset
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,7 +52,6 @@ from PIL import Image
 
 # Import the package logic we are wiring up.
 from vqasynth.datasets import Dataloader
-from vqasynth.utils import filter_null
 from vqasynth.judge_dataset import (
     build_scored_dataset,
     match_entries,
@@ -59,6 +59,7 @@ from vqasynth.judge_dataset import (
     score_distribution,
     write_jsonl,
 )
+from vqasynth.utils import filter_null
 
 
 def _load_rows(dataset_id: str, split: str, cache_dir: str | None):
@@ -140,7 +141,9 @@ def score(args: argparse.Namespace) -> None:
     distribution = score_distribution(matched)
     print(f"score distribution: {distribution}")
     if args.histogram:
-        _plot_histogram(distribution, "Score Distribution of Parsed Data", args.histogram)
+        _plot_histogram(
+            distribution, "Score Distribution of Parsed Data", args.histogram
+        )
 
     def _load_image(record):
         return Image.open(record["image"]).convert("RGB")
@@ -150,12 +153,13 @@ def score(args: argparse.Namespace) -> None:
 
     if args.push_to_hub:
         dataset = DatasetDict({"train": Dataset.from_list(scored)})
-        Dataloader(args.cache_dir or "").push_to_hub(dataset, args.push_to_hub.split("/")[-1])
+        Dataloader(args.cache_dir or "").push_to_hub(
+            dataset, args.push_to_hub.split("/")[-1]
+        )
         print(f"pushed scored dataset to {args.push_to_hub}")
     elif args.output_dataset:
         with open(args.output_dataset, "w", encoding="utf-8") as handle:
-            for entry in scored:
-                handle.write(json.dumps(entry) + "\n")
+            handle.writelines(json.dumps(entry) + "\n" for entry in scored)
         print(f"wrote scored dataset to {args.output_dataset}")
 
 
@@ -174,13 +178,25 @@ def main(argv: list[str] | None = None) -> int:
     build_parser.set_defaults(func=build)
 
     score_parser = sub.add_parser("score", help="Parse scores + build scored dataset.")
-    score_parser.add_argument("--eval", required=True, help="Judge-input JSONL (build output).")
+    score_parser.add_argument(
+        "--eval", required=True, help="Judge-input JSONL (build output)."
+    )
     score_parser.add_argument("--results", required=True, help="llava answers JSONL.")
     score_parser.add_argument("--image-dir", default="openspaces")
-    score_parser.add_argument("--skip-images", action="store_true", help="Store image paths instead of opening PIL images.")
-    score_parser.add_argument("--histogram", default=None, help="Optional histogram PNG path.")
-    score_parser.add_argument("--output-dataset", default=None, help="Optional scored-dataset JSONL path.")
-    score_parser.add_argument("--push-to-hub", default=None, help="Optional HF Hub repo id to push to.")
+    score_parser.add_argument(
+        "--skip-images",
+        action="store_true",
+        help="Store image paths instead of opening PIL images.",
+    )
+    score_parser.add_argument(
+        "--histogram", default=None, help="Optional histogram PNG path."
+    )
+    score_parser.add_argument(
+        "--output-dataset", default=None, help="Optional scored-dataset JSONL path."
+    )
+    score_parser.add_argument(
+        "--push-to-hub", default=None, help="Optional HF Hub repo id to push to."
+    )
     score_parser.add_argument("--cache-dir", default=None)
     score_parser.set_defaults(func=score)
 

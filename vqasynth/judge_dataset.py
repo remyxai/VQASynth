@@ -8,17 +8,19 @@ The reformat + score-parse logic here is pure-stdlib (no torch / PIL / HF) so
 it can be unit-tested with synthetic inputs the way ``tests/test_vggt_speedups``
 tests the VGGT wrapper. The end-to-end wiring (loading ``remyxai/OpenSpaces``,
 materializing images, plotting the histogram, pushing the scored dataset to the
-Hub) lives in ``examples/prometheus_space_judge.py``.
+Hub) lives in ``experiments/prometheus_space_judge/run.py``.
 
 The reference for the record shape and rubric wording is the maintainer's
 ``prometheus_space_judge`` Colab (issue #28).
 """
+
 from __future__ import annotations
 
 import json
 import re
 from collections import Counter
-from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any
 
 # --- Provenance / rubric constants (mirror the reference notebook) ------------
 
@@ -95,6 +97,7 @@ _SCORE_RE = re.compile(r"\[(\d+(?:\.\d+)?)\]")
 
 
 # --- Reformat: OpenSpaces row -> Prometheus-vision judge record ---------------
+
 
 def extract_text(content: Any) -> str:
     """Coerce a message ``content`` field into plain text.
@@ -187,7 +190,7 @@ def reformat_dataset(
     Each row must expose a ``messages`` list of ``{role, content}`` turns. Every
     QA pair in a row becomes its own judge record (a row may carry more than
     one). The ``image`` field is set to ``{image_dir}/{row_index}.{image_ext}``;
-    the caller (see ``examples/prometheus_space_judge.py``) is responsible for
+    the caller (see ``experiments/prometheus_space_judge/run.py``) is responsible for
     materializing those image files from ``row['images']`` so the paths resolve
     for ``llava.eval.model_vqa``. ``limit`` caps the number of input rows.
     """
@@ -206,11 +209,11 @@ def reformat_dataset(
 def write_jsonl(entries: Iterable[Mapping[str, Any]], path: str) -> None:
     """Write records to ``path`` as newline-delimited JSON (overwrites)."""
     with open(path, "w", encoding="utf-8") as handle:
-        for entry in entries:
-            handle.write(json.dumps(entry) + "\n")
+        handle.writelines(json.dumps(entry) + "\n" for entry in entries)
 
 
 # --- Score parsing: judge feedback -> [N] score ------------------------------
+
 
 def parse_score(text: str) -> float | None:
     """Extract the first ``[N]`` (or ``[N.M]``) score from judge feedback text.
@@ -270,6 +273,7 @@ def score_distribution(
 
 
 # --- Match + rebuild: judge input + results -> scored OpenSpaces dataset -----
+
 
 def match_entries(
     eval_entries: Iterable[Mapping[str, Any]],
