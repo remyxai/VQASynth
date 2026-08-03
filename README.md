@@ -155,6 +155,28 @@ print(result.tool_calls_used)   # 4
 
 See `experiments/nooa_agent/README.md` for install, resource tiers (CPU with DepthPro / GPU with VGGT), the full tool inventory, and the lerobot integration path.
 
+## Human Pose Estimation
+
+`vqasynth.pose` adds a body-keypoint stage so the pipeline can emit PoseText-style VQA for fine-tuning Molmo on body keypoint estimation ([#31](https://github.com/remyxai/VQASynth/issues/31), [salma-remyx/PoseText](https://huggingface.co/datasets/salma-remyx/PoseText)). Pose estimation is built as a constrained instance of the existing Molmo point-prediction path — the same `<point x=.. y=.. alt=..>` tokens `MolmoCaptionLocalizer` already emits — so it reuses `vqasynth.localize`'s parser and `vqasynth.prompt_templates`' spatial-predicate corpus rather than duplicating them.
+
+```python
+from vqasynth.pose import MolmoPoseLocalizer, parse_pose, build_pose_qa_pairs
+
+# Predict the 17 COCO body joints for the person in the image (GPU).
+pose = MolmoPoseLocalizer().run(image)
+
+# Or parse Molmo <point> text you already captured (CPU-friendly).
+pose = parse_pose(molmo_output, image.width, image.height)
+
+# PoseText-style instruction-tuning pairs: per-joint localization, whole-pose
+# localization, and relative-position predicates between joints.
+qa_pairs = build_pose_qa_pairs(pose)
+#   "Where is the person's left wrist?"
+#   → "The person's left wrist is located at <point x=\"28.0\" y=\"55.0\" alt=\"left wrist\"/>."
+```
+
+`examples/pose_estimation.py` generates sample pairs from captured Molmo output (no GPU required). The model-backed estimator imports torch/transformers lazily, so the parsing and QA logic import with the standard library alone.
+
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
 ```
