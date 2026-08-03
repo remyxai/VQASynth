@@ -155,6 +155,29 @@ print(result.tool_calls_used)   # 4
 
 See `experiments/nooa_agent/README.md` for install, resource tiers (CPU with DepthPro / GPU with VGGT), the full tool inventory, and the lerobot integration path.
 
+## Prometheus-vision Judge
+
+Score SpaceLLaVA outputs on spatial reasoning with a [Prometheus-vision](https://github.com/prometheus-eval/prometheus-vision) judge (refs [#28](https://github.com/remyxai/VQASynth/issues/28)). `vqasynth.judge_dataset` reformats an OpenSpaces-style spatial-VQA dataset into the judge record shape — `image` / `instruction` (task-description + scoring preamble + the user question) / `response to evaluate` / `reference answer` / a 5-point spatial-reasoning `score rubrics` — and parses the `[N]` scores out of the judge feedback into a score distribution and a score-matched dataset ready for the Hub. The reformat + score-parse logic is pure-stdlib and unit-tested (`tests/test_judge_dataset.py`).
+
+The runnable wiring lives in `examples/prometheus_space_judge.py`:
+
+```bash
+# 1. Build the judge-input JSONL (and materialize images)
+python examples/prometheus_space_judge.py build \
+    --dataset remyxai/OpenSpaces --limit 1000 \
+    --image-dir openspaces --output openspaces/sample_eval_data.jsonl
+
+# 2. Run the external prometheus-vision / llava eval to produce
+#    evaluation_results.jsonl (maintainer-run; see the script docstring).
+
+# 3. Parse scores, plot a histogram, and build/push the scored dataset
+python examples/prometheus_space_judge.py score \
+    --eval openspaces/sample_eval_data.jsonl \
+    --results evaluation_results.jsonl \
+    --histogram score_histogram.png \
+    --push-to-hub <user>/SpaceJudgeDataset
+```
+
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
 ```
