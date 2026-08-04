@@ -123,6 +123,7 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Evaluate SpaceThinker on QSpatial++ | Assess SpaceThinker's quantitative spatial reasoning on the QSpatial++ benchmark | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1buEe2QC4_pnrJwQ9XyRAH7RfaIa6pbex?usp=sharing) |
 | SpaceLLaVA Attention with TransformerLens | Visualize SpaceLLaVA-7B attention patterns using TransformerLens | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/19H_hOL8gc1nFQKpDoioJR8nDWX1lsNZM?usp=sharing) |
 | Agent with VQASynth Tools | Dynamic tool composition for spatial questions beyond template + VLM ceilings | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1nEWs0eVJPW-mmh5PMJFWx8kenPILRlvE?usp=sharing) |
+| Prometheus-vision Judge | Score SpaceLLaVA outputs with a prometheus-vision judge to build a score-matched spatial-VQA dataset | Local CLI — no hosted notebook yet; see [`experiments/prometheus_space_judge/`](experiments/prometheus_space_judge/) |
 
 ## Agent with VQASynth Tools
 
@@ -154,6 +155,33 @@ print(result.tool_calls_used)   # 4
 <img width="2752" height="1536" alt="complex_image_reasoning_20x" src="https://github.com/user-attachments/assets/4edc92cf-0bff-461d-8f4e-f94a174f4b14" />
 
 See `experiments/nooa_agent/README.md` for install, resource tiers (CPU with DepthPro / GPU with VGGT), the full tool inventory, and the lerobot integration path.
+
+## Prometheus-vision Judge
+
+Score SpaceLLaVA outputs on spatial reasoning with a [Prometheus-vision](https://github.com/prometheus-eval/prometheus-vision) judge (refs [#28](https://github.com/remyxai/VQASynth/issues/28)). `vqasynth.judge_dataset` reformats an OpenSpaces-style spatial-VQA dataset into the judge record shape — `image` / `instruction` (task-description + scoring preamble + the user question) / `response to evaluate` / `reference answer` / a 5-point spatial-reasoning `score rubrics` — and parses the `[N]` scores out of the judge feedback into a score distribution and a score-matched dataset ready for the Hub. The reformat + score-parse logic is pure-stdlib and unit-tested (`tests/test_judge_dataset.py`).
+
+The runnable wiring lives in `experiments/prometheus_space_judge/` (an opt-in
+surface, like `experiments/nooa_agent/` — no changes to the `vqasynth/` core):
+
+```bash
+# 1. Build the judge-input JSONL (and materialize images)
+python -m experiments.prometheus_space_judge.run build \
+    --dataset remyxai/OpenSpaces --limit 1000 \
+    --image-dir openspaces --output openspaces/sample_eval_data.jsonl
+
+# 2. Run the external prometheus-vision / llava eval to produce
+#    evaluation_results.jsonl (maintainer-run; see the package README).
+
+# 3. Parse scores, plot a histogram, and build/push the scored dataset
+python -m experiments.prometheus_space_judge.run score \
+    --eval openspaces/sample_eval_data.jsonl \
+    --results evaluation_results.jsonl \
+    --histogram score_histogram.png \
+    --push-to-hub <user>/SpaceJudgeDataset
+```
+
+See `experiments/prometheus_space_judge/README.md` for install, the build/score
+subcommands, and the external-eval pointer.
 
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
