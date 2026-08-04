@@ -254,3 +254,53 @@ def test_pose_estimator_default_backend_name_is_mediapipe():
     assert PoseEstimator(backend="mediapipe").backend_name == "mediapipe"
     # A stub instance derives a short name from its class.
     assert PoseEstimator(backend=StubPoseBackend(VISIBLE, (W, H))).backend_name == "stub"
+
+
+# ── API-drift guards vs upstream vqasynth.pose ───────────────────────────
+#
+# The wrapper composes vqasynth.pose.KeypointExtractor by passing a single
+# ``backend=`` kwarg. Stub-based tests here never touch the real
+# constructor, so upstream drift (kwarg rename, default change, AGPL guard
+# regression) would slip past them. These guards close the gap in
+# milliseconds without importing MediaPipe or ultralytics.
+
+
+def test_keypoint_extractor_accepts_backend_kwarg():
+    """The wrapper passes ``backend=`` to :class:`vqasynth.pose.KeypointExtractor`
+    on every load — if upstream renames or drops the kwarg the stub tests
+    still pass but a real run breaks. Pin the parameter name explicitly."""
+    import inspect
+    from vqasynth.pose import KeypointExtractor
+    accepted = set(inspect.signature(KeypointExtractor.__init__).parameters)
+    assert "backend" in accepted, (
+        f"PoseEstimator passes backend= to KeypointExtractor, but that class "
+        f"no longer accepts it (accepts: {sorted(accepted)})"
+    )
+
+
+def test_default_backend_name_matches_upstream_default():
+    """The wrapper's ``PoseEstimator.BACKEND`` must match the string
+    :class:`vqasynth.pose.KeypointExtractor` uses as its own default (both
+    should be ``"mediapipe"``). A drift here would ship a wrapper whose
+    default backend disagreed with the underlying default — silently."""
+    import inspect
+    from vqasynth.pose import KeypointExtractor
+    from experiments.nooa_agent.tools.pose import PoseEstimator
+    upstream_default = inspect.signature(
+        KeypointExtractor.__init__
+    ).parameters["backend"].default
+    assert PoseEstimator.BACKEND == upstream_default, (
+        f"wrapper default {PoseEstimator.BACKEND!r} != upstream default "
+        f"{upstream_default!r}"
+    )
+
+
+def test_agpl_guard_holds_upstream():
+    """The wrapper's docstring promises ``KeypointExtractor(backend="yolov8")``
+    raises with an AGPL-refusal message. That behavior lives in upstream's
+    :func:`_resolve_backend`; if it's dropped or its message changes, the
+    wrapper's user-visible refusal path breaks silently."""
+    import pytest as _pytest
+    from vqasynth.pose import KeypointExtractor
+    with _pytest.raises(ValueError, match="AGPL"):
+        KeypointExtractor(backend="yolov8")
