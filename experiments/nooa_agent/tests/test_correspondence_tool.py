@@ -370,3 +370,19 @@ def test_keep_ratio_lower_for_unrelated_than_warped_views():
         # Loose absolute bound — unrelated views keep well under half their
         # ratio-test matches (no exact number; bounded per the brief).
         assert _ratio(unrelated) <= 0.5
+
+
+def test_upstream_correspondence_result_exposes_raw_match_count():
+    """The wrapper reads ``upstream_result.raw_match_count`` to surface
+    ``n_raw`` on the agent-facing result. This field was added to upstream
+    in the same PR so the wrapper had a clean value to lift; guard the
+    field name explicitly so a future upstream refactor (rename, drop)
+    surfaces here rather than silently returning ``n_raw=0``."""
+    import dataclasses
+    from vqasynth.correspondence import CorrespondenceResult as UpstreamResult
+    fields = {f.name for f in dataclasses.fields(UpstreamResult)}
+    assert "raw_match_count" in fields, (
+        f"vqasynth.correspondence.CorrespondenceResult no longer exposes "
+        f"raw_match_count (has: {sorted(fields)}). The NOOA wrapper depends "
+        f"on this field."
+    )
