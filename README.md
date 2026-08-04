@@ -315,3 +315,39 @@ python examples/mesh_tokenize_example.py --objaverse --output tokens/ --sample 1
 ```
 
 See [`vqasynth/mesh_tokenize.py`](vqasynth/mesh_tokenize.py) for the full pipeline and [`examples/mesh_tokenize_example.py`](examples/mesh_tokenize_example.py) for a runnable demo.
+
+## Multi-view Correspondence
+
+A lightweight stage for sampling point-level correspondences across views
+(e.g. adjacent frames from an Ego4D clip) and converting them into pointing-VLM
+(Molmo) training data. Tracked in [issue #41](https://github.com/remyxai/VQASynth/issues/41).
+
+**Method:** OpenCV classical — SIFT keypoints + Lowe ratio-tested matching
+(BF or FLANN) + RANSAC homography filter. CPU-only, no model weights, matching
+the lightweight `docker/*_stage` shape. The converter emits Molmo
+`<point x=".." y=".." alt="..">` tags in the exact 0–100 normalized format
+parsed by `vqasynth.localize`, so correspondence outputs drop straight into the
+existing pointing-VLM pipeline. (Neural alternatives cited in the issue —
+StreamVGGT [arXiv:2507.11539] and PlanarRecon [arXiv:2104.00681] — are heavier
+GPU paths kept as future options for large viewpoint changes.)
+
+```python
+from vqasynth.correspondence import CorrespondenceExtractor, correspondences_to_messages
+
+extractor = CorrespondenceExtractor()                 # SIFT + BFMatcher + RANSAC
+result = extractor.extract(view_a, view_b)            # two PIL images / ndarrays
+messages = correspondences_to_messages(result)        # -> pointing-VLM QA messages
+```
+
+Run the end-to-end demo (synthesizes a second view via a known warp — no Ego4D
+download needed):
+
+```bash
+python examples/correspondence_example.py --out viz.png
+```
+
+The stage ships as a Docker pipeline entrypoint at
+`docker/correspondence_stage/` (same `--source_repo_id` / `--images` /
+`--target_repo_name` surface as the other stages; expects an image column
+holding a list of frames per example). Structural tests live in
+`tests/test_correspondence.py`.
