@@ -27,15 +27,20 @@ from vqasynth.utils import filter_null
 # decode_angles — faithful port of Orient-Anything's get_3angle
 # ---------------------------------------------------------------------------
 def _logits_with_peaks(az_bin, polar_bin, rot_bin, in_dist_logit=10.0):
-    """Build a (1, 720) logits vector with argmax peaks at the given bins."""
-    width = 360 + 180 + 180 + 2
+    """Build a (1, 902) logits vector with argmax peaks at the given bins.
+
+    Layout matches upstream Orient-Anything's ``app.py`` construction —
+    ``out_dim = 360+180+360+2``: azimuth [0:360], polar [360:540],
+    rotation [540:900], confidence [900:902].
+    """
+    width = 360 + 180 + 360 + 2
     vec = torch.zeros(width)
     vec[az_bin] = 5.0
     vec[360 + polar_bin] = 5.0
     vec[360 + 180 + rot_bin] = 5.0
     # confidence head: [in-dist, out-dist]; make in-dist dominate.
-    vec[360 + 180 + 180] = in_dist_logit
-    vec[360 + 180 + 180 + 1] = 0.0
+    vec[360 + 180 + 360] = in_dist_logit
+    vec[360 + 180 + 360 + 1] = 0.0
     return vec.unsqueeze(0)
 
 
@@ -60,6 +65,19 @@ def test_decode_angles_accepts_numpy_and_1d():
     assert angles_1d["azimuth"] == 359.0
     assert angles_1d["polar"] == 89.0
     assert angles_1d["rotation"] == -1.0
+
+
+def test_decode_angles_covers_full_rotation_range():
+    """Rotation is 360 bins (upstream ``out_dim = 360+180+360+2``), so bins
+    in [180, 359] must map to positive degrees [0, 179]. An earlier
+    revision used 180 rotation bins and silently truncated this half of
+    the range — this test regresses that mistake."""
+    # rot_bin=270  ->  rotation = 270 - 180 = 90 (positive, above old ceiling)
+    angles = decode_angles(_logits_with_peaks(az_bin=0, polar_bin=90, rot_bin=270))
+    assert angles["rotation"] == 90.0
+    # rot_bin=359  ->  rotation = 359 - 180 = 179 (max rotation value)
+    angles = decode_angles(_logits_with_peaks(az_bin=0, polar_bin=90, rot_bin=359))
+    assert angles["rotation"] == 179.0
 
 
 # ---------------------------------------------------------------------------
@@ -224,3 +242,71 @@ def test_filter_null_drops_failed_orientation_rows():
     }
     keep = filter_null(batch)
     assert keep == [True, False]
+
+
+# ---------------------------------------------------------------------------
+# Shape-guard: layout must match the real Orient-Anything head
+# ---------------------------------------------------------------------------
+def test_output_shape_matches_upstream():
+    """The bin-count constants must sum to Orient-Anything's authoritative
+    ``out_dim = 360+180+360+2 = 902`` (see upstream ``app.py`` and
+    ``inference.get_3angle``).
+
+    This is a cheap correctness guard: the fake-model tests above verify
+    the decode logic against whatever layout ``_logits_with_peaks``
+    builds, so they pass under any self-consistent choice of constants.
+    Only a check against the true model's output shape catches the case
+    where the wrapper drifted from upstream. A first revision of this
+    file used 180 rotation bins (out_dim=720) after misreading a README
+    fragment against the actual code — the plumbing tests all passed,
+    but half the rotation range was silently truncated on real weights.
+    """
+    from vqasynth.orientation import (
+        _AZIMUTH_BINS, _POLAR_BINS, _ROTATION_BINS, _CONFIDENCE_BINS,
+    )
+    total = _AZIMUTH_BINS + _POLAR_BINS + _ROTATION_BINS + _CONFIDENCE_BINS
+    assert total == 902, (
+        f"Orient-Anything head layout drift: bins sum to {total}, "
+        f"expected 902 (see upstream app.py `out_dim=360+180+360+2`)"
+    )
+    # Rotation is 360 bins upstream. This is the specific value the earlier
+    # revision got wrong; pin it explicitly so a well-meaning "fix" to
+    # `_ROTATION_BINS = 180` fails loudly here.
+    assert _ROTATION_BINS == 360
+
+
+@pytest.mark.skipif(
+    "ORIENT_ANYTHING_PATH" not in __import__("os").environ,
+    reason="Set ORIENT_ANYTHING_PATH=/path/to/Orient-Anything to run the "
+           "real-model shape check (~30s CPU, ~90MB DINOv2 backbone "
+           "download; no orient-anything weights required — untrained "
+           "heads are enough for the shape assertion).",
+)
+def test_output_shape_against_real_orient_anything():
+    """Optional integration: load the real DINOv2_MLP with no orient-
+    anything weights, forward-pass a dummy image, assert the output
+    shape is 902.
+
+    Runs only when the Orient-Anything repo is on PYTHONPATH via
+    ``ORIENT_ANYTHING_PATH``. No orient-anything checkpoint download —
+    the shape assertion doesn't need trained heads; it only needs the
+    DINOv2 backbone (fetched from HuggingFace's ``facebook/dinov2-
+    large``, ~90MB) plus the untrained MLP heads.
+    """
+    import os, sys
+    sys.path.insert(0, os.environ["ORIENT_ANYTHING_PATH"])
+    from vision_tower import DINOv2_MLP
+    from transformers import AutoImageProcessor
+    import torch, numpy as np
+    from PIL import Image
+
+    dino = DINOv2_MLP(
+        dino_mode="large", in_dim=1024, out_dim=360 + 180 + 360 + 2,
+        evaluate=True, mask_dino=False, frozen_back=True,
+    ).eval()
+    proc = AutoImageProcessor.from_pretrained("facebook/dinov2-large")
+    img = Image.fromarray(np.zeros((224, 224, 3), dtype=np.uint8))
+    with torch.no_grad():
+        inputs = proc(images=img, return_tensors="pt")
+        out = dino(inputs)
+    assert out.shape[-1] == 902, f"got out_dim={out.shape[-1]}, expected 902"

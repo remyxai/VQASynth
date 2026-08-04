@@ -23,14 +23,21 @@ from PIL import Image
 from vqasynth.utils import pick_dtype
 
 
-# Orient-Anything head layout (see DINOv2_MLP construction in its README:
-# out_dim = 360 + 180 + 180 + 2). decode_angles splits the model output into
-# these contiguous heads. (The repo's inference.get_3angle slices rotation as
-# [540:900], which is internally inconsistent with this out_dim; we use the
-# documented, self-consistent layout instead.)
+# Orient-Anything head layout. The authoritative source is the model
+# construction in the upstream ``app.py``:
+#
+#     dino = DINOv2_MLP(dino_mode='large', in_dim=1024,
+#                       out_dim=360+180+360+2, ...)
+#
+# so the model emits 902 logits per image, sliced by ``inference.get_3angle``
+# as azimuth[0:360] / polar[360:540] / rotation[540:900] / confidence[900:902].
+# An earlier revision of this file used 180 rotation bins after misreading a
+# README fragment against the code — that dropped half the rotation range;
+# ``test_output_shape_matches_upstream`` guards against the mismatch
+# regressing.
 _AZIMUTH_BINS = 360   # 0..359 degrees
 _POLAR_BINS = 180     # argmax - 90  ->  -90..89 degrees
-_ROTATION_BINS = 180  # argmax - 180 ->  -180..-1 degrees
+_ROTATION_BINS = 360  # argmax - 180 ->  -180..179 degrees
 _CONFIDENCE_BINS = 2  # in-/out-of-distribution head, softmax -> P(in-dist)
 
 
@@ -42,12 +49,12 @@ def decode_angles(logits):
     shifts) and a softmax over the 2-class in/out-of-distribution head.
 
     Args:
-        logits: raw model output of shape ``(B, 720)`` (or wider). Works on
+        logits: raw model output of shape ``(B, 902)`` (or wider). Works on
             torch tensors or numpy arrays; the first batch row is used.
 
     Returns:
         dict with float ``azimuth`` (0..359), ``polar`` (-90..89),
-        ``rotation`` (-180..-1), and ``confidence`` (0..1).
+        ``rotation`` (-180..179), and ``confidence`` (0..1).
     """
     if isinstance(logits, np.ndarray):
         logits = torch.from_numpy(logits)
