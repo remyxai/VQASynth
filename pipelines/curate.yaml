@@ -1,0 +1,47 @@
+version: '3.8'
+
+# Standalone curation pipeline. Selects a uniform (farthest-point) or random
+# subset of a HuggingFace dataset by maximizing pairwise distance between sample
+# embeddings, consuming the `embedding` column written by the embeddings stage.
+#
+# This is an auxiliary data-selection step, upstream of training, that composes
+# with the embeddings stage. The intended workflow is:
+#   1. Run the embeddings stage to populate the `embedding` column.
+#   2. Run this compose file to emit a curated dataset variant + manifest.
+#   3. Point a LoRA training config's dataset.repo_id at the curated variant.
+#
+# Usage:
+#   docker compose -f pipelines/curate.yaml up --build
+
+services:
+  embeddings_stage:
+    build:
+      context: ../
+      dockerfile: docker/embeddings_stage/Dockerfile
+    volumes:
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
+  curate_stage:
+    build:
+      context: ../
+      dockerfile: docker/curate_stage/Dockerfile
+    volumes:
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - embeddings_stage
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
