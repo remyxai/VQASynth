@@ -1,0 +1,35 @@
+version: '3.8'
+
+# Describe Anything captioning stage. Runs NVIDIA's DAM over the SAM masks
+# produced by the location-refinement stage and writes a per-region detailed
+# caption column (`dam_captions`) plus spatial-VQA messages (`dam_messages`).
+#
+# This stage consumes the localization step's output: it waits for
+# `location_refinement_done.txt` under OUTPUT_DIR, so populate the `masks`
+# column first by running `spatialvqa.yaml` (or `spatialvqa_reasoning.yaml`).
+# Args are read from config/config.yaml by the entrypoint:
+#   --output_dir      directories.output_dir
+#   --source_repo_id  arguments.source_repo_id
+#   --images          arguments.images
+# Additional knobs (argparse defaults, surfaced here for visibility):
+#   --model_id        env DAM_MODEL_ID; default nvidia/DAM-3B-Self-Contained
+#   --batch_size      datasets.map batch size; default 1
+#
+# Usage:
+#   docker compose -f describe_anything.yaml up --build
+
+services:
+  describe_anything_stage:
+    build:
+      context: ../
+      dockerfile: docker/describe_anything_stage/Dockerfile
+    volumes:
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]

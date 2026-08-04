@@ -1,0 +1,30 @@
+version: '3.8'
+
+# 3D object-detection synthesis stage. Consumes the per-object point clouds
+# (+ captions) emitted by the scene-fusion stage and produces Molmo-style
+# <point3d> QA-pair training data — the 3D analog of localize.py's <point>
+# outputs. No new model: it reuses the existing depth + segmentation upstream
+# and only adds 3D bounding-box math + QA formatting on the point clouds.
+#
+# The entrypoint blocks on ${OUTPUT_DIR}/scene_fusion_done.txt, so this stage
+# slots into the full synthesis pipeline (spatialvqa.yaml) after
+# scene_fusion_stage, or runs standalone against an existing fused dataset.
+#
+# Usage:
+#   docker compose -f detection_3d.yaml up --build
+
+services:
+  detection_3d_stage:
+    build:
+      context: ../
+      dockerfile: docker/detection_3d_stage/Dockerfile
+    volumes:
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
