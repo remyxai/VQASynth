@@ -67,6 +67,26 @@ services:
           devices:
           - capabilities: ["gpu"]
 
+  # Consumes the per-object masks written by location_refinement_stage and
+  # runs alongside scene_fusion_stage: it waits (read-only) on the same
+  # location_refinement_done.txt trigger and writes the orientation column.
+  orientation_stage:
+    build:
+      context: ../
+      dockerfile: docker/orientation_stage/Dockerfile
+    volumes:
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    depends_on:
+      - location_refinement_stage
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
   prompt_stage:
     build:
       context: ../
