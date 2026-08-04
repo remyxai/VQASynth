@@ -1,0 +1,31 @@
+version: '3.8'
+
+# Standalone pose-keypoint pipeline. Runs a pluggable body-keypoint backend
+# over a Hugging Face image dataset and appends a ``pose_messages`` column of
+# Molmo-style ``<point>`` SFT samples (PoseText task, issue #31) — the same
+# column-append convention the other stages use. This is a data-generation
+# step; it does not depend on the spatial synthesis pipeline.
+#
+# The default backend is MediaPipe Pose (Apache-2.0, CPU-friendly), so this
+# stage does not hard-require CUDA even though it mirrors the GPU reservation
+# shape of the sibling stages for consistency. YOLOv8-pose (ultralytics) is
+# AGPL-3.0 and opt-in only — pass a custom backend instance, never by name.
+#
+# Usage:
+#   docker compose -f pose.yaml up --build
+
+services:
+  pose_stage:
+    build:
+      context: ../
+      dockerfile: docker/pose_stage/Dockerfile
+    volumes:
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]

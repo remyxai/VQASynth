@@ -127,6 +127,8 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 
 | 3D Object-Detection QA Synthesis | Synthesize Molmo `<point3d>` training pairs from per-object point clouds (CPU-only) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb) |
 
+| Pose Estimation SFT Pairs | Generate PoseText-style `<point>` SFT pairs from body keypoints (CPU) | [notebook](notebooks/pose_estimation.ipynb) |
+
 ## Agent with VQASynth Tools
 
 The VQASynth tool inventory — Florence-2 detection/OCR, DepthPro/VGGT metric depth, 3D distance measurement — is also exposed as an [NOOA](https://github.com/NVIDIA-NeMo/labs-OO-Agents)-based agent (`experiments/nooa_agent/`) that composes tool calls dynamically per prompt rather than following a pre-templated pipeline. Useful when the input question isn't known at pipeline-design time.
@@ -500,3 +502,46 @@ OUTPUT_DIR=./curated python examples/curate_spacethinker.py
 The curated subset is a standalone artifact — point a LoRA training config's
 `dataset.repo_id` at the curated variant directory (or Hub repo) to train on it.
 Curation is upstream of training; no training-side changes are required.
+
+## Human Pose Estimation
+
+`vqasynth.pose` produces instruction-tuning samples that teach a VLM to emit
+`<point x=.. y=.. alt=..>` tags for the 17 COCO body joints
+([#31](https://github.com/remyxai/VQASynth/issues/31),
+[salma-remyx/PoseText](https://huggingface.co/datasets/salma-remyx/PoseText)).
+The stage is **keypoint-source-first** — keypoints come from a lightweight pose
+model (or an annotated dataset) and are rendered *into* Molmo-style `<point>`
+SFT samples, so Molmo is the *target* of the distillation rather than the
+source of the keypoints. Run the CPU demo end-to-end in
+[`notebooks/pose_estimation.ipynb`](notebooks/pose_estimation.ipynb) (no GPU or
+mediapipe install required for the synthetic-keypoint path).
+
+```python
+from vqasynth.pose import KeypointExtractor, pose_from_keypoints, build_pose_qa_pairs
+
+# 1. Keypoints come from a pluggable backend (default MediaPipe Pose, CPU-friendly).
+poses = KeypointExtractor(backend="mediapipe").extract(image)   # one pose dict per person
+
+#    ...or build a pose directly from an annotated dataset (COCO/MPII):
+pose = pose_from_keypoints({"left_wrist": [x, y], ...}, image_size=(image.width, image.height))
+
+# 2. Render each keypoint set as Molmo-style SFT pairs.
+qa_pairs = build_pose_qa_pairs(pose)
+#   "Where is the person's left wrist?"
+#   → "The person's left wrist is located at <point x=\"28.0\" y=\"55.0\" alt=\"left wrist\"/>."
+```
+
+- **Pluggable backend**: implement `PoseBackend.extract(image) -> (people, image_size)`
+  (per-person COCO-17 keypoint arrays) and pass an instance to `KeypointExtractor`.
+  `MediaPipePoseBackend` (Apache-2.0) is the default; `StubPoseBackend` drives the tests
+  with no model install.
+- **Licensing**: MediaPipe is Apache-2.0. YOLOv8-pose (ultralytics) is **AGPL-3.0** and is
+  opt-in only — it is never selected by name and is not installed by the pose stage; pass a
+  custom backend instance only if you accept that license.
+- **Dataset stage**: `docker/pose_stage/` runs the backend + emitter over a Hugging Face
+  dataset, appending a `pose_messages` column (the same column-append convention the other
+  stages use). `examples/pose_estimation.py` prints sample SFT pairs from a keypoint fixture
+  (no GPU required).
+
+The QA emitter and chat-message shape reuse `vqasynth.prompt_templates` and the `messages`
+column convention rather than duplicating them.
