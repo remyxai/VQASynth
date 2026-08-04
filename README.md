@@ -401,3 +401,27 @@ GPU-free demo and `tests/test_detection_3d.py` for the test suite.
 Refs: [issue #47](https://github.com/remyxai/VQASynth/issues/47),
 [SpatialRGPT](https://www.anjiecheng.me/assets/SpatialRGPT/Spatial_RGPT.pdf)
 (format design anchor for region-level 3D descriptors).
+
+## Region Captioning with Describe Anything
+
+VQASynth's localization stage already produces one [SAM2](https://github.com/facebookresearch/sam2) mask per detected object, but the captions attached to those masks are short class labels. The `vqasynth.describe_anything` stage ([issue #51](https://github.com/remyxai/VQASynth/issues/51)) feeds each mask to NVIDIA's [Describe Anything Model (DAM)](https://describe-anything.github.io/) to produce a detailed region caption — useful for distinguishing subjects by small visual features — and turns each `(image, mask, caption)` triple into spatial-VQA training samples.
+
+🖼️ Per-region detail via [Describe Anything (DAM)](https://arxiv.org/abs/2504.16072), prompted with the masks SAM2 already produces. No re-segmentation: DAM consumes `vqasynth.localize.Localizer` output directly.
+
+```python
+from PIL import Image
+from vqasynth.localize import Localizer
+from vqasynth.describe_anything import DescribeAnything
+
+image = Image.open("warehouse.jpg").convert("RGB")
+masks, _, _ = Localizer(captioner_type="molmo").run(image)
+
+# A DAM caption for every SAM mask, then spatial-VQA pairs
+dam = DescribeAnything()  # model_id defaults to nvidia/DAM-3B-Self-Contained
+detailed_captions = dam.describe_regions(image, masks)
+qa_prompts, messages = dam.generate_qa_pairs(masks, detailed_captions)
+```
+
+`docker/describe_anything_stage/` runs this over a Hugging Face dataset via `datasets.map`, adding `dam_captions` and `dam_messages` columns downstream of the location-refinement stage. DAM is loaded lazily through `transformers` (self-contained variant), and the module + tests import and run without a GPU using an injected stub callable — see `tests/test_describe_anything.py`. Override the DAM variant with `--model_id` (or the `DAM_MODEL_ID` env var) on the Docker stage.
+
+If you build on it, cite the [DAM paper](https://arxiv.org/abs/2504.16072) (ICCV 2025).
