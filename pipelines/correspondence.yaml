@@ -1,0 +1,30 @@
+version: '3.8'
+
+# Standalone multi-view correspondence pipeline. Samples point-level
+# correspondences across Ego4D-style adjacent frames with OpenCV (SIFT +
+# BFMatcher + RANSAC) and writes Molmo <point> pointing-VLM training messages.
+#
+# This is a standalone stage: it does not depend on the synthesis chain in
+# spatialvqa.yaml / spatialvqa_reasoning.yaml (different inputs — a list of
+# per-example frames rather than a single image). The entrypoint reads its
+# arguments.source_repo_id / arguments.target_repo_name / arguments.images
+# keys from config/config.yaml.
+#
+# Usage:
+#   docker compose -f correspondence.yaml up --build
+
+services:
+  correspondence_stage:
+    build:
+      context: ../
+      dockerfile: docker/correspondence_stage/Dockerfile
+    volumes:
+      - ${OUTPUT_DIR}:${OUTPUT_DIR}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]

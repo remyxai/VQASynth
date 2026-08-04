@@ -7,12 +7,12 @@ from vqasynth.datasets import Dataloader
 from vqasynth.embeddings import EmbeddingGenerator
 from vqasynth.utils import filter_null
 
-def main(output_dir, source_repo_id, images):
+def main(output_dir, source_repo_id, images, backend="clip", model_name="ViT-B/32"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     dataloader = Dataloader(output_dir)
-    embedding_generator = EmbeddingGenerator()
+    embedding_generator = EmbeddingGenerator(backend=backend, model_name=model_name)
 
     # Load dataset
     dataset = dataloader.load_dataset(source_repo_id)
@@ -52,5 +52,19 @@ if __name__ == "__main__":
         required=True,
         help="Column containing PIL.Image images",
     )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="clip",
+        help="Embedding backend: 'clip' (default, OpenAI CLIP) or 'transformers' "
+        "(HF CLIP/SigLIP/LLM2CLIP checkpoints).",
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="ViT-B/32",
+        help="Model/checkpoint for the backend (e.g. 'ViT-B/32' for CLIP, "
+        "'microsoft/LLM2CLIP-OpenAI-B-16' for transformers).",
+    )
     args = parser.parse_args()
-    main(args.output_dir, args.source_repo_id, args.images)
+    main(args.output_dir, args.source_repo_id, args.images, args.backend, args.model_name)
