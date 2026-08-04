@@ -147,6 +147,14 @@ class CorrespondenceResult:
     view_b_size: tuple[int, int]               # (W, H) of view B
     homography: list[float] | None = None      # 3x3 H (view A -> B), row-major, if recovered
     inlier_count: int = 0                       # matches surviving RANSAC
+    raw_match_count: int = 0                    # matches surviving the Lowe ratio test,
+                                                # BEFORE the RANSAC filter (0 if matching
+                                                # was never attempted — e.g. too few
+                                                # descriptors). ``inlier_count`` /
+                                                # ``raw_match_count`` is the inlier ratio
+                                                # a caller can use as a view-similarity
+                                                # signal (a 5% keep rate hints the two
+                                                # views are of different scenes).
     backend: str = "sift-bf"
 
     def __repr__(self) -> str:
@@ -156,6 +164,7 @@ class CorrespondenceResult:
         return (
             f"CorrespondenceResult(backend={self.backend!r}, "
             f"matches={len(self.matches)}, inliers={self.inlier_count}, "
+            f"raw={self.raw_match_count}, "
             f"view_a={self.view_a_size}, view_b={self.view_b_size}, "
             f"has_homography={self.homography is not None})"
         )
@@ -425,7 +434,14 @@ class CorrespondenceExtractor:
                 if m.distance < self.ratio * n.distance:
                     good.append(m)
 
-        if len(good) < self.min_match_count:
+        # Matches surviving the ratio test but BEFORE the RANSAC filter.
+        # Surfaced on the result (including ``empty`` below) so a caller can
+        # compute the inlier ratio inlier_count / raw_match_count as a
+        # view-similarity signal without re-running the matcher.
+        raw_match_count = len(good)
+        empty.raw_match_count = raw_match_count
+
+        if raw_match_count < self.min_match_count:
             return empty
 
         # RANSAC filter — keeps only matches consistent with a single global
@@ -456,6 +472,7 @@ class CorrespondenceExtractor:
             view_b_size=size_b,
             homography=h_flat,
             inlier_count=len(matches),
+            raw_match_count=raw_match_count,
             backend=self.backend,
         )
 
