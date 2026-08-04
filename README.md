@@ -125,6 +125,8 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Agent with VQASynth Tools | Dynamic tool composition for spatial questions beyond template + VLM ceilings | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1nEWs0eVJPW-mmh5PMJFWx8kenPILRlvE?usp=sharing) |
 | Prometheus-vision Judge | Score SpaceLLaVA outputs with a prometheus-vision judge to build a score-matched spatial-VQA dataset | Local CLI — no hosted notebook yet; see [`experiments/prometheus_space_judge/`](experiments/prometheus_space_judge/) |
 
+| 3D Object-Detection QA Synthesis | Synthesize Molmo `<point3d>` training pairs from per-object point clouds (CPU-only) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb) |
+
 ## Agent with VQASynth Tools
 
 The VQASynth tool inventory — Florence-2 detection/OCR, DepthPro/VGGT metric depth, 3D distance measurement — is also exposed as an [NOOA](https://github.com/NVIDIA-NeMo/labs-OO-Agents)-based agent (`experiments/nooa_agent/`) that composes tool calls dynamically per prompt rather than following a pre-templated pipeline. Useful when the input question isn't known at pipeline-design time.
@@ -351,6 +353,78 @@ The stage ships as a Docker pipeline entrypoint at
 `--target_repo_name` surface as the other stages; expects an image column
 holding a list of frames per example). Structural tests live in
 `tests/test_correspondence.py`.
+
+## 3D object detection (pointing-VLM training data)
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb)
+
+VQASynth can also emit **3D object-detection** QA pairs — the 3D analog of the
+Molmo `<point>` pointing data the pipeline already produces. Given the per-object
+point clouds that the scene-fusion stage emits, `vqasynth.detection_3d` computes
+each object's axis-aligned 3D bounding box (center + extent, with an optional
+oriented box for elongated / diagonal objects) and formats it as Molmo-style
+`<point3d>` tags (or SpatialRGPT-style bracketed `[center, extent]` region
+descriptors) for downstream pointing-VLM distillation.
+
+```python
+from vqasynth.localize import Localizer
+from vqasynth.scene_fusion import SpatialSceneConstructor
+from vqasynth.detection_3d import Detection3DGenerator
+
+image = ...  # PIL.Image
+
+# Upstream: detect + segment objects, then lift to per-object point clouds.
+masks, _, captions = Localizer(captioner_type="florence").run(image)
+pcd_filepaths, _, _, _ = SpatialSceneConstructor().run(
+    "scene_0", image, masks, output_dir="./scenes"
+)
+
+# 3D object-detection QA pairs (reuses the depth + segmentation upstream —
+# no new model, just box math + formatting on the existing point clouds).
+qa_pairs = Detection3DGenerator().run(captions, pcd_filepaths)
+
+# Example output:
+#   "Where is the wooden crate located in 3D space?"
+#   -> 'wooden crate: <point3d x="0.30" y="0.25" z="0.40" extent="0.60,0.50,0.80" alt="wooden crate"/>.'
+```
+
+The stage reuses the bounding-box helpers prototyped in
+`tests/data_processing/clipseg_data_processing.py`
+(`get_axis_aligned_bounding_box`) and is shipped as `vqasynth/detection_3d.py`
+plus the `docker/detection_3d_stage/` Docker stage. The box math and QA-pair
+formatting are pure-Python standard library, so they are unit-tested without
+CUDA, depth models, SAM, numpy, or open3d (those are runtime-only deps of the
+`.pcd` I/O path). See `examples/detection_3d_example.py`
+(or the [Colab notebook](examples/detection_3d_example.ipynb)) for a runnable,
+GPU-free demo and `tests/test_detection_3d.py` for the test suite.
+
+Refs: [issue #47](https://github.com/remyxai/VQASynth/issues/47),
+[SpatialRGPT](https://www.anjiecheng.me/assets/SpatialRGPT/Spatial_RGPT.pdf)
+(format design anchor for region-level 3D descriptors).
+
+## Region Captioning with Describe Anything
+
+VQASynth's localization stage already produces one [SAM2](https://github.com/facebookresearch/sam2) mask per detected object, but the captions attached to those masks are short class labels. The `vqasynth.describe_anything` stage ([issue #51](https://github.com/remyxai/VQASynth/issues/51)) feeds each mask to NVIDIA's [Describe Anything Model (DAM)](https://describe-anything.github.io/) to produce a detailed region caption — useful for distinguishing subjects by small visual features — and turns each `(image, mask, caption)` triple into spatial-VQA training samples.
+
+🖼️ Per-region detail via [Describe Anything (DAM)](https://arxiv.org/abs/2504.16072), prompted with the masks SAM2 already produces. No re-segmentation: DAM consumes `vqasynth.localize.Localizer` output directly.
+
+```python
+from PIL import Image
+from vqasynth.localize import Localizer
+from vqasynth.describe_anything import DescribeAnything
+
+image = Image.open("warehouse.jpg").convert("RGB")
+masks, _, _ = Localizer(captioner_type="molmo").run(image)
+
+# A DAM caption for every SAM mask, then spatial-VQA pairs
+dam = DescribeAnything()  # model_id defaults to nvidia/DAM-3B-Self-Contained
+detailed_captions = dam.describe_regions(image, masks)
+qa_prompts, messages = dam.generate_qa_pairs(masks, detailed_captions)
+```
+
+`docker/describe_anything_stage/` runs this over a Hugging Face dataset via `datasets.map`, adding `dam_captions` and `dam_messages` columns downstream of the location-refinement stage. DAM is loaded lazily through `transformers` (self-contained variant), and the module + tests import and run without a GPU using an injected stub callable — see `tests/test_describe_anything.py`. Override the DAM variant with `--model_id` (or the `DAM_MODEL_ID` env var) on the Docker stage.
+
+If you build on it, cite the [DAM paper](https://arxiv.org/abs/2504.16072) (ICCV 2025).
 
 ## Data Curation — Uniform Sampling
 

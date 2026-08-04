@@ -1,0 +1,86 @@
+# config.yaml — LoRA SFT recipe that reproduces the SpaceQwen2.5-VL-3B-Instruct
+# training setup from a single NVIDIA A10 (24 GB VRAM).
+#
+# Base model : UCSC-VLAA/VLAA-Thinker-Qwen2.5VL-3B (a Qwen2.5-VL-3B derivative
+#              already tuned for chain-of-thought — a strong spatial-VQA start)
+# Dataset    : remyxai/SpaceThinker (OpenSpace successor, spatial-reasoning traces)
+# Method     : LoRA via peft — target ALL linear modules (see lora.target_modules)
+#
+# Override anything from the CLI:
+#   python -m experiments.train_qwen2_5_vl_3b.train --config path/to/this.yaml
+
+base_model: UCSC-VLAA/VLAA-Thinker-Qwen2.5VL-3B
+
+model:
+  torch_dtype: bfloat16
+  attn_implementation: sdpa        # faster: flash_attention_2 (needs flash-attn)
+  trust_remote_code: true
+
+dataset:
+  repo_id: remyxai/SpaceThinker
+  split: train                     # SpaceThinker: train=11.4k, test=1.25k
+  image_column: images             # list[Image]; one image per row
+  messages_column: messages        # OpenAI/Qwen chat: [{role, content}]
+  fallback_input_column: input     # used only if a snapshot lacks `messages`
+  fallback_output_column: output   # (assistant response incl. <think> traces)
+  max_samples: null                # null = full split; int = smoke subset
+
+output_dir: outputs/spacethinker-qwen2_5_vl_3b_lora
+
+hub:
+  push_to_hub: false
+  repo_id: null                    # e.g. <your-user>/SpaceQwen2.5-VL-3B-Instruct-lora
+
+# ── LoRA ────────────────────────────────────────────────────────────────────
+# alpha = 2 * rank (standard α = 2·r convention; here r=128 → alpha=256).
+#
+# Target ALL linear modules — the self-attention AND MLP projections of the
+# language decoder, plus the Qwen2.5-VL vision tower and multimodal projection
+# linears. The default "attention modules only" targeting underfits VLMs; the
+# visual side has to adapt for spatial-reasoning tuning to move the needle.
+lora:
+  r: 128
+  lora_alpha: 256
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    # Language decoder — self-attention projections
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    # Language decoder — SwiGLU MLP projections
+    - gate_proj
+    - up_proj
+    - down_proj
+    # Qwen2.5-VL vision tower + multimodal projection (visual.*) — fused
+    # vision self-attention QKV, vision attn output + patch-embed projection,
+    # and the vision MLP up/down projections.
+    - qkv
+    - proj
+    - fc1
+    - fc2
+
+# ── Training ────────────────────────────────────────────────────────────────
+# Sized for a single A10 24 GB: per-device batch 1 + grad-accum 16 → effective
+# batch 16, bf16, gradient checkpointing. Lower max_length if long <think>
+# traces OOM; raise batch size if VRAM headroom remains.
+training:
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16    # effective batch size = 1 * 16
+  learning_rate: 1.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  max_length: 4096                   # tokens incl. expanded image tokens
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_strategy: steps
+  save_steps: 500
+  save_total_limit: 2
+  seed: 42
+  report_to: none                    # "wandb" / "tensorboard" to log metrics
