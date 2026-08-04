@@ -129,9 +129,11 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 
 ## Agent with VQASynth Tools
 
-The VQASynth tool inventory — Florence-2 detection/OCR, DepthPro/VGGT metric depth, 3D distance measurement — is also exposed as an [NOOA](https://github.com/NVIDIA-NeMo/labs-OO-Agents)-based agent (`experiments/nooa_agent/`) that composes tool calls dynamically per prompt rather than following a pre-templated pipeline. Useful when the input question isn't known at pipeline-design time.
+The VQASynth tool inventory — Florence-2 detection + segmentation, DepthPro/VGGT/FoundationGeo metric depth, [Orient-Anything](https://github.com/SpatialVision/Orient-Anything) object orientation, [NVIDIA DAM](https://github.com/NVlabs/describe-anything) regional captioning, [MediaPipe](https://github.com/google/mediapipe) pose keypoints, open3d 3D bounding boxes, and OpenCV multi-view correspondence — is exposed as an [NOOA](https://github.com/NVIDIA-NeMo/labs-OO-Agents)-based agent (`experiments/nooa_agent/`) that composes tool calls dynamically per prompt rather than following a pre-templated pipeline. Useful when the input question isn't known at pipeline-design time.
 
-- **Dynamic tool composition** — the LLM decides which tools to call and in what order per question. `detect_objects → metric_depth → distance_3d` for a "how far apart" query; `caption_scene → dense_region_captions` for a scene inventory. No pre-coded question types.
+![Dynamic pipeline construction across all NOOA agent tools](https://gist.githubusercontent.com/smellslikeml/65da53b4a9d7224e991cb88bc33a7e5e/raw/q5_full_spatial_report.png)
+
+- **Dynamic tool composition** — the LLM decides which tools to call and in what order per question. `detect_objects → metric_depth → distance_3d` for a "how far apart" query; `detect_objects → segment → orient → describe_region` for camera-facing object descriptions; `find_correspondences → depth → detect_3d_boxes` for cross-view scene diffs. No pre-coded question types.
 - **Dense reward annotation** — plug into a robot-learning pipeline as a per-frame reward or CoT source. The agent satisfies [`lerobot`](https://github.com/huggingface/lerobot)'s `VlmClient` protocol via `SpatialAnnotatorVlmClient`, so it drops into any annotation module (VQA, plan, ECoT) as a tool-grounded alternative to a raw VLM call.
 - **Traces grounded on tool calls** — every `annotate()` streams a JSONL row in OpenAI-messages format (ready for Qwen2.5-VL / Qwen3-VL fine-tuning) preserving the full tool-call chain, not just the final answer. Reasoning stays auditable.
 
