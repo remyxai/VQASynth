@@ -1,4 +1,30 @@
-import clip
+"""Pluggable multimodal embedding backends.
+
+VQASynth embeds images for content-based filtering (``TagFilter``) and dataset
+enrichment (``EmbeddingGenerator``). Both used to be hardwired to the OpenAI
+``clip`` package. This module exposes a small backend interface so other
+CLIP-family models can be dropped in without touching the dataset-transform
+logic (https://github.com/remyxai/VQASynth/issues/33).
+
+Built-in backends:
+
+* ``clip`` (default) — OpenAI CLIP, unchanged behaviour. The ``clip`` import is
+  deferred to construction time so this module imports cleanly even when the
+  CLIP package is not installed.
+* ``transformers`` — any HuggingFace model exposing ``get_image_features`` /
+  ``get_text_features``. Covers SigLIP (``google/siglip-base-patch16-224``) and
+  LLM2CLIP converted checkpoints (``microsoft/LLM2CLIP-OpenAI-B-16``).
+  ``transformers`` is already a VQASynth dependency, so the common case needs no
+  extra install. (LLM2CLIP checkpoints need ``transformers>=4.52``.)
+
+New backends can be added via :func:`register_embedding_backend`. MagicLens
+(https://github.com/google-deepmind/magiclens) is intentionally not provided
+here: it encodes a composed (image, text-instruction) query rather than a shared
+image/text embedding space, so it does not satisfy the ``TagFilter`` similarity
+contract. The registry is the extension point if a future use case needs it.
+"""
+from __future__ import annotations
+
 import torch
 import numpy as np
 from PIL import Image
@@ -13,26 +39,181 @@ def _to_same_dtype_tensor(x, ref_tensor, device):
         t = torch.as_tensor(x)
     return t.to(device=device, dtype=ref_tensor.dtype)
 
+
+class EmbeddingBackend:
+    """Common surface for a multimodal image + text embedding backend.
+
+    ``EmbeddingGenerator`` and ``TagFilter`` talk to backends only through these
+    four primitives, so a new backend can be added without touching the
+    dataset-transform logic.
+    """
+
+    name = "base"
+
+    def __init__(self, device=None):
+        self.device = device
+
+    def preprocess(self, image):
+        raise NotImplementedError
+
+    def encode_image(self, image_input):
+        raise NotImplementedError
+
+    def encode_text(self, text_input):
+        raise NotImplementedError
+
+    def tokenize(self, texts):
+        raise NotImplementedError
+
+
+class CLIPBackend(EmbeddingBackend):
+    """OpenAI CLIP backend (https://github.com/openai/CLIP). The default.
+
+    Preserves the original load/encode behaviour; only the ``clip`` import is
+    deferred so this module is importable without the package installed.
+    """
+
+    name = "clip"
+
+    def __init__(self, model_name="ViT-B/32", device=None):
+        import clip  # lazy: not required merely to import vqasynth.embeddings
+
+        super().__init__(device=device)
+        self.model, self._preprocess = clip.load(model_name, self.device)
+        self._clip = clip
+
+    def preprocess(self, image):
+        return self._preprocess(image)
+
+    def encode_image(self, image_input):
+        return self.model.encode_image(image_input.to(self.device))
+
+    def encode_text(self, text_input):
+        return self.model.encode_text(text_input.to(self.device))
+
+    def tokenize(self, texts):
+        return self._clip.tokenize(texts)
+
+
+class TransformersBackend(EmbeddingBackend):
+    """HuggingFace Transformers backend for CLIP-family models.
+
+    Loads any model exposing ``get_image_features`` / ``get_text_features``:
+    CLIP, SigLIP, or LLM2CLIP converted checkpoints. ``transformers`` is already
+    a VQASynth dependency, so the common case needs no extra install.
+    """
+
+    name = "transformers"
+
+    def __init__(self, model_name="openai/clip-vit-base-patch32", device=None):
+        from transformers import AutoModel, AutoProcessor
+
+        super().__init__(device=device)
+        self.model = AutoModel.from_pretrained(
+            model_name, trust_remote_code=True
+        ).to(self.device).eval()
+        self._processor = AutoProcessor.from_pretrained(
+            model_name, trust_remote_code=True
+        )
+
+    def preprocess(self, image):
+        # (C, H, W) for a single image; EmbeddingGenerator.run unsqueezes batch.
+        return self._processor(images=image, return_tensors="pt")["pixel_values"][0]
+
+    def encode_image(self, image_input):
+        with torch.no_grad():
+            return self.model.get_image_features(pixel_values=image_input.to(self.device))
+
+    def tokenize(self, texts):
+        if isinstance(texts, str):
+            texts = [texts]
+        return self._processor(
+            text=texts, return_tensors="pt", padding=True, truncation=True
+        )
+
+    def encode_text(self, text_input):
+        # text_input is the BatchEncoding returned by tokenize().
+        moved = {k: v.to(self.device) for k, v in text_input.items()}
+        with torch.no_grad():
+            return self.model.get_text_features(**moved)
+
+
+_EMBEDDING_BACKENDS: dict[str, type[EmbeddingBackend]] = {}
+
+
+def register_embedding_backend(name, cls):
+    """Register an :class:`EmbeddingBackend` subclass under ``name``."""
+    if not (isinstance(cls, type) and issubclass(cls, EmbeddingBackend)):
+        raise TypeError(f"backend class must subclass EmbeddingBackend; got {cls!r}")
+    _EMBEDDING_BACKENDS[name] = cls
+
+
+def build_embedding_backend(backend, model_name="ViT-B/32", device=None):
+    """Resolve ``backend`` (name / class / instance) into an EmbeddingBackend."""
+    if isinstance(backend, EmbeddingBackend):
+        return backend
+    if isinstance(backend, type) and issubclass(backend, EmbeddingBackend):
+        return backend(model_name=model_name, device=device)
+    if not isinstance(backend, str):
+        raise TypeError(
+            f"backend must be a name, class, or instance; got {backend!r}"
+        )
+    try:
+        cls = _EMBEDDING_BACKENDS[backend]
+    except KeyError:
+        raise ValueError(
+            f"Unknown embedding backend {backend!r}. "
+            f"Registered: {sorted(_EMBEDDING_BACKENDS)}."
+        ) from None
+    return cls(model_name=model_name, device=device)
+
+
+register_embedding_backend("clip", CLIPBackend)
+register_embedding_backend("transformers", TransformersBackend)
+
+
 class MultiModalEmbeddingModel:
-    def __init__(self, model_name='ViT-B/32', device=None):
-        """Initialize the CLIP model and its configuration."""
+    def __init__(self, backend="clip", model_name="ViT-B/32", device=None):
+        """Initialize a multimodal embedding backend and its configuration.
+
+        Args:
+            backend: backend name (``"clip"`` / ``"transformers"``), an
+                ``EmbeddingBackend`` subclass, or an instance. Defaults to CLIP.
+            model_name: model/checkpoint name for the selected backend.
+            device: torch device; defaults to CUDA when available.
+        """
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model, self.preprocess = clip.load(model_name, self.device)
+        self._backend = build_embedding_backend(
+            backend, model_name=model_name, device=self.device
+        )
+        self.backend_name = (
+            backend
+            if isinstance(backend, str)
+            else getattr(backend, "name", backend.__class__.__name__)
+        )
+
+        # Uniform interface used by EmbeddingGenerator / TagFilter.
+        self.preprocess = self._backend.preprocess
+        self.encode_image = self._backend.encode_image
+        self.encode_text = self._backend.encode_text
+        self.tokenize = self._backend.tokenize
+        # Backward-compat: expose the underlying model object.
+        self.model = getattr(self._backend, "model", self._backend)
 
 class EmbeddingGenerator(MultiModalEmbeddingModel):
     def run(self, image: Image.Image):
         """
-        Generate CLIP embeddings for an image.
+        Generate embeddings for an image using the configured backend.
 
         Args:
             image (PIL.Image.Image): The input image for which embeddings are generated.
 
         Returns:
-            np.ndarray: Normalized CLIP embeddings for the image.
+            np.ndarray: Normalized embeddings for the image.
         """
-        image_input = self.preprocess(image).unsqueeze(0).to(self.device)
+        image_input = self.preprocess(image).unsqueeze(0)
         with torch.no_grad():
-            image_features = self.model.encode_image(image_input)
+            image_features = self.encode_image(image_input)
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
         # Force float32 so numpy doesn't upcast to float64 later
@@ -102,9 +283,9 @@ class TagFilter(MultiModalEmbeddingModel):
         Returns:
             str: The tag with the highest confidence score.
         """
-        text_inputs = torch.cat([clip.tokenize(f"a photo of a {tag}") for tag in tags]).to(self.device)
+        text_inputs = self.tokenize([f"a photo of a {tag}" for tag in tags])
         with torch.no_grad():
-            text_features = self.model.encode_text(text_inputs)
+            text_features = self.encode_text(text_inputs)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
         # image_embeddings may be list/array of shape (1, D); squeeze and match dtype
@@ -174,4 +355,3 @@ class TagFilter(MultiModalEmbeddingModel):
                 example['tag'] = None
 
         return example
-
