@@ -246,3 +246,38 @@ def test_mask_from_bbox_round_trips_and_clamps():
     assert _bbox_of_mask(mask) == (20, 10, 50, 30)
     # Float coords are rounded (matches how PIL.crop treats a box).
     assert _bbox_of_mask(_mask_from_bbox((1.4, 2.6, 11.4, 12.6), 50, 50)) == (1, 3, 11, 13)
+
+
+# ── API-drift guards ─────────────────────────────────────────────────────
+#
+# The wrapper composes vqasynth.describe_anything.DescribeAnything via a
+# handful of kwargs at construction time and a single .describe() method.
+# The stub-based tests above never touch the real constructor, so an
+# upstream rename would slip past them and only surface on a real DAM run.
+# These two guards run in milliseconds and catch that class of drift.
+
+
+def test_dam_estimator_kwargs_are_accepted_by_upstream():
+    """Every kwarg :class:`DAMEstimator._ensure_loaded` passes to
+    :class:`vqasynth.describe_anything.DescribeAnything` must be a parameter
+    that class actually accepts. If upstream renames or drops one, the
+    stub-based tests above still pass (they never construct the real
+    DescribeAnything); this guard catches the drift explicitly."""
+    import inspect
+    from vqasynth.describe_anything import DescribeAnything
+    accepted = set(inspect.signature(DescribeAnything.__init__).parameters)
+    for kwarg in ("model_id", "device", "dtype", "dam"):
+        assert kwarg in accepted, (
+            f"DAMEstimator passes {kwarg}= to DescribeAnything, but that "
+            f"class no longer accepts it (accepts: {sorted(accepted)})"
+        )
+
+
+def test_default_model_id_matches_upstream():
+    """The wrapper's default DAM variant must track the underlying stage's
+    default. If either side updates independently, both defaults should
+    move together — this pins them so the drift surfaces as a test
+    failure rather than a silent behavior split."""
+    from vqasynth import describe_anything as upstream
+    from experiments.nooa_agent.tools.describe import DAMEstimator
+    assert DAMEstimator.DEFAULT_MODEL_ID == upstream.DEFAULT_MODEL_ID
