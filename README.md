@@ -236,3 +236,54 @@ register_embedding_backend("mine", MyBackend)
 > space, so it does not fit the `TagFilter` image-vs-tag similarity contract.
 > The `EmbeddingBackend` registry above is the extension point if a future use
 > case needs composed-query embeddings.
+
+## Object Orientation
+
+🧭 Per-object 3D orientation with [Orient-Anything](https://github.com/SpatialVision/Orient-Anything) — each segmented object gets an `azimuth` / `polar` / `rotation` estimate plus an in-distribution `confidence`. The estimator mirrors `DepthEstimator` (`run` / `apply_transform`) and isolates each object from its SAM2 mask before orienting it, since the model is trained on rendered single-object images and only generalizes to in-the-wild photos when objects are cropped first (the repo's stated "Best Practice").
+
+```python
+from vqasynth.orientation import OrientationEstimator
+
+# `masks` is the per-object SAM2 mask list produced by vqasynth.localize.Localizer
+orientation = OrientationEstimator()
+per_object = orientation.run_objects(image, masks)
+# -> [{"azimuth": 312.0, "polar": 4.0, "rotation": -7.0, "confidence": 0.98}, ...]
+```
+
+In the batch pipeline this runs as the `orientation_stage` (`docker/orientation_stage/`), reading the `masks` column and adding an `orientation` column. The Orient-Anything model code is not on PyPI — clone the repo and put it on your `PYTHONPATH` (or inject `model=` / `preprocess=` into `OrientationEstimator`) to load the real weights.
+```
+@article{wang2024orient,
+  title={Orient Anything: Learning Robust Object Orientation Estimation from Rendering 3D Models},
+  author={Wang, Zehan and Zhang, Ziang and Pang, Tianyu and Du, Chao and Zhao, Hengshuang and Zhao, Zhou},
+  journal={arXiv preprint arXiv:2412.18605},
+  url={https://arxiv.org/abs/2412.18605},
+  year={2024}
+}
+```
+
+## Text-to-3D Mesh Tokenization
+
+VQASynth can also structure 3D meshes into the text token format used to fine-tune text-to-3D VLMs in the style of [LLaMA-Mesh](https://github.com/nv-tlabs/LLaMA-Mesh) ([issue #30](https://github.com/remyxai/VQASynth/issues/30)). Load a Wavefront OBJ, filter to a face budget, apply a random 90° rotation for augmentation, quantize vertices into bounded bins, sort by depth, and emit `v x y z` / `f a b c` tokens — one `.txt` per mesh, ready for instruction tuning.
+
+```python
+from vqasynth.mesh_tokenize import process_mesh_file, mesh_to_text
+
+# One mesh -> token text
+vertices, faces = process_mesh_file("cow.obj", max_faces=500, bins=64)
+print(mesh_to_text(vertices, faces))
+
+# Every .obj in a directory -> per-mesh .txt outputs. Records are filtered
+# through the same null filter as the image-derived rows, so they drop into
+# vqasynth.datasets unchanged.
+from vqasynth.mesh_tokenize import process_directory
+records = process_directory("meshes/", "tokens/")
+```
+
+Tokenize a sample of [Objaverse XL](https://objaverse.allenai.org/) meshes:
+
+```bash
+pip install objaverse
+python examples/mesh_tokenize_example.py --objaverse --output tokens/ --sample 10
+```
+
+See [`vqasynth/mesh_tokenize.py`](vqasynth/mesh_tokenize.py) for the full pipeline and [`examples/mesh_tokenize_example.py`](examples/mesh_tokenize_example.py) for a runnable demo.
