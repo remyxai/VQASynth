@@ -308,3 +308,37 @@ def test_detect_3d_boxes_delegates_to_default_estimator(monkeypatch):
     assert len(boxes) == 1
     assert boxes[0].label == "stub"
     assert boxes[0].extent == (0.5, 0.5, 0.5)
+
+
+# ── API-drift guards vs upstream vqasynth.detection_3d ────────────────────
+#
+# The wrapper composes vqasynth.detection_3d.Detection3DGenerator +
+# BoundingBox3D via a handful of surface points. Stub tests never touch
+# the real classes; these guards catch upstream drift explicitly.
+
+
+def test_detection_3d_generator_compute_boxes_signature():
+    """The wrapper calls ``Detection3DGenerator().compute_boxes(captions, pointclouds)``.
+    Guard the method name + parameter names against upstream rename."""
+    import inspect
+    from vqasynth.detection_3d import Detection3DGenerator
+    method = getattr(Detection3DGenerator, "compute_boxes", None)
+    assert callable(method), "Detection3DGenerator.compute_boxes went missing"
+    params = list(inspect.signature(method).parameters)
+    assert params[:3] == ["self", "captions", "pointclouds"], (
+        f"compute_boxes signature drifted: {params}"
+    )
+
+
+def test_bounding_box_3d_fields_the_wrapper_reads():
+    """``Detection3DGeneratorAgent._lift`` reads ``box.center`` + ``box.extent``
+    + ``box.label`` off the upstream :class:`BoundingBox3D`. Guard those
+    attribute names — a rename would silently drop labels or produce
+    zero-extent boxes."""
+    from vqasynth.detection_3d import BoundingBox3D
+    import dataclasses
+    fields = {f.name for f in dataclasses.fields(BoundingBox3D)}
+    for name in ("center", "extent", "label", "oriented"):
+        assert name in fields, (
+            f"BoundingBox3D no longer exposes {name} (has: {sorted(fields)})"
+        )
