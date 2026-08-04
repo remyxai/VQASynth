@@ -4,14 +4,12 @@ Ports the mesh-tokenization pipeline from the maintainer's LLaMA-Mesh Colab into
 the vqasynth package, so Objaverse OBJ meshes can be structured into the text
 ``v x y z`` / ``f a b c`` token format used to fine-tune text-to-3D VLMs.
 
-Pipeline (mirrors the notebook): load OBJ -> filter to <= ``max_faces`` faces ->
-quantize vertices into ``bins`` per axis -> random 90 deg z-axis rotation (data
-augmentation) -> (optional) simplify to a target vertex count -> sort vertices
-by z (faces canonically) -> emit as OBJ-style text tokens.
+Pipeline: load OBJ -> filter to <= ``max_faces`` faces -> random 90 deg z-axis
+rotation (data augmentation) -> quantize vertices into ``bins`` per axis ->
+(optional) simplify to a target vertex count -> sort vertices by z (faces
+canonically) -> emit as OBJ-style text tokens.
 
-Two deviations from the reference notebook, both pure correctness hardening
-(neither changes the emitted token format on the Objaverse path the brief
-targets):
+Three deviations from the reference notebook, all pure correctness hardening:
 
 1. ``load_obj`` parses face indices to 0-based internally and ``mesh_to_text``
    emits them back as 1-based OBJ tokens. The notebook carried 1-based indices
@@ -22,6 +20,14 @@ targets):
    The notebook reordered vertices by z but left face indices untouched, so
    every emitted face referenced the wrong vertex. The canonical face ordering
    (``sorted(faces, key=sorted)``) is preserved.
+3. Rotation runs BEFORE quantization (notebook cells apply quantize then
+   rotate). A 90 deg z-rotation applied to quantized ``[0, bins-1]`` bin
+   indices takes them out of range — ``(x, y) -> (-y, x)`` produces negative
+   x — which breaks the LLaMA-Mesh paper's token vocabulary
+   ``x, y, z in [0, N-1]``. Rotating in real-valued coordinates first, then
+   letting min-max quantization re-normalize the (rotated) bounding box back
+   into ``[0, bins-1]``, keeps every emitted vertex token inside the valid
+   range regardless of which rotation was drawn.
 
 The optional ``simplify_mesh`` step is ported verbatim (scipy Delaunay). It is
 off the Objaverse path (cell 5 of the notebook omits it) and carries the same
@@ -252,11 +258,13 @@ def process_mesh_file(
     vertices, faces = load_obj(filename)
 
     vertices, faces = filter_faces(vertices, faces, max_faces)
-    vertices = quantize_vertices(vertices, bins)
-    # NOTE: follows the notebook's quantize-then-rotate order. A 90 deg z-axis
-    # rotation permutes and may negate the (already quantized) x/y coordinates,
-    # so emitted vertex tokens can be negative. z is invariant.
+    # Rotate FIRST (in real-valued coordinates) so the 90 deg z-axis rotation's
+    # coordinate permutation + sign flip is absorbed by the subsequent
+    # min-max quantization. The alternative (quantize-then-rotate, notebook
+    # order) leaves emitted tokens outside the ``[0, bins-1]`` vocabulary the
+    # LLaMA-Mesh paper defines. See module docstring, deviation #3.
     vertices = random_rotate(vertices, rng=rng)
+    vertices = quantize_vertices(vertices, bins)
 
     if simplify:
         if target_vertices_count is None:

@@ -156,10 +156,12 @@ def test_process_mesh_file_round_trip(tmp_path):
         assert parts[0] in ("v", "f")
         if parts[0] == "v":
             x, y, z = (int(v) for v in parts[1:4])
-            # Quantize-then-rotate (notebook order): x/y may be negated by a 90
-            # deg z-axis rotation; z is invariant and stays in [0, bound].
-            assert -bound <= x <= bound
-            assert -bound <= y <= bound
+            # Rotate-then-quantize: every emitted axis lands in the
+            # LLaMA-Mesh token vocabulary ``[0, bins-1]`` regardless of
+            # which 90 deg rotation was drawn (min-max quantization
+            # re-centers the rotated bounding box).
+            assert 0 <= x <= bound
+            assert 0 <= y <= bound
             assert 0 <= z <= bound
         else:
             idx = [int(x) for x in parts[1:]]
@@ -167,6 +169,38 @@ def test_process_mesh_file_round_trip(tmp_path):
 
     # Vertices are z-ascending after the pipeline.
     assert np.all(np.diff(vertices[:, 2]) >= 0)
+
+
+def test_process_mesh_file_all_rotations_stay_in_range(tmp_path):
+    """The LLaMA-Mesh token vocabulary is ``[0, bins-1]`` on every axis.
+    Rotate-before-quantize must keep every emitted vertex inside that
+    range regardless of which of the four 90 deg rotations was drawn —
+    an earlier revision quantized first and then rotated, which
+    produced negative x/y tokens outside the vocabulary."""
+    path = _write(tmp_path, "tet.obj", TETRA_OBJ)
+    bound = 64 - 1
+    # Force each rotation index by seeding the module-level ``random``
+    # so ``random.choice(range(4))`` picks each in turn.
+    for rot_index in range(4):
+        rng = random.Random()
+        rng.seed(0)
+        # Pre-consume RNG state until choice(range(4)) yields rot_index.
+        # Simpler: rebind random_rotate to test each rotation explicitly.
+        import vqasynth.mesh_tokenize as mt
+        original = mt._Z_AXIS_ROTATIONS
+        try:
+            mt._Z_AXIS_ROTATIONS = [original[rot_index]]
+            vertices, _ = process_mesh_file(
+                path, bins=64, rng=random.Random(0),
+            )
+            for v in vertices:
+                for axis_val in v:
+                    assert 0 <= int(axis_val) <= bound, (
+                        f"rotation {rot_index}: axis value {int(axis_val)} "
+                        f"outside [0, {bound}]"
+                    )
+        finally:
+            mt._Z_AXIS_ROTATIONS = original
 
 
 def test_process_mesh_file_over_budget_is_rejected(tmp_path):
