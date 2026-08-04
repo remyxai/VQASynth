@@ -8,8 +8,8 @@ from vqasynth.embeddings import TagFilter
 from vqasynth.utils import filter_null
 
 
-def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_threshold=0.7):
-    tag_filter = TagFilter()
+def main(output_dir, source_repo_id, include_tags, exclude_tags, confidence_threshold=0.7, backend="clip", model_name="ViT-B/32"):
+    tag_filter = TagFilter(backend=backend, model_name=model_name)
     dataloader = Dataloader(output_dir)
 
     dataset = dataloader.load_dataset(source_repo_id)
@@ -58,5 +58,17 @@ if __name__ == "__main__":
     parser.add_argument("--source_repo_id", type=str, required=True, help="Source huggingface dataset repo id")
     parser.add_argument("--include_tags", type=str, required=False, default=None, help="Comma-separated list of tags to include (optional)")
     parser.add_argument("--exclude_tags", type=str, required=False, default=None, help="Comma-separated list of tags to exclude (optional)")
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="clip",
+        help="Embedding backend: 'clip' (default) or 'transformers'. Should match the embeddings_stage backend.",
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="ViT-B/32",
+        help="Model/checkpoint for the backend. Should match the embeddings_stage model_name.",
+    )
     args = parser.parse_args()
-    main(args.output_dir, args.source_repo_id, args.include_tags, args.exclude_tags)
+    main(args.output_dir, args.source_repo_id, args.include_tags, args.exclude_tags, backend=args.backend, model_name=args.model_name)

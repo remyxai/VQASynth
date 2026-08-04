@@ -44,6 +44,14 @@ on:
         description: 'Optional hand-crafted implementation spec (landing-zone-to-PR mode). Overrides suggested_experiment.'
         required: false
         default: ''
+      mode:
+        description: 'Run mode. recommend (default) runs the ranker+paper flow; brief runs the paper-less lead-content-only flow; convention/fidelity/test run the corresponding refinement pass on an open PR.'
+        required: false
+        default: ''
+      pr-number:
+        description: 'PR number to audit — required by mode=convention / fidelity / test refinement passes.'
+        required: false
+        default: ''
       start-from-ref:
         description: 'Optional branch/tag/SHA to start the coding session from.'
         required: false
@@ -88,9 +96,13 @@ jobs:
           if [ -n "$MODEL_INPUT" ]; then
             echo "ANTHROPIC_MODEL=$MODEL_INPUT" >> "$GITHUB_ENV"
           fi
+      # Brief-mode + parser fix merged as v1.7.48 / v1.7.47 — re-pinned to @v1
+      # so the floating pointer picks up future outrider releases automatically.
       - uses: remyxai/outrider@v1
         with:
           interest-id: 8c1de057-99fa-405f-a7af-7842492d2873
+          mode: ${{ inputs.mode || '' }}
+          pr-number: ${{ inputs.pr-number || '' }}
           rate-limit-days: '0'
           # Coding agents routinely touch build/env metadata while adding a
           # training pipeline (cache dirs into .gitignore, deps into

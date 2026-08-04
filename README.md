@@ -123,6 +123,8 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Evaluate SpaceThinker on QSpatial++ | Assess SpaceThinker's quantitative spatial reasoning on the QSpatial++ benchmark | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1buEe2QC4_pnrJwQ9XyRAH7RfaIa6pbex?usp=sharing) |
 | SpaceLLaVA Attention with TransformerLens | Visualize SpaceLLaVA-7B attention patterns using TransformerLens | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/19H_hOL8gc1nFQKpDoioJR8nDWX1lsNZM?usp=sharing) |
 | Agent with VQASynth Tools | Dynamic tool composition for spatial questions beyond template + VLM ceilings | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1nEWs0eVJPW-mmh5PMJFWx8kenPILRlvE?usp=sharing) |
+| Prometheus-vision Judge | Score SpaceLLaVA outputs with a prometheus-vision judge to build a score-matched spatial-VQA dataset | Local CLI — no hosted notebook yet; see [`experiments/prometheus_space_judge/`](experiments/prometheus_space_judge/) |
+
 | Pose Estimation SFT Pairs | Generate PoseText-style `<point>` SFT pairs from body keypoints (CPU) | [notebook](notebooks/pose_estimation.ipynb) |
 
 ## Agent with VQASynth Tools
@@ -156,6 +158,33 @@ print(result.tool_calls_used)   # 4
 
 See `experiments/nooa_agent/README.md` for install, resource tiers (CPU with DepthPro / GPU with VGGT), the full tool inventory, and the lerobot integration path.
 
+## Prometheus-vision Judge
+
+Score SpaceLLaVA outputs on spatial reasoning with a [Prometheus-vision](https://github.com/prometheus-eval/prometheus-vision) judge (refs [#28](https://github.com/remyxai/VQASynth/issues/28)). `vqasynth.judge_dataset` reformats an OpenSpaces-style spatial-VQA dataset into the judge record shape — `image` / `instruction` (task-description + scoring preamble + the user question) / `response to evaluate` / `reference answer` / a 5-point spatial-reasoning `score rubrics` — and parses the `[N]` scores out of the judge feedback into a score distribution and a score-matched dataset ready for the Hub. The reformat + score-parse logic is pure-stdlib and unit-tested (`tests/test_judge_dataset.py`).
+
+The runnable wiring lives in `experiments/prometheus_space_judge/` (an opt-in
+surface, like `experiments/nooa_agent/` — no changes to the `vqasynth/` core):
+
+```bash
+# 1. Build the judge-input JSONL (and materialize images)
+python -m experiments.prometheus_space_judge.run build \
+    --dataset remyxai/OpenSpaces --limit 1000 \
+    --image-dir openspaces --output openspaces/sample_eval_data.jsonl
+
+# 2. Run the external prometheus-vision / llava eval to produce
+#    evaluation_results.jsonl (maintainer-run; see the package README).
+
+# 3. Parse scores, plot a histogram, and build/push the scored dataset
+python -m experiments.prometheus_space_judge.run score \
+    --eval openspaces/sample_eval_data.jsonl \
+    --results evaluation_results.jsonl \
+    --histogram score_histogram.png \
+    --push-to-hub <user>/SpaceJudgeDataset
+```
+
+See `experiments/prometheus_space_judge/README.md` for install, the build/score
+subcommands, and the external-eval pointer.
+
 ## References
 This project was inspired by or utilizes concepts discussed in the following research paper(s):
 ```
@@ -180,6 +209,150 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Embedding backends
+
+The `embeddings_stage` (content filtering via `TagFilter` and image embedding via
+`EmbeddingGenerator`) supports pluggable multimodal embedding backends, so you
+are not limited to OpenAI CLIP ([#33](https://github.com/remyxai/VQASynth/issues/33)).
+
+Select a backend with the `--backend` / `--model_name` flags on the
+`embeddings_stage` and `filter_stage` entry points (use the same pair on both so
+image and text embeddings live in the same space):
+
+| `--backend` | `--model_name` example | Notes |
+| :-- | :-- | :-- |
+| `clip` (default) | `ViT-B/32` | OpenAI CLIP. Requires the `clip` package (installed in the embeddings Docker image). |
+| `transformers` | `openai/clip-vit-base-patch32` | Any HuggingFace model exposing `get_image_features` / `get_text_features`. |
+| `transformers` | `google/siglip-base-patch16-224` | SigLIP. No new dependency (`transformers` is already required). |
+| `transformers` | `microsoft/LLM2CLIP-OpenAI-B-16` | [LLM2CLIP](https://github.com/microsoft/LLM2CLIP) converted checkpoint. Needs `transformers>=4.52`. |
+
+```bash
+# Example: run the embeddings + filter stages with an LLM2CLIP backend
+docker compose -f pipelines/spatialvqa.yaml run embeddings_stage \
+  --backend transformers --model_name microsoft/LLM2CLIP-OpenAI-B-16
+docker compose -f pipelines/spatialvqa.yaml run filter_stage \
+  --backend transformers --model_name microsoft/LLM2CLIP-OpenAI-B-16
+```
+
+In-process usage:
+
+```python
+from vqasynth.embeddings import EmbeddingGenerator
+
+# Default: OpenAI CLIP
+gen = EmbeddingGenerator()
+
+# LLM2CLIP via HuggingFace
+gen = EmbeddingGenerator(backend="transformers", model_name="microsoft/LLM2CLIP-OpenAI-B-16")
+```
+
+Custom backends can be added by subclassing `EmbeddingBackend` and registering it:
+
+```python
+from vqasynth.embeddings import EmbeddingBackend, register_embedding_backend
+
+class MyBackend(EmbeddingBackend):
+    name = "mine"
+    # implement preprocess / encode_image / encode_text / tokenize
+    ...
+
+register_embedding_backend("mine", MyBackend)
+```
+
+> **Note on MagicLens.** [MagicLens](https://github.com/google-deepmind/magiclens)
+> is intentionally not provided as a backend: it encodes a composed
+> (image, text-instruction) query rather than a shared image/text embedding
+> space, so it does not fit the `TagFilter` image-vs-tag similarity contract.
+> The `EmbeddingBackend` registry above is the extension point if a future use
+> case needs composed-query embeddings.
+
+## Object Orientation
+
+🧭 Per-object 3D orientation with [Orient-Anything](https://github.com/SpatialVision/Orient-Anything) — each segmented object gets an `azimuth` / `polar` / `rotation` estimate plus an in-distribution `confidence`. The estimator mirrors `DepthEstimator` (`run` / `apply_transform`) and isolates each object from its SAM2 mask before orienting it, since the model is trained on rendered single-object images and only generalizes to in-the-wild photos when objects are cropped first (the repo's stated "Best Practice").
+
+```python
+from vqasynth.orientation import OrientationEstimator
+
+# `masks` is the per-object SAM2 mask list produced by vqasynth.localize.Localizer
+orientation = OrientationEstimator()
+per_object = orientation.run_objects(image, masks)
+# -> [{"azimuth": 312.0, "polar": 4.0, "rotation": -7.0, "confidence": 0.98}, ...]
+```
+
+In the batch pipeline this runs as the `orientation_stage` (`docker/orientation_stage/`), reading the `masks` column and adding an `orientation` column. The Orient-Anything model code is not on PyPI — clone the repo and put it on your `PYTHONPATH` (or inject `model=` / `preprocess=` into `OrientationEstimator`) to load the real weights.
+```
+@article{wang2024orient,
+  title={Orient Anything: Learning Robust Object Orientation Estimation from Rendering 3D Models},
+  author={Wang, Zehan and Zhang, Ziang and Pang, Tianyu and Du, Chao and Zhao, Hengshuang and Zhao, Zhou},
+  journal={arXiv preprint arXiv:2412.18605},
+  url={https://arxiv.org/abs/2412.18605},
+  year={2024}
+}
+```
+
+## Text-to-3D Mesh Tokenization
+
+VQASynth can also structure 3D meshes into the text token format used to fine-tune text-to-3D VLMs in the style of [LLaMA-Mesh](https://github.com/nv-tlabs/LLaMA-Mesh) ([issue #30](https://github.com/remyxai/VQASynth/issues/30)). Load a Wavefront OBJ, filter to a face budget, apply a random 90° rotation for augmentation, quantize vertices into bounded bins, sort by depth, and emit `v x y z` / `f a b c` tokens — one `.txt` per mesh, ready for instruction tuning.
+
+```python
+from vqasynth.mesh_tokenize import process_mesh_file, mesh_to_text
+
+# One mesh -> token text
+vertices, faces = process_mesh_file("cow.obj", max_faces=500, bins=64)
+print(mesh_to_text(vertices, faces))
+
+# Every .obj in a directory -> per-mesh .txt outputs. Records are filtered
+# through the same null filter as the image-derived rows, so they drop into
+# vqasynth.datasets unchanged.
+from vqasynth.mesh_tokenize import process_directory
+records = process_directory("meshes/", "tokens/")
+```
+
+Tokenize a sample of [Objaverse XL](https://objaverse.allenai.org/) meshes:
+
+```bash
+pip install objaverse
+python examples/mesh_tokenize_example.py --objaverse --output tokens/ --sample 10
+```
+
+See [`vqasynth/mesh_tokenize.py`](vqasynth/mesh_tokenize.py) for the full pipeline and [`examples/mesh_tokenize_example.py`](examples/mesh_tokenize_example.py) for a runnable demo.
+
+## Multi-view Correspondence
+
+A lightweight stage for sampling point-level correspondences across views
+(e.g. adjacent frames from an Ego4D clip) and converting them into pointing-VLM
+(Molmo) training data. Tracked in [issue #41](https://github.com/remyxai/VQASynth/issues/41).
+
+**Method:** OpenCV classical — SIFT keypoints + Lowe ratio-tested matching
+(BF or FLANN) + RANSAC homography filter. CPU-only, no model weights, matching
+the lightweight `docker/*_stage` shape. The converter emits Molmo
+`<point x=".." y=".." alt="..">` tags in the exact 0–100 normalized format
+parsed by `vqasynth.localize`, so correspondence outputs drop straight into the
+existing pointing-VLM pipeline. (Neural alternatives cited in the issue —
+StreamVGGT [arXiv:2507.11539] and PlanarRecon [arXiv:2104.00681] — are heavier
+GPU paths kept as future options for large viewpoint changes.)
+
+```python
+from vqasynth.correspondence import CorrespondenceExtractor, correspondences_to_messages
+
+extractor = CorrespondenceExtractor()                 # SIFT + BFMatcher + RANSAC
+result = extractor.extract(view_a, view_b)            # two PIL images / ndarrays
+messages = correspondences_to_messages(result)        # -> pointing-VLM QA messages
+```
+
+Run the end-to-end demo (synthesizes a second view via a known warp — no Ego4D
+download needed):
+
+```bash
+python examples/correspondence_example.py --out viz.png
+```
+
+The stage ships as a Docker pipeline entrypoint at
+`docker/correspondence_stage/` (same `--source_repo_id` / `--images` /
+`--target_repo_name` surface as the other stages; expects an image column
+holding a list of frames per example). Structural tests live in
+`tests/test_correspondence.py`.
 
 ## Human Pose Estimation
 
