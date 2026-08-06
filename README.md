@@ -185,3 +185,25 @@ This project was inspired by or utilizes concepts discussed in the following res
   year={2024}
 }
 ```
+
+## Visual Credit Audit
+**Visual Credit Audit** — adapted from *Visual Credit Audit for Multimodal Spatial Reasoning* (arXiv:2607.27069).
+
+A complementary diagnostic for the `Model Evaluation` stage. Alongside the usual correctness scorer, it asks whether a VLM's yes/no spatial decision is actually *credited to the image* or merely recoverable from a text-only (or blank) control. For each `comparison_yn` question it reads the model's next-token `P(yes)/P(no)` under the real benchmark image and under a null control — one forward pass each on the already-loaded HuggingFace VLM — then reports:
+
+- **Dependence-credited correctness (D-CC)** — correct decisions where the image gives the gold answer positive probability gain over the control.
+- **Correct-but-uncredited rate** — correct decisions with no image support (the paper's "right answer, wrong reason" case).
+- **Image-credit rate (label-free)** — the training- and label-free first audit: how often the real image raises support for the declared decision above the control.
+
+```bash
+# Audit a model on SpatialScore's yes/no subset (text-only control)
+python docker/eval_stage/visual_credit_audit_eval.py --output_dir ./cache \
+    --model remyxai/SpaceThinker-Qwen2.5VL-3B --benchmark spatialscore
+
+# Use a blank uniform image as the null control, cap items for a smoke test
+python docker/eval_stage/visual_credit_audit_eval.py --output_dir ./cache \
+    --model Qwen/Qwen2.5-VL-7B-Instruct --benchmark spatialscore \
+    --control blank --max_items 200
+```
+
+Implemented in `vqasynth/visual_credit_audit.py`; entrypoint mirrors `docker/eval_stage/process_eval.py` and reuses the benchmark loaders and the loaded VLM.
