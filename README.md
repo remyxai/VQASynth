@@ -97,7 +97,6 @@ VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://spati
 * [SpaceThinker-Qwen2.5VL-3B](https://huggingface.co/remyxai/SpaceThinker-Qwen2.5VL-3B) - the most accurate distance estimates
 * [SpaceQwen2.5-VL-3B-Instruct - 3B](https://huggingface.co/remyxai/SpaceQwen2.5-VL-3B-Instruct) - the most popular
 * [SpaceLLaVA - 13B](https://huggingface.co/remyxai/SpaceLLaVA) - the original
-* [SpaceLLaVA - 7B](https://huggingface.co/salma-remyx/spacellava-1.5-7b) - the most interpretable
 
 Examples from [SpaceThinker](https://huggingface.co/remyxai/SpaceThinker-Qwen2.5VL-3B):
 
@@ -121,7 +120,7 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Generate Spatial VQA Dataset | Augment an HF Image Dataset with Spatial VQA | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1sJUsJ5-UR-3Bydgg-thJ59KSNxRG8Q30?usp=sharing) |
 | Spatial Reasoning with Point Clouds | Visualize point clouds and evaluate spatial relationships | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1f3rr-y233GvxWVzPE7_mK-DY52pG0fsm?usp=sharing) |
 | Evaluate SpaceThinker on QSpatial++ | Assess SpaceThinker's quantitative spatial reasoning on the QSpatial++ benchmark | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1buEe2QC4_pnrJwQ9XyRAH7RfaIa6pbex?usp=sharing) |
-| SpaceLLaVA Attention with TransformerLens | Visualize SpaceLLaVA-7B attention patterns using TransformerLens | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/19H_hOL8gc1nFQKpDoioJR8nDWX1lsNZM?usp=sharing) |
+| Space* Mechanistic Inspection via TransformerLens | Compare SpaceQwen / SpaceThinker / SpaceOm on a canonical spatial-reasoning query — attention entropy, residual norms, and logit-lens across the fine-tune trajectory | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/14p2l_RJKk5nqPHM3rkvCUKqGcse6XZ25?usp=sharing) |
 | Agent with VQASynth Tools | Dynamic tool composition for spatial questions beyond template + VLM ceilings | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1nEWs0eVJPW-mmh5PMJFWx8kenPILRlvE?usp=sharing) |
 | Prometheus-vision Judge | Score SpaceLLaVA outputs with a prometheus-vision judge to build a score-matched spatial-VQA dataset |  [`experiments/prometheus_space_judge/`](experiments/prometheus_space_judge/) |
 | 3D Object-Detection QA Synthesis | Synthesize Molmo `<point3d>` training pairs from per-object point clouds (CPU-only) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb) |
