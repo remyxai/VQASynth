@@ -1,24 +1,29 @@
-name: Outrider daily (branch-mode, GLM)
+name: Outrider daily (branch-mode, drafter)
 
-# Continuous exploration companion to outrider.yml. Dispatches once daily
-# under publish=branch on the z.ai GLM backend — no PR, no Issue, no
-# maintainer notification. Preflight-passed candidates land as fork branches
-# that the team reviews at its own cadence. Complementary to the weekly
-# Anthropic Opus run in outrider.yml, which stays the committed-tier
-# deployment.
+# Drafter tier of the two-tier setup: high-frequency, cheap-model
+# exploration. Publishes as branch — no PR/Issue, no maintainer signal.
+# Every dispatch accumulates repo intel; outrider-weekly-refine.yml
+# promotes one accumulated branch per week to a ready-for-review PR.
+#
+# Backend for this tier: provider=zai model=glm-5.2
 
 on:
   schedule:
-    - cron: '30 6 * * *'
+    - cron: '0 6 * * *'
   workflow_dispatch: {}
 
 concurrency:
-  group: outrider-daily
+  # Deliberately static, unlike outrider.yml's per-target group:
+  # every drafter run commits to the same accumulated intel branch, so two in
+  # flight would race on the push. One at a time is protective here, and the
+  # drafter is cron/dispatcher-driven rather than fired in batches.
+  group: outrider-drafter
   cancel-in-progress: false
 
 jobs:
   scout:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: write
       pull-requests: write
@@ -26,11 +31,17 @@ jobs:
     env:
       REMYX_API_KEY: ${{ secrets.REMYX_API_KEY }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_API_KEY }}
+      ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
       ANTHROPIC_MODEL: glm-5.2
     steps:
-      - uses: actions/checkout@v4
       - uses: remyxai/outrider@v1
         with:
-          interest-id: '8c1de057-99fa-405f-a7af-7842492d2873'
+          interest-id: c41621c4-d031-4151-b504-3ab0ee1e11d5
           publish: branch
-          model-base-url: 'https://api.z.ai/api/anthropic'
+          # Drafter defaults: accumulate intel, skip research (cost is
+          # proportionate weekly, not at daily drafter frequency).
+          maintain-state: 'true'
+          staged-synthesis: 'false'
+          rate-limit-days: '0'
+          # Backend-matched agent timeout (thinking-mode backends need 3600s).
+          claude-timeout: '3600'
