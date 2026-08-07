@@ -1,0 +1,160 @@
+name: Outrider
+
+# Dispatch-only (two-tier: the drafter owns the daily cadence); uses remyxai/outrider to pick a paper from
+# engine.remyx.ai for this research interest and open a draft PR with an
+# agent-scaffolded integration.
+#
+# Secrets needed (set in Settings → Secrets and variables → Actions):
+#   REMYX_API_KEY     — engine.remyx.ai token
+#   ANTHROPIC_API_KEY — Claude Code backend key (when provider=anthropic)
+#   ZAI_API_KEY       — Z.ai backend key (when provider=zai)
+#   MOONSHOT_API_KEY  — Moonshot AI backend key (when provider=moonshot)
+#
+# Baked defaults (this repo's agent config): provider=moonshot
+# model=kimi-k3 — a workflow_dispatch can override
+# both per run (that's how a two-tier refiner dispatches its promotions).
+
+on:
+  workflow_dispatch:
+    inputs:
+      pin-arxiv:
+        description: 'Optional arxiv_id to implement directly (bypass selection).'
+        required: false
+        default: ''
+      publish:
+        description: 'pr (default) or branch.'
+        required: false
+        default: ''
+      mode:
+        description: 'Action mode passthrough.'
+        required: false
+        default: ''
+      start-from-ref:
+        description: 'Warm-start the session on an existing draft branch.'
+        required: false
+        default: ''
+      lead-content:
+        description: 'Ground the session on this text instead of pool selection.'
+        required: false
+        default: ''
+      staged-synthesis:
+        description: 'true/false passthrough.'
+        required: false
+        default: ''
+      test-integration-policy:
+        description: 'strict | soft | off — test-integration gate (empty = action default).'
+        required: false
+        default: ''
+      fidelity-policy:
+        description: 'block | advisory | off — pre-PR fidelity gate (empty = action default).'
+        required: false
+        default: ''
+      provider:
+        description: 'anthropic | zai | moonshot (empty = this repo default).'
+        required: false
+        default: ''
+      model:
+        description: 'Model name (empty = this repo default).'
+        required: false
+        default: ''
+      interest-id:
+        description: 'Research interest UUID this run is for (empty = this repo default).'
+        required: false
+        default: ''
+
+concurrency:
+  # Keyed by what THIS dispatch works on, not a flat "outrider". A static group
+  # with cancel-in-progress:false permits exactly one *pending* run, so firing
+  # several dispatches at one repo silently cancels all but the last queued one
+  # — no error, and the cancellations read as flakes. Keying by target lets
+  # distinct papers/branches run in parallel (they touch different branches)
+  # while a true duplicate of the same target still queues behind its
+  # predecessor. Unpinned runs fall back to run_id: never cancel a dispatch we
+  # can't prove is a duplicate. (Index syntax, not dot — a workflow-level
+  # expression error invalidates the whole workflow, and hyphenated property
+  # names are only *documented* as safe when indexed.)
+  group: outrider-${{ inputs['pin-arxiv'] || inputs['start-from-ref'] || inputs['search-method'] || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  recommend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      REMYX_API_KEY: ${{ secrets.REMYX_API_KEY }}
+    steps:
+      # Route the model backend: dispatch inputs override the baked repo
+      # defaults; auth env is exclusive per provider (the action validates).
+      - name: Configure provider auth
+        id: backend
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY_SECRET: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_API_KEY_SECRET: ${{ secrets.ZAI_API_KEY }}
+          MOONSHOT_API_KEY_SECRET: ${{ secrets.MOONSHOT_API_KEY }}
+          PROVIDER_INPUT: ${{ inputs.provider }}
+          MODEL_INPUT: ${{ inputs.model }}
+        run: |
+          PROVIDER="${PROVIDER_INPUT:-moonshot}"
+          MODEL="${MODEL_INPUT:-kimi-k3}"
+          case "$PROVIDER" in
+            zai)
+              echo "ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY_SECRET" >> "$GITHUB_ENV"
+              echo "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic" >> "$GITHUB_ENV"
+              echo "base_url=https://api.z.ai/api/anthropic" >> "$GITHUB_OUTPUT"
+              echo "timeout=3600" >> "$GITHUB_OUTPUT" ;;
+            moonshot)
+              echo "ANTHROPIC_AUTH_TOKEN=$MOONSHOT_API_KEY_SECRET" >> "$GITHUB_ENV"
+              echo "ANTHROPIC_BASE_URL=https://api.moonshot.ai/anthropic" >> "$GITHUB_ENV"
+              echo "base_url=https://api.moonshot.ai/anthropic" >> "$GITHUB_OUTPUT"
+              echo "timeout=3600" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY_SECRET" >> "$GITHUB_ENV"
+              echo "base_url=" >> "$GITHUB_OUTPUT"
+              echo "timeout=900" >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ -n "$MODEL" ]; then
+            echo "ANTHROPIC_MODEL=$MODEL" >> "$GITHUB_ENV"
+          fi
+          echo "provider=$PROVIDER" >> "$GITHUB_OUTPUT"
+      # Mint a remyx[bot] token from Remyx so the PR / Issue is authored by
+      # the Remyx GitHub App (not github-actions[bot]). The App private key
+      # stays on Remyx's side; this uses the REMYX_API_KEY already in secrets.
+      # If it can't be minted (e.g. App not installed), the token is empty and
+      # the action falls back to the workflow's built-in GITHUB_TOKEN.
+      - name: Mint Remyx bot token
+        id: remyx-bot
+        shell: bash
+        run: |
+          token="$(curl -sf -X POST             -H "Authorization: Bearer ${{ secrets.REMYX_API_KEY }}"             -H "Content-Type: application/json"             -d "{\"repo\": \"${{ github.repository }}\"}"             "https://engine.remyx.ai/api/v1.0/github/installation-token"             | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))")" || token=""
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+      - uses: remyxai/outrider@v1
+        with:
+          # The agent is tied to this research interest (baked default); a
+          # dispatch may pass a different interest-id to override for one run.
+          # Bracket-index the hyphenated input so the || fallback is unambiguous.
+          interest-id: ${{ inputs['interest-id'] || 'c41621c4-d031-4151-b504-3ab0ee1e11d5' }}
+          # remyx[bot] token (empty → action falls back to GITHUB_TOKEN).
+          github-token: ${{ steps.remyx-bot.outputs.token }}
+          # Disable the per-repo rate-limit window so manual and scheduled
+          # runs always evaluate the latest recommendation. Per-paper dedup
+          # (open PR / Issue for the same arxiv_id) still prevents duplicates.
+          rate-limit-days: '0'
+          # Per-phase agent timeout, matched to the routed backend — the
+          # thinking-mode backends (glm-5.2, kimi-k3) need the 3600s ceiling
+          # or long turns die mid-phase.
+          claude-timeout: ${{ steps.backend.outputs.timeout }}
+          pin-arxiv: ${{ inputs.pin-arxiv }}
+          publish: ${{ inputs.publish }}
+          mode: ${{ inputs.mode }}
+          start-from-ref: ${{ inputs.start-from-ref }}
+          lead-content: ${{ inputs.lead-content }}
+          staged-synthesis: ${{ inputs.staged-synthesis }}
+          test-integration-policy: ${{ inputs.test-integration-policy }}
+          fidelity-policy: ${{ inputs.fidelity-policy }}
+          model-base-url: ${{ steps.backend.outputs.base_url }}
