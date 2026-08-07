@@ -1,0 +1,242 @@
+name: Outrider weekly refine
+
+# Refiner role in the two-tier setup: low-frequency, capable-model
+# commitment. Reviews the past week's drafter output, picks the strongest
+# candidate, generates a targeted gap analysis, and dispatches an Opus
+# refinement pass with the gap analysis piped in as lead-content. The
+# refinement's chain (fidelity → convention → test) runs inline; terminal
+# artifact is a ready-for-review draft PR.
+#
+# Companion to outrider-daily.yml (the drafter). This workflow does the
+# selection + spec authorship + dispatch; the refinement itself runs via
+# outrider.yml (mode=recommend + pin-arxiv + start-from-ref + lead-content).
+#
+# Requires ANTHROPIC_API_KEY for the gap-analysis LLM call and the
+# downstream refinement dispatch. Linear connector is optional — this
+# workflow passes the gap analysis inline as raw markdown, no Linear
+# write side needed.
+
+on:
+  schedule:
+    - cron: '0 12 * * 1'   # Mondays 12:00 UTC — after weekend accumulates
+  workflow_dispatch:
+    inputs:
+      lookback-days:
+        description: 'Days to look back for drafter branches (default 7).'
+        required: false
+        default: '7'
+      pick-override:
+        description: 'Optional branch name to pick, bypassing the heuristic. Useful for testing before a full week accumulates.'
+        required: false
+        default: ''
+      pick-override-arxiv:
+        description: 'Optional arxiv_id to pair with pick-override when the branch does not have a resolvable arxiv (SPEC.md is a runtime artifact, not persisted on the branch).'
+        required: false
+        default: ''
+
+concurrency:
+  group: outrider-refiner
+  cancel-in-progress: false
+
+jobs:
+  refine:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write        # to dispatch outrider.yml
+      pull-requests: read   # to check whether candidates are already promoted
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Pick candidate from past week's drafter output
+        id: pick
+        run: |
+          set -euo pipefail
+          LOOKBACK_DAYS="${{ inputs.lookback-days || '7' }}"
+          OVERRIDE="${{ inputs.pick-override || '' }}"
+          OVERRIDE_ARXIV="${{ inputs.pick-override-arxiv || '' }}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          if [ -n "$OVERRIDE" ]; then
+            echo "→ pick override: $OVERRIDE"
+            BRANCH="$OVERRIDE"
+          else
+            # Enumerate ONLY drafter-known branches: pull the branch names
+            # recorded in .remyx/repo_intel.yaml's confirmed_by list — that's
+            # the drafter's own landing record and the authoritative source of
+            # "this branch came out of a drafter dispatch." Filtering the raw
+            # branch list on name pattern alone (the prior approach) let in
+            # inherited upstream branches on forks (dependabot/*, feat/*,
+            # etc.) that don't have arxiv_ids to resolve, producing hard errors
+            # at the arxiv-resolution gate below rather than picking a valid
+            # drafter candidate.
+            SINCE=$(date -u -d "$LOOKBACK_DAYS days ago" +%Y-%m-%dT%H:%M:%SZ)
+            KNOWN_BRANCHES=$(gh api "repos/$REPO/contents/.remyx/repo_intel.yaml?ref=main" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null \
+              | awk '
+                  /confirmed_by:/ {in_cb=1; next}
+                  in_cb && /branch:/ {b=$2; gsub(/^[ ]*|[ ]*$/, "", b); print b}
+                  /^[^ ]/ {in_cb=0}
+                ' | sort -u)
+
+            if [ -z "$KNOWN_BRANCHES" ]; then
+              echo "::warning::No drafter-known branches in .remyx/repo_intel.yaml — nothing to promote yet"
+              echo "picked=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            BRANCH=$(echo "$KNOWN_BRANCHES" \
+              | while read -r name; do
+                  [ -z "$name" ] && continue
+                  # Pull last-commit date from the branch head; keep only
+                  # branches still on origin + within the lookback window
+                  DATE=$(gh api "repos/$REPO/branches/$name" \
+                    --jq '.commit.commit.committer.date' 2>/dev/null || echo "")
+                  if [ -n "$DATE" ] && [ "$DATE" \> "$SINCE" ]; then
+                    echo "$DATE $name"
+                  fi
+                done \
+              | sort -r | head -1 | awk '{print $2}')
+          fi
+
+          if [ -z "$BRANCH" ]; then
+            echo "::warning::No candidate branches in past $LOOKBACK_DAYS days on $REPO"
+            echo "picked=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Skip if an open PR already targets this branch (idempotency)
+          OPEN_PR=$(gh pr list --repo "$REPO" --state open --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$OPEN_PR" ]; then
+            echo "::warning::Branch $BRANCH already has open PR #$OPEN_PR; skipping"
+            echo "picked=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Resolve arxiv_id, in order of source reliability:
+          #   1. Explicit override input (unambiguous)
+          #   2. Intel yaml's observed_landing_zones (drafter writes it on landing)
+          #   3. Empty (LLM gap analysis handles unresolved case; downstream refinement
+          #      still needs a value, so we surface the miss to the operator)
+          if [ -n "$OVERRIDE_ARXIV" ]; then
+            ARXIV="$OVERRIDE_ARXIV"
+          else
+            ARXIV=$(gh api "repos/$REPO/contents/.remyx/repo_intel.yaml?ref=main" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null \
+              | awk -v b="$BRANCH" '
+                  /confirmed_by:/ {in_cb=1; next}
+                  in_cb && /arxiv:/ {arxiv=$NF; gsub(/^[ ]*|[ ]*$/, "", arxiv)}
+                  in_cb && /branch:/ {branch=$2; gsub(/^[ ]*|[ ]*$/, "", branch); if (branch == b) {print arxiv; exit}}
+                  /^[^ ]/ {in_cb=0}
+                ' || echo "")
+          fi
+
+          echo "→ picked branch: $BRANCH"
+          echo "→ arxiv: ${ARXIV:-<unresolved>}"
+
+          if ! printf '%s' "$ARXIV" | grep -qE '^(arxiv:)?[0-9]{4}\.[0-9]{4,5}(v[0-9]+)?$'; then
+            echo "::error::arxiv_id could not be resolved to a valid id for branch $BRANCH (checked intel yaml + override). Re-dispatch with pick-override-arxiv=<id>."
+            exit 1
+          fi
+          echo "picked=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "arxiv=$ARXIV" >> "$GITHUB_OUTPUT"
+
+      - name: Generate gap analysis for the picked candidate
+        id: gap
+        if: steps.pick.outputs.picked != ''
+        env:
+          BRANCH: ${{ steps.pick.outputs.picked }}
+          ARXIV: ${{ steps.pick.outputs.arxiv }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF' > gap_analysis.md
+          import json, os, re, subprocess, textwrap, urllib.request
+
+          repo = os.environ["REPO"]
+          branch = os.environ["BRANCH"]
+          arxiv = os.environ.get("ARXIV", "")
+
+          diff = subprocess.check_output([
+              "gh", "api", f"repos/{repo}/compare/main...{branch}",
+              "--jq", "[.files[] | {status, additions, deletions, path: .filename}]"
+          ], text=True).strip()
+
+          paper_title = "(unknown)"
+          if arxiv:
+              try:
+                  req = urllib.request.Request(f"https://export.arxiv.org/api/query?id_list={arxiv}")
+                  body = urllib.request.urlopen(req, timeout=15).read().decode()
+                  m = re.search(r"<title>([^<]+)</title>", body)
+                  if m and "arXiv.org" not in m.group(1):
+                      paper_title = m.group(1).strip().replace("\n", " ")
+              except Exception:
+                  pass
+
+          prompt_body = textwrap.dedent(f"""
+              You are auditing an Outrider-drafted GLM branch against its source paper before an Opus refinement pass. Produce a structured gap-analysis markdown with this shape:
+
+              * Lead paragraph naming what the branch attempted vs what the paper actually specifies (2-3 sentences)
+              * A section per gap: `## Gap N — <short title>` with fields for File (path:line), Current behavior, Paper (arxiv:{arxiv}) specification, and the specific Fix.
+              * Final `## Acceptance criteria` bulleted list of verifiable outcomes.
+
+              Focus on MECHANISM-LEVEL divergences (wrong math, invented heuristics, missing paper rules, category errors) — not stylistic. If the branch is faithful, say so and list only cosmetic items.
+
+              Branch: {branch}
+              Paper: {paper_title} (arxiv:{arxiv})
+              Files touched:
+              {diff}
+
+              Read the paper (arxiv HTML at https://arxiv.org/html/{arxiv}) and compare against the actual branch code (repo {repo}, ref {branch}). Emit the gap analysis in markdown.
+              """).strip()
+
+          req = urllib.request.Request(
+              "https://api.anthropic.com/v1/messages",
+              data=json.dumps({
+                  "model": "claude-sonnet-4-6",
+                  "max_tokens": 4096,
+                  "messages": [{"role": "user", "content": prompt_body}],
+              }).encode(),
+              headers={
+                  "Content-Type": "application/json",
+                  "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+                  "anthropic-version": "2023-06-01",
+              },
+              method="POST",
+          )
+          resp = urllib.request.urlopen(req, timeout=120).read()
+          data = json.loads(resp)
+          print(data["content"][0]["text"])
+          PYEOF
+
+          echo "→ gap analysis (first 400 chars):"
+          head -c 400 gap_analysis.md
+          echo ""
+          # Multi-line output for step outputs
+          {
+            echo 'markdown<<GAP_EOF'
+            cat gap_analysis.md
+            echo 'GAP_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch Opus refinement
+        if: steps.pick.outputs.picked != '' && steps.gap.outputs.markdown != ''
+        env:
+          BRANCH: ${{ steps.pick.outputs.picked }}
+          ARXIV: ${{ steps.pick.outputs.arxiv }}
+          GAP: ${{ steps.gap.outputs.markdown }}
+        run: |
+          set -euo pipefail
+          gh workflow run outrider.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f mode=recommend \
+            -f provider=moonshot \
+            -f model=kimi-k3 \
+            -f pin-arxiv="$ARXIV" \
+            -f start-from-ref="$BRANCH" \
+            -f lead-content="$GAP" \
+            -f staged-synthesis=true \
+            -f publish=pr
+          echo "→ dispatched Opus refinement on $BRANCH (arxiv:$ARXIV)"
