@@ -125,7 +125,6 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Agent with VQASynth Tools | Dynamic tool composition for spatial questions beyond template + VLM ceilings | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1nEWs0eVJPW-mmh5PMJFWx8kenPILRlvE?usp=sharing) |
 | Prometheus-vision Judge | Score SpaceLLaVA outputs with a prometheus-vision judge to build a score-matched spatial-VQA dataset |  [`experiments/prometheus_space_judge/`](experiments/prometheus_space_judge/) |
 | 3D Object-Detection QA Synthesis | Synthesize Molmo `<point3d>` training pairs from per-object point clouds (CPU-only) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb) |
-| Pose Estimation SFT Pairs | Generate PoseText-style `<point>` SFT pairs from body keypoints (CPU) | [notebook](notebooks/pose_estimation.ipynb) |
 
 ## Agent with VQASynth Tools
 
