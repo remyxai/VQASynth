@@ -137,7 +137,12 @@ def _normals_from_pointcloud(xyz: np.ndarray, smooth: int = 1) -> np.ndarray:
     return normals.astype(np.float32)
 
 
-def surface_normals(depth: DepthResult, *, smooth: int = 1) -> NormalResult:
+def surface_normals(
+    depth: DepthResult,
+    *,
+    smooth: int = 1,
+    learned_normals: np.ndarray | None = None,
+) -> NormalResult:
     """Derive per-pixel surface normals from a :class:`DepthResult`.
 
     Uses ``depth.point_cloud_xyz`` when the backend populated it (DepthPro
@@ -150,10 +155,26 @@ def surface_normals(depth: DepthResult, *, smooth: int = 1) -> NormalResult:
         depth: a :class:`DepthResult` from any depth-tool backend.
         smooth: number of 3×3 vector-average smoothing passes (default 1).
             0 keeps raw cross-product normals.
+        learned_normals: optional learned per-pixel normals from a foundation
+            model's normal head (e.g. Metric3D v2's ``prediction_normal``, 3 or
+            4 channels — channel 4 is the per-pixel confidence). When provided,
+            the geometry proxy is skipped and the learned normals are wrapped
+            directly, finally populating :attr:`NormalResult.confidence` — the
+            hook this proxy leaves ``None``. Tagged
+            ``"<backend>+learned_normals"``.
 
     Returns:
-        :class:`NormalResult` tagged ``"<backend>+pointcloud_normals"``.
+        :class:`NormalResult` tagged ``"<backend>+pointcloud_normals"`` (the
+        default geometry path) or ``"<backend>+learned_normals"`` (when
+        ``learned_normals`` is supplied).
     """
+    if learned_normals is not None:
+        # Local import: metric3d imports NormalResult from this module, so a
+        # top-level import would cycle. By call time metric3d is fully loaded.
+        from experiments.nooa_agent.tools.metric3d import build_normal_result
+
+        return build_normal_result(learned_normals, backend=depth.backend)
+
     xyz = depth.point_cloud_xyz
     if xyz is None:
         xyz = _unproject(depth.depth_m, depth.intrinsics_3x3)

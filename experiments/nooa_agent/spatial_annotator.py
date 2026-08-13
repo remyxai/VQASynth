@@ -312,6 +312,7 @@ def SpatialAnnotator(
     florence_dtype: Any = None,
     depth_device: str | None = None,
     depth_dtype: Any = None,
+    depth_backend: str | None = None,
     **class_kwargs,
 ):
     """Construct a SpatialAnnotator for the given (or auto-detected) tier.
@@ -329,6 +330,12 @@ def SpatialAnnotator(
             DepthPro; GPU-tier uses VGGT (VGGT device is controlled by
             ``CUDA_VISIBLE_DEVICES`` — this kwarg is advisory for VGGT).
         depth_dtype: precision for the depth backend. Same aliases as above.
+        depth_backend: optional override selecting a specific depth backend
+            instead of the tier default. ``"metric3d"`` selects the Metric3D v2
+            backend (arXiv:2404.15506) — a 4th GPU backend that also exposes a
+            learned per-pixel normal head (see
+            :class:`experiments.nooa_agent.tools.metric3d.Metric3DEstimator`).
+            ``None`` keeps the tier default (VGGT on GPU, DepthPro on CPU).
         **class_kwargs: forwarded to NOOA's class-level configuration hook
             (e.g. ``llm=...``).
 
@@ -350,7 +357,15 @@ def SpatialAnnotator(
     detector = FlorenceDetector(device=fd_device, dtype=florence_dtype)
     segmenter = FlorenceSegmenter(detector=detector)
 
-    if tier == "gpu":
+    if depth_backend == "metric3d":
+        # Optional 4th backend (Mode-1 port of Metric3D v2, arXiv:2404.15506):
+        # metric depth + a learned per-pixel normal head. Lazy import keeps the
+        # torch/hub dependency off the default import path.
+        from experiments.nooa_agent.tools.metric3d import Metric3DEstimator
+
+        md_device = depth_device or ("cpu" if tier == "cpu" else "cuda")
+        depth = Metric3DEstimator(device=md_device, dtype=depth_dtype)
+    elif tier == "gpu":
         depth = VggtEstimator(device=depth_device, dtype=depth_dtype)
     else:
         dd_device = depth_device or "cpu"

@@ -347,3 +347,27 @@ End-to-end tests require Python 3.12 + a provider key. Not currently in CI.
 - `/home/thorax/ecot_smoke_output_aloha/florence2_tools_2026-07-18/` —
   original prototype Florence-2 tool code refactored into
   `tools/florence.py` here.
+
+## Optional depth backend: Metric3D v2
+
+`SpatialAnnotator(depth_backend="metric3d", tier="gpu")` selects a fourth
+metric-depth backend — [Metric3D v2](https://arxiv.org/abs/2404.15506)
+(`experiments/nooa_agent/tools/metric3d.py`) — in place of the tier default
+(VGGT on GPU, DepthPro on CPU). It joins the same
+`metric_depth(image) -> DepthResult` contract, so `distance_3d`, `boxes3d`,
+and `orientation` consume it unchanged.
+
+What it adds that the other backends do not: a **learned per-pixel surface
+normal head**. `surface_normals.py` currently derives normals from the depth
+point cloud (a parameter-free proxy) and leaves `NormalResult.confidence` as
+`None`. Metric3D v2's normal head is the learned head that field was reserved
+for — its `prediction_normal` output carries a per-pixel normal confidence,
+surfaced via `Metric3DEstimator.learned_normals()` /
+`depth_and_normals()`, or by handing the learned normals to
+`surface_normals(depth, learned_normals=...)`, which fills `confidence` and
+tags the result `"<backend>+learned_normals"`.
+
+The model loads lazily through `torch.hub.load('yvanyin/metric3d',
+'metric3d_vit_large', ...)` on first use (no pip package; hub fetches the
+repo). Like `FoundationGeoEstimator`, importing the module pulls in neither
+torch nor weights — it stays importable on the GPU-free test host.
