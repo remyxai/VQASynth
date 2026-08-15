@@ -184,4 +184,19 @@ This project was inspired by or utilizes concepts discussed in the following res
   url={https://arxiv.org/abs/2408.00714},
   year={2024}
 }
+
+@article{bydewayv22026,
+  title = {Explainable and Resource-Efficient Spatial Reasoning in Multimodal LLMs for Decision-Critical Applications},
+  author = {ByDeWay-V2 authors},
+  journal = {arXiv preprint arXiv:2607.27145},
+  url = {https://arxiv.org/abs/2607.27145},
+  year = {2026}
+}
 ```
+
+## Topological predicates
+
+The prompt stage additionally emits topological predicates — "inside" and
+"touching" — computed pairwise on the fused per-object point clouds
+(`vqasynth/topology.py`), extending the projective left/right/above/behind
+set with auditable geometric evidence in the ByDeWay-V2 style.

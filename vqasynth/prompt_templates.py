@@ -450,3 +450,43 @@ height_answers = [
     "the [A] is [X] in height.",
     "It is [X].",
 ]
+
+# Topological predicates (containment and contact). Geometric tests live in
+# vqasynth.topology; these are the question/answer surfaces only.
+inside_predicate_questions = [
+    "Is the [A] inside the [B]?",
+    "Does the [A] lie within the [B]?",
+    "Is the [A] contained by the [B]?",
+    "Is the [A] located inside of the [B]?",
+]
+
+inside_true_responses = [
+    "Yes, the [A] is inside the [B].",
+    "Indeed, the [A] is contained by the [B].",
+    "Correct, the [A] lies within the [B].",
+]
+
+inside_false_responses = [
+    "No, the [A] is not inside the [B].",
+    "In fact, the [A] is fully outside the [B].",
+    "Incorrect, the [A] is not contained by the [B].",
+]
+
+touching_predicate_questions = [
+    "Is the [A] touching the [B]?",
+    "Is the [A] in contact with the [B]?",
+    "Does the [A] make contact with the [B]?",
+    "Are the [A] and the [B] touching each other?",
+]
+
+touching_true_responses = [
+    "Yes, the [A] is touching the [B].",
+    "Indeed, the [A] is in contact with the [B].",
+    "Correct, the [A] and the [B] are touching.",
+]
+
+touching_false_responses = [
+    "No, the [A] is not touching the [B].",
+    "In fact, there is clear space between the [A] and the [B].",
+    "Incorrect, the [A] and the [B] are not in contact.",
+]

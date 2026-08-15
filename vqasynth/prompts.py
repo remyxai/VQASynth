@@ -4,10 +4,12 @@ import random
 import numpy as np
 from itertools import combinations
 from vqasynth.prompt_templates import *
-from vqasynth.scene_fusion import restore_pointclouds
+from vqasynth.topology import TopologicalRelationGenerator
 
 
 class PromptGenerator:
+
+    topological_relations = TopologicalRelationGenerator()
 
     def human_like_distance(self, distance_meters, scaling_factor=10):
         """
@@ -636,6 +638,10 @@ class PromptGenerator:
 
         Returns:
             List of results for each object pair.
+
+        Topological predicates (inside/touching) are skipped for pairs whose
+        clouds are degenerate — empty, a single point, or flat along an axis —
+        where containment or contact tests on 3D boxes would be meaningless.
         """
         all_prompt_variants = [
             self.left_predicate,
@@ -646,6 +652,8 @@ class PromptGenerator:
             self.small_predicate,
             self.behind_predicate,
             self.front_predicate,
+            self.topological_relations.inside_predicate,
+            self.topological_relations.touching_predicate,
             self.left_choice,
             self.right_choice,
         ]
@@ -688,6 +696,10 @@ class PromptGenerator:
         for A, B in pairs:
             pair_results = []
             for prompt_func in selected_predicates_choices:
+                if self._is_topological(prompt_func) and not (
+                    self._is_full_rank_cloud(A[1]) and self._is_full_rank_cloud(B[1])
+                ):
+                    continue
                 pair_results.append(prompt_func(A, B))
 
             distance = np.asarray(A[1].compute_point_cloud_distance(B[1])).mean()
@@ -727,6 +739,10 @@ class PromptGenerator:
         return valid_results
 
     def run(self, captions, pointclouds, is_canonicalized):
+        # lazy: scene_fusion pulls the VGGT torch stack, a Docker-only dep —
+        # importing it here keeps this module testable outside the image.
+        from vqasynth.scene_fusion import restore_pointclouds
+
         pointclouds = restore_pointclouds(pointclouds)
         try:
             objects = list(zip(captions, pointclouds))
@@ -743,6 +759,21 @@ class PromptGenerator:
         except:
             prompts = []
         return prompts
+
+    def _is_topological(self, prompt_func):
+        return prompt_func in (
+            self.topological_relations.inside_predicate,
+            self.topological_relations.touching_predicate,
+        )
+
+    def _is_full_rank_cloud(self, cloud):
+        """True if the cloud spans all three axes, so box/contact tests apply."""
+        points = (
+            cloud
+            if isinstance(cloud, np.ndarray)
+            else np.asarray(cloud.points)
+        )
+        return len(points) >= 2 and bool(np.all(points.ptp(axis=0) > 0))
 
     def create_messages_from_prompts(self, prompts):
         """
