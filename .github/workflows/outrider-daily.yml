@@ -1,4 +1,4 @@
-name: Outrider daily (branch-mode, GLM)
+name: Outrider weekly (branch-mode, GLM)
 
 # Continuous exploration companion to outrider.yml. Dispatches once daily
 # under publish=branch on the z.ai GLM backend — no PR, no Issue, no
@@ -9,7 +9,7 @@ name: Outrider daily (branch-mode, GLM)
 
 on:
   schedule:
-    - cron: '30 6 * * *'
+    - cron: '30 6 * * 1'
   workflow_dispatch: {}
 
 concurrency:
