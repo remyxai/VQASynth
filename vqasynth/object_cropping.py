@@ -238,9 +238,12 @@ def interleave_object_references(
     cursor = 0
     for start, end, index in kept:
         pieces.append(text[cursor:start])
-        pieces.append(f"{placeholder} ({len(crop_indices) + 1})")
         if index not in crop_indices:
             crop_indices.append(index)
+        # Number the deictic by the crop's position in crop_indices, so a
+        # repeated mention of the same object reuses its number rather than
+        # inventing a "(2)" that points at no crop.
+        pieces.append(f"{placeholder} ({crop_indices.index(index) + 1})")
         cursor = end
 
     pieces.append(text[cursor:])
@@ -251,14 +254,18 @@ def build_grounded_messages(prompts, crop_index: dict[str, int]) -> list[dict]:
     """Rebuild a prompt-stage conversation with object mentions grounded.
 
     Mirrors :meth:`vqasynth.prompts.PromptGenerator.create_messages_from_prompts`
-    turn for turn — one user and one assistant message per prompt, the scene
-    image attached only to the first user turn — except that each object
-    mention is replaced by the image index of that object's crop, and each
-    crop is attached exactly once at its own index (0 stays reserved for the
-    full scene).
+    turn for turn — the grounded **question** becomes the user turn and the
+    grounded **answer** the assistant turn, exactly as the plain variant splits
+    them — except each object mention is replaced by a deictic that resolves to
+    that object's crop, and each crop is attached exactly once as an image.
+
+    All crops are attached in the **user** turn (index 0 stays reserved for the
+    full scene), including crops only the answer mentions, so a standard VLM SFT
+    consumer sees every referent as input context while the assistant turn stays
+    a pure-text target — the grounded answer.
 
     Args:
-        prompts: prompt strings in the pipeline's ``question + " Answer: " +
+        prompts: prompt strings in the pipeline's ``question + "Answer: " +
             answer`` form.
         crop_index: caption -> crop image index, from
             :func:`caption_to_crop_index`.
@@ -272,31 +279,41 @@ def build_grounded_messages(prompts, crop_index: dict[str, int]) -> list[dict]:
     attached: set[int] = set()
 
     for prompt in prompts:
-        if " Answer: " not in prompt:
+        # Split on the same delimiter as create_messages_from_prompts so the
+        # grounded variant keeps exactly the prompts the plain one does.
+        if "Answer: " not in prompt:
             continue
 
-        question, answer = prompt.split(" Answer: ", 1)
+        question, answer = prompt.split("Answer: ", 1)
+        grounded_q = interleave_object_references(question, crop_index)
+        grounded_a = interleave_object_references(answer, crop_index)
 
-        content: list[dict] = []
+        user_content: list[dict] = []
         if first_prompt:
-            content.append({"index": 0, "text": None, "type": "image"})
+            user_content.append({"index": 0, "text": None, "type": "image"})
 
-        # Question first, then answer, so the crops attach in the order a
-        # reader meets the referents across both halves of the turn.
-        for text in (question, answer):
-            grounded = interleave_object_references(text, crop_index)
-            for index in grounded["crop_indices"]:
-                if index not in attached:
-                    attached.add(index)
-                    content.append({"index": index, "text": None, "type": "image"})
-            content.append(
-                {"index": None, "text": grounded["text"].strip(), "type": "text"}
-            )
+        # Attach every crop this turn references — question mentions first, then
+        # any the answer adds — once each, as images in the user turn.
+        answer_only = [
+            i for i in grounded_a["crop_indices"]
+            if i not in grounded_q["crop_indices"]
+        ]
+        for index in grounded_q["crop_indices"] + answer_only:
+            if index not in attached:
+                attached.add(index)
+                user_content.append(
+                    {"index": index, "text": None, "type": "image"}
+                )
+        user_content.append(
+            {"index": None, "text": grounded_q["text"].strip(), "type": "text"}
+        )
+        messages.append({"content": user_content, "role": "user"})
 
-        messages.append({"content": content, "role": "user"})
         messages.append(
             {
-                "content": [{"index": None, "text": answer.strip(), "type": "text"}],
+                "content": [
+                    {"index": None, "text": grounded_a["text"].strip(), "type": "text"}
+                ],
                 "role": "assistant",
             }
         )

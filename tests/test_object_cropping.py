@@ -188,14 +188,17 @@ def test_apply_transform_answers_keep_grounding_too():
     )
     out = gen.apply_transform(_example())
     user_content = out["grounded_messages"][0]["content"]
-    # Scene, question text, the crop the answer's mention resolves to, answer
-    # text — content order follows mention order across both halves.
-    assert [c["type"] for c in user_content] == [
-        "image", "text", "image", "text",
-    ]
-    # The answer half of the user turn is the grounded rewrite; the assistant
-    # turn keeps the verbatim answer.
-    assert out["grounded_messages"][1]["content"][0]["text"] == "a red chair is wider"
+    # Scene image + the crop the answer mentions, both attached in the user
+    # turn as input context, then the question text. The answer itself moves to
+    # the assistant turn (grounded), it does not stay in the user turn.
+    assert [c["type"] for c in user_content] == ["image", "image", "text"]
+    assert [c["index"] for c in user_content if c["type"] == "image"] == [0, 1]
+    assert user_content[-1]["text"] == "Which is wider?"
+    # The assistant turn is the grounded answer, not the verbatim one.
+    assert (
+        out["grounded_messages"][1]["content"][0]["text"]
+        == "this object (1) is wider"
+    )
 
 
 @requires_prompt_generator
@@ -242,13 +245,11 @@ def test_build_grounded_messages_attaches_each_crop_once_across_turns():
     first_user = messages[0]["content"]
     assert [c["index"] for c in first_user if c["type"] == "image"] == [0, 1, 2]
 
-    # The scene image and both crops appear only in the first turn; the second
-    # turn's mentions resolve to already-attached indices, so it attaches no
-    # new image and both halves stay text.
+    # The scene image and both crops appear only in the first user turn; the
+    # second turn's question mentions nothing new and its answer's crop is
+    # already attached, so the user turn is just the question text.
     second_user = messages[2]["content"]
-    assert [c["type"] for c in second_user] == ["text", "text"]
+    assert [c["type"] for c in second_user] == ["text"]
     assert second_user[0]["text"] == "Which is wider?"
-    # The answer half is the grounded rewrite; the assistant turn keeps the
-    # verbatim answer.
-    assert second_user[1]["text"] == "this object (1) is wider"
-    assert messages[3]["content"][0]["text"] == "a red chair is wider"
+    # The grounded answer lives in the assistant turn now, not the user turn.
+    assert messages[3]["content"][0]["text"] == "this object (1) is wider"
