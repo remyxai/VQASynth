@@ -4,6 +4,12 @@ import random
 import numpy as np
 from itertools import combinations
 from vqasynth.prompt_templates import *
+from vqasynth.object_cropping import (
+    build_crop_features,
+    build_grounded_messages,
+    caption_to_crop_index,
+    crop_object_records,
+)
 from vqasynth.scene_fusion import restore_pointclouds
 
 
@@ -781,6 +787,21 @@ class PromptGenerator:
 
         return messages
 
+    def create_messages_from_prompts_interleaved(self, prompts, crop_index):
+        """
+        Variant of ``create_messages_from_prompts`` that grounds each object
+        mention to its own image instead of naming it in text. See
+        :func:`vqasynth.object_cropping.build_grounded_messages`.
+
+        Args:
+            prompts (list): A list of prompt strings.
+            crop_index (dict): caption -> image index of that object's crop.
+
+        Returns:
+            A list of message dictionaries formatted for user and assistant roles.
+        """
+        return build_grounded_messages(prompts, crop_index)
+
     def apply_transform(self, example):
         """
         Process a single example to produce:
@@ -805,6 +826,16 @@ class PromptGenerator:
               and subsequent messages have:
                  "content": [ { "index": None, "text": <prompt>, "type": "text" } ]
 
+          Additionally, when the example carries the localization stage's
+          per-object "masks" column:
+          - "object_crops": per-object image content entries ({"index", "text",
+            "type"}), index 1..N — the crops themselves, for consumers that
+            expand them from "object_crop_boxes"
+          - "object_crop_boxes": the matching pixel boxes (l, t, r, b)
+          - "grounded_messages": the same conversation with each object mention
+            replaced by the image index of that object's crop, so referents are
+            grounded in an image rather than a caption string
+
         If any error occurs for this sample, returns None (and the sample will be dropped).
         """
         try:
@@ -813,11 +844,27 @@ class PromptGenerator:
             random.shuffle(prompts)
             truncated = prompts[:5]
             messages = self.create_messages_from_prompts(truncated)
-            return {
+
+            # Object-level grounded variant: replace each object mention in the
+            # text with the image index of that object's crop. Falls back to an
+            # empty list when the row carries no usable masks, so the column is
+            # always present and consumers can filter on it.
+            crops = crop_object_records(example.get("masks"), example.get("captions"))
+            grounded_messages = []
+            if crops:
+                crop_index = caption_to_crop_index(crops)
+                grounded_messages = self.create_messages_from_prompts_interleaved(
+                    truncated, crop_index
+                )
+
+            result = {
                 "prompts": prompts,
                 "truncated_prompts": truncated,
-                "messages": messages
+                "messages": messages,
             }
+            result.update(build_crop_features(crops))
+            result["grounded_messages"] = grounded_messages
+            return result
         except Exception as e:
             print(f"Error processing sample, skipping: {e}")
             return None

@@ -83,6 +83,8 @@ VQASynth 🎹 provides an open-source reproduction of [SpatialVLM](https://spati
 
 🧠 Multimodal "Thinking" by CoT Reasoning
 
+🖼️ Object-level grounding — per-object crops interleaved into the prompt text in place of caption mentions, adapted from [MultiModal Code-Switching](https://arxiv.org/abs/2608.11167)
+
 ## Datasets made using VQASynth 🎹
 
 * [SpaceOm](https://huggingface.co/datasets/remyxai/SpaceOm)
