@@ -112,6 +112,16 @@ Synthetic spatial reasoning traces suffice to train VLMs capable of grounded, qu
 Report VLM spatial reasoning on [benchmarks](https://github.com/remyxai/VQASynth/blob/main/pipelines/spatialvqa_eval.yaml
 ): SpatialScore, OmniSpatial, SpaCE-10, MindCube
 
+Benchmark reports also carry **rubric credit** (`vqasynth.rubric_credit`) — the
+gold answer is decomposed into atomic propositions and the response is scored
+against each one, giving per-proposition partial credit along Visual
+Faithfulness (VF), Reasoning Consistency (RC, does the answer contradict the
+response's own chain of thought?) and Instruction Following (IF, does the
+answer carry the unit / yes-no / option its question type demands?), with the
+failing clause's character span so an error localizes to the exact proposition
+that is unsupported. Read alongside scalar accuracy, it separates "wrong
+answer, sound reasoning" from "right answer, ungrounded chain".
+
 ## Notebooks
 We've hosted some notebooks visualizing and experimenting with the techniques included in this repo.
 

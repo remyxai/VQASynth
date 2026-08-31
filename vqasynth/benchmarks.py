@@ -25,6 +25,7 @@ from vqasynth.evaluation import (
     score_distance_mra,
     score_yes_no,
 )
+from vqasynth.rubric_credit import score_items as score_rubric_items
 
 
 def _ensure_zip_extracted(repo_id, filename, repo_type="dataset"):
@@ -541,6 +542,14 @@ class BenchmarkRunner:
         def _agg(scores):
             return {"accuracy": sum(scores) / len(scores) if scores else 0.0, "count": len(scores)}
 
+        # Per-proposition partial credit (VF / RC / IF) alongside the scalar
+        # accuracy above — decomposes each gold answer into atomic propositions
+        # and scores the response against each one. See vqasynth.rubric_credit.
+        rubric = score_rubric_items(
+            (item["question"], item["answer"], pred_map.get(item["id"], ""))
+            for item in items
+        )
+
         return {
             "benchmark": benchmark_name,
             "overall_accuracy": _agg(all_scores)["accuracy"],
@@ -548,6 +557,14 @@ class BenchmarkRunner:
             "by_category": {cat: _agg(s) for cat, s in sorted(category_scores.items())},
             "by_subcategory": {sub: _agg(s) for sub, s in sorted(subcategory_scores.items())},
             "per_item": per_item,
+            "rubric_credit": {
+                "vf": rubric.vf,
+                "reasoning_consistency": rubric.reasoning_consistency,
+                "instruction_following": rubric.instruction_following,
+                "rubric_score": rubric.rubric_score,
+                "scalar_accuracy": rubric.scalar_accuracy,
+                "propositions_per_item": rubric.propositions_per_item,
+            },
         }
 
     def run(self, predictions_by_benchmark, load_kwargs=None):
@@ -583,6 +600,7 @@ class BenchmarkRunner:
                 "total": result["total"],
                 "by_category": result["by_category"],
                 "by_subcategory": result["by_subcategory"],
+                "rubric_credit": result["rubric_credit"],
             }
             report["summary"][result["benchmark"]] = result["overall_accuracy"]
 
@@ -658,6 +676,16 @@ def format_benchmark_report(report):
                 lines.append(f"  {'-' * 60}")
                 for sub, sdata in subcats.items():
                     lines.append(f"  {sub:<40} {sdata['accuracy']:>9.1%} {sdata['count']:>8}")
+
+        rubric = bdata.get("rubric_credit")
+        if rubric:
+            lines.append("")
+            lines.append(f"  {'Rubric credit (per proposition)':<40} {'Credit':>10}")
+            lines.append(f"  {'-' * 52}")
+            for key in ("vf", "reasoning_consistency", "instruction_following"):
+                lines.append(f"  {key:<40} {rubric[key]:>9.1%}")
+            lines.append(f"  {'rubric_score (partial credit)':<40} {rubric['rubric_score']:>9.1%}")
+            lines.append(f"  {'scalar (all-or-nothing)':<40} {rubric['scalar_accuracy']:>9.1%}")
 
     lines.append("")
     lines.append("=" * 70)
