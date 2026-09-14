@@ -62,6 +62,12 @@ from experiments.nooa_agent.tools.depth import (
     depth_at_point,
     distance_3d_meters,
 )
+from experiments.nooa_agent.tools.boxes3d import Box3D
+from experiments.nooa_agent.tools.scene_graph import (
+    SceneGraphResult,
+    bev_layout as render_bev_layout,
+    build_scene_graph,
+)
 
 
 def _scene_cached(method: Callable) -> Callable:
@@ -239,6 +245,21 @@ def _make_agent_class(tier: Tier, max_iterations: int = DEFAULT_MAX_ITERATIONS, 
         def distance_3d(self, depth: DepthResult, box_a: Box, box_b: Box) -> dict:
             """Compute 3D metric distance (meters) between two detected objects."""
             return distance_3d_meters(depth, box_a, box_b)
+
+        # --- scene-graph tools (GraFT-style 3DSG: deterministic relation
+        # edges over the 3D boxes + an allocentric bird's-eye-view layout).
+        # Nodes are the Box3D outputs of tools.boxes3d.detect_3d_boxes.
+
+        def scene_graph(self, boxes: list[Box3D]) -> SceneGraphResult:
+            """Build a 3D scene graph: one node per 3D box, deterministic
+            relation edges (left/right, above/below, front/behind, on-top-of,
+            nearest) each carrying the measurement that justifies it."""
+            return build_scene_graph(boxes)
+
+        def bev_layout(self, graph: SceneGraphResult, grid_size: int = 16) -> dict:
+            """Render the scene graph allocentrically: a bird's-eye-view text
+            occupancy grid (rows = depth, columns = x) + per-object legend."""
+            return render_bev_layout(graph, grid_size=grid_size)
 
         # --- LLM-driven entry point
 
