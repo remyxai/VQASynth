@@ -125,6 +125,7 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Agent with VQASynth Tools | Dynamic tool composition for spatial questions beyond template + VLM ceilings | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1nEWs0eVJPW-mmh5PMJFWx8kenPILRlvE?usp=sharing) |
 | Prometheus-vision Judge | Score SpaceLLaVA outputs with a prometheus-vision judge to build a score-matched spatial-VQA dataset |  [`experiments/prometheus_space_judge/`](experiments/prometheus_space_judge/) |
 | Visual Credit Audit | Score how many correct spatial-VQA answers the image actually earns (dependence-credited correctness vs no-image controls) — adapted from *Visual Credit Audit* (arXiv:2607.27069) |  [`experiments/visual_credit_audit/`](experiments/visual_credit_audit/) |
+| Claim Grounding Audit | Flag object claims in generated CoT that paraphrased pointing queries fail to localize consistently (semantic-spatial agreement) — adapted from *Semantic-Spatial Agreement Verification* (arXiv:2609.17269) |  [`experiments/claim_grounding_audit/`](experiments/claim_grounding_audit/) |
 | 3D Object-Detection QA Synthesis | Synthesize Molmo `<point3d>` training pairs from per-object point clouds (CPU-only) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb) |
 
 ## Agent with VQASynth Tools
