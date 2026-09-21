@@ -83,7 +83,8 @@ def test_qirv_majority_cluster_beats_runner_up():
     # 6 of the 10 query pairs agree (C(4,2) inside the cluster).
     assert agreement.overlap == pytest.approx(6 / 10)
     assert agreement.dominance == pytest.approx((4 - 1) / 4)
-    assert agreement.score == pytest.approx((0.8 + 0.6 + 0.75) / 3)
+    # Product of the three components (AND-semantics), matching reference SSAV.
+    assert agreement.score == pytest.approx(0.8 * 0.6 * 0.75)
 
 
 def test_qirv_empty_inputs_return_zeros():
@@ -99,10 +100,13 @@ def test_verify_claim_geometric_mean_fusion():
     assert clustered.score == pytest.approx(1.0)
     assert clustered.grounded is True
 
-    # Either branch lacking support sinks the geometric mean.
+    # Either branch lacking support sinks the geometric mean. Here the QIRV
+    # product is 0.2 * 0.0 * 0.0 = 0.0 (dispersed => no overlap, no dominance),
+    # so the fused score collapses to sqrt(1.0 * 0.0) = 0.0 — the AND-semantics
+    # of the reference's product QIRV firing on a hallucinated-but-found claim.
     dispersed = verify_claim("unicorn", _dispersed())
     assert dispersed.semantic_support == pytest.approx(1.0)   # always found...
-    assert dispersed.score == pytest.approx(((0.2 + 0.0 + 0.0) / 3) ** 0.5)
+    assert dispersed.score == pytest.approx(0.0)
     assert dispersed.grounded is False
 
     isolated = verify_claim("ghost", [[(0.5, 0.5)], [], [], [], []])  # found once

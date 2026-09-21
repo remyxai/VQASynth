@@ -14,15 +14,21 @@ The paper's two evidence branches are kept at full fidelity:
 
   * semantic support  — the share of paraphrased queries that localize the
                        claim at all. Aggregating over paraphrases makes the
-                       signal robust to any single prompt's wording;
+                       signal robust to any single prompt's wording. (The
+                       reference SSAV averages per-query detection *scores*;
+                       the localize stage emits Molmo ``<point>`` outputs that
+                       carry no confidence, so this branch uses the
+                       localized-query *fraction* as the point-native analog.);
   * QIRV              — Query-Induced Regional Verification over the per-query
-                       localizations: region *persistence* (how many distinct
-                       queries agree on one region), spatial *overlap* (how
-                       many distinct-query pairs land within one region), and
-                       relative *candidate dominance* (how far the modal region
-                       stands above the runner-up — this is what separates a
-                       real object from dispersed localizations and isolated
-                       single-query responses);
+                       localizations, combining region *persistence* (how many
+                       distinct queries agree on one region), spatial *overlap*
+                       (how many distinct-query pairs land within one region),
+                       and relative *candidate dominance* (how far the modal
+                       region stands above the runner-up) as their **product**
+                       — the AND-semantics of the reference's
+                       ``persistence * spatial_agreement * candidate_dominance``,
+                       so dispersed localizations and isolated single-query
+                       responses collapse the branch;
   * fusion            — the geometric mean of the two branches, so a claim
                        scores high only when BOTH semantic and spatial
                        evidence support it.
@@ -325,7 +331,14 @@ def qirv(query_points, radius=DEFAULT_RADIUS):
     runner_up = max((_support(x, y, outside) for _, x, y in outside), default=0)
     dominance = (modal_support - runner_up) / modal_support if modal_support else 0.0
 
-    score = (persistence + overlap + dominance) / 3.0
+    # Combine the three components as a PRODUCT, matching the reference SSAV's
+    # ``qirv_evidence = proposal_persistence * spatial_agreement *
+    # candidate_dominance`` (zihengren/SSAV, ``ssav/core.py::qirv_features``).
+    # The product gives AND-semantics — any one component near zero collapses
+    # the spatial evidence — which is the paper's intent (a claim is spatially
+    # grounded only when it persists AND overlaps AND dominates). An average
+    # would soften that, letting two strong components mask a failed one.
+    score = persistence * overlap * dominance
     return SpatialAgreement(
         persistence=persistence,
         overlap=overlap,
