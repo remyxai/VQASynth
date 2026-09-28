@@ -126,6 +126,7 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Prometheus-vision Judge | Score SpaceLLaVA outputs with a prometheus-vision judge to build a score-matched spatial-VQA dataset |  [`experiments/prometheus_space_judge/`](experiments/prometheus_space_judge/) |
 | Visual Credit Audit | Score how many correct spatial-VQA answers the image actually earns (dependence-credited correctness vs no-image controls) — adapted from *Visual Credit Audit* (arXiv:2607.27069) |  [`experiments/visual_credit_audit/`](experiments/visual_credit_audit/) |
 | 3D Object-Detection QA Synthesis | Synthesize Molmo `<point3d>` training pairs from per-object point clouds (CPU-only) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb) |
+| Precision Parity Audit | Pair FP16 vs INT8/NF4 answers item-by-item to surface grounding flips hidden by same-score aggregate accuracy — adapted from *GHOST-Q* (arXiv:2609.29999) |  [`experiments/precision_parity_audit/`](experiments/precision_parity_audit/) |
 
 ## Agent with VQASynth Tools
 

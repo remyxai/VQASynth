@@ -11,7 +11,49 @@ import torch
 from PIL import Image
 from tqdm.auto import tqdm
 from transformers import AutoProcessor, AutoModelForVision2Seq, AutoTokenizer
+from transformers.utils.quantization_config import BitsAndBytesConfig
 from vqasynth.utils import pick_dtype
+
+# Weight precisions (GHOST-Q's controlled protocol grid); "auto" defers to
+# the device-native float dtype from vqasynth.utils.pick_dtype.
+FP_PRECISIONS = ("auto", "fp16", "bf16")
+QUANTIZED_PRECISIONS = ("int8", "nf4")
+SUPPORTED_PRECISIONS = FP_PRECISIONS + QUANTIZED_PRECISIONS
+
+
+def quantization_kwargs(precision="auto", dtype=None):
+    """
+    Map a precision name to transformers ``from_pretrained`` kwargs.
+
+    ``fp16`` / ``bf16`` load full-precision weights in that dtype; ``int8`` /
+    ``nf4`` load bitsandbytes post-training-quantized weights.
+    """
+    if dtype is None:
+        dtype = pick_dtype()
+    if precision in (None, "auto"):
+        return {"torch_dtype": dtype}
+    if precision == "fp16":
+        return {"torch_dtype": torch.float16}
+    if precision == "bf16":
+        return {"torch_dtype": torch.bfloat16}
+    if BitsAndBytesConfig is None:
+        raise ImportError("bitsandbytes is required for quantized precisions")
+    if precision == "int8":
+        return {
+            "torch_dtype": dtype,
+            "quantization_config": BitsAndBytesConfig(load_in_8bit=True),
+        }
+    if precision == "nf4":
+        return {
+            "torch_dtype": dtype,
+            "quantization_config": BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=dtype,
+            ),
+        }
+    valid = ", ".join(SUPPORTED_PRECISIONS)
+    raise ValueError(f"Unknown precision '{precision}'. Valid precisions: {valid}")
 
 
 class VLMInference:
@@ -22,30 +64,36 @@ class VLMInference:
     or chat-template-based VLM pattern (Qwen2-VL, LLaVA-Next, InternVL, etc.).
     """
 
-    def __init__(self, model_name, device=None, max_new_tokens=256):
+    def __init__(self, model_name, device=None, max_new_tokens=256,
+                 precision="auto"):
         """
         Args:
             model_name: HuggingFace model slug (e.g., "Qwen/Qwen2.5-VL-7B-Instruct").
             device: torch device. Auto-detected if None.
             max_new_tokens: Max tokens to generate per response.
+            precision: weight precision to load — "auto", "fp16", "bf16",
+                or a bitsandbytes post-training quantization ("int8", "nf4").
         """
         self.model_name = model_name
         self.max_new_tokens = max_new_tokens
+        self.precision = precision
         self.dtype = pick_dtype()
 
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
+        if precision in QUANTIZED_PRECISIONS and self.device != "cuda":
+            raise ValueError(f"Precision '{precision}' requires CUDA (bitsandbytes).")
 
         self.processor = AutoProcessor.from_pretrained(
             model_name, trust_remote_code=True
         )
         self.model = AutoModelForVision2Seq.from_pretrained(
             model_name,
-            torch_dtype=self.dtype,
             device_map="auto" if self.device == "cuda" else None,
             trust_remote_code=True,
+            **quantization_kwargs(precision, dtype=self.dtype),
         )
         if self.device != "cuda":
             self.model = self.model.to(self.device)
@@ -144,7 +192,7 @@ def _to_pil(img):
 
 
 def run_inference_on_benchmark(model_name, benchmark_items, max_new_tokens=256,
-                               device=None):
+                               device=None, precision="auto"):
     """
     Run VLM inference on benchmark items.
 
@@ -154,10 +202,14 @@ def run_inference_on_benchmark(model_name, benchmark_items, max_new_tokens=256,
                         "options", and "images" keys.
         max_new_tokens: Max generation length.
         device: torch device.
+        precision: weight precision — "auto", "fp16", "bf16", "int8", "nf4".
+            Run once per precision and pair the prediction dicts with
+            ``BenchmarkRunner.score_parity``.
 
     Returns dict mapping item ID -> prediction string.
     """
-    vlm = VLMInference(model_name, device=device, max_new_tokens=max_new_tokens)
+    vlm = VLMInference(model_name, device=device, max_new_tokens=max_new_tokens,
+                       precision=precision)
     predictions = {}
 
     for item in tqdm(benchmark_items, desc="inference", unit="item"):

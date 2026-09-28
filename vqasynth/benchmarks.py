@@ -25,6 +25,7 @@ from vqasynth.evaluation import (
     score_distance_mra,
     score_yes_no,
 )
+from vqasynth.precision_parity import audit as parity_audit
 
 
 def _ensure_zip_extracted(repo_id, filename, repo_type="dataset"):
@@ -587,6 +588,45 @@ class BenchmarkRunner:
             report["summary"][result["benchmark"]] = result["overall_accuracy"]
 
         return report
+
+    def score_parity(self, benchmark_name, baseline_predictions,
+                     quantized_predictions, items=None, **kwargs):
+        """
+        Paired cross-precision parity audit (GHOST-Q protocol).
+
+        Runs the same deterministic benchmark scorer over both prediction
+        sets item-by-item and hands the pairs to ``vqasynth.precision_parity``,
+        decomposing the two runs into outcome flips, decision changes, the
+        same-score-tradeoff flag, and an FDR-ready sign test.
+
+        Args:
+            benchmark_name: Name of the benchmark (its native scorer is used).
+            baseline_predictions: id -> prediction text from the reference
+                (full-precision) model, or a list aligned with ``items``.
+            quantized_predictions: same shape, from the quantized variant.
+            items: normalized benchmark items; loaded from the benchmark if
+                omitted (pass them explicitly to audit offline).
+            **kwargs: Passed to ``load_benchmark`` when ``items`` is omitted.
+
+        Returns a ``vqasynth.precision_parity.PrecisionParityReport``.
+        """
+        scorer = BENCHMARK_SCORERS.get(benchmark_name.lower())
+        if scorer is None:
+            raise ValueError(f"No scorer for benchmark '{benchmark_name}'")
+        if items is None:
+            items = self.load(benchmark_name, **kwargs)
+
+        def correctness(item, prediction):
+            # Deterministic path only: unscoreable answers drop the item from
+            # the pair rather than falling back to the LLM judge.
+            score = scorer(item, prediction)
+            return None if score is None else score >= 0.5
+
+
+        return parity_audit(
+            baseline_predictions, quantized_predictions, items,
+            correctness=correctness,
+        )
 
     def get_benchmark_items(self, benchmark_name, **kwargs):
         """
