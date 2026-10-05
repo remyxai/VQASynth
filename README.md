@@ -184,4 +184,11 @@ This project was inspired by or utilizes concepts discussed in the following res
   url={https://arxiv.org/abs/2408.00714},
   year={2024}
 }
+@article{sirko2026whereopd,
+  title={Where-OPD: Spatially Guided On-Policy Self-Distillation of MLLMs with Synthetic Scenes},
+  author={Sirko-Galouchenko, Sophia and Wysoczanska, Monika and Bursuc, Andrei and Thome, Nicolas and Gidaris, Spyros},
+  journal={arXiv preprint arXiv:2610.02117},
+  url={https://arxiv.org/abs/2610.02117},
+  year={2026}
+}
 ```

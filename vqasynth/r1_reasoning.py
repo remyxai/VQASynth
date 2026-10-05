@@ -5,6 +5,8 @@ import random
 from PIL import Image
 from openai import OpenAI
 
+from vqasynth.privileged_context import build_spatial_context
+
 class R1Reasoner:
     def __init__(
         self,
@@ -12,7 +14,9 @@ class R1Reasoner:
         model: str,
         image_column: str,
         text_column: str,
-        delay: int = 1
+        delay: int = 1,
+        captions_column: str = "captions",
+        pointclouds_column: str = "pointclouds"
     ):
         """
         Args:
@@ -21,11 +25,17 @@ class R1Reasoner:
             image_column: The name of the column where images are stored.
             text_column: The name of the column containing conversation data (list of dicts).
             delay: Minimum time (seconds) to wait between calls.
+            captions_column: Column of per-object captions for the scene.
+            pointclouds_column: Column of per-object point clouds (paths or
+                arrays); when present, the teacher call receives privileged
+                spatial guidance derived from them.
         """
         self.model = model
         self.image_column = image_column
         self.text_column = text_column
         self.delay = delay
+        self.captions_column = captions_column
+        self.pointclouds_column = pointclouds_column
 
         self.client = OpenAI(api_key=api_key)
 
@@ -94,7 +104,15 @@ class R1Reasoner:
         )
         return input_str
 
-    def run(self, question: str, answer: str, image):
+    def _build_spatial_context(self, captions, pointclouds, question):
+        """Privileged teacher guidance from the fused scene ('' when unusable)."""
+        try:
+            return build_spatial_context(captions, pointclouds, question)
+        except Exception as e:
+            print(f"Skipping privileged spatial context: {e}")
+            return ""
+
+    def run(self, question: str, answer: str, image, spatial_context: str = ""):
         """
         Build a prompt that includes the question/answer pair,
         call the model, and return the chain-of-thought or reasoning.
@@ -103,18 +121,32 @@ class R1Reasoner:
             question: The question from user
             answer: The assistant's answer
             image: The image data (path or PIL image)
+            spatial_context: Optional privileged guidance for this teacher call only.
         Returns:
             reasoning (str)
         """
         # Encode image
         base64_image = self.encode_image(image)
 
+        # Without measured scene facts the teacher must hedge; with them it can
+        # treat the guidance block as ground truth for the scene's scale.
+        reliability_note = (
+            "The spatial context above was measured directly from this scene's 3D "
+            "reconstruction, so treat its values as reliable ground truth. "
+            if spatial_context
+            else "Some information may be partially incorrect, so you will need to "
+            "reason about the scene and its scale to ensure high-quality, "
+            "consistent, and robust responses. "
+        )
+        guidance_block = f"{spatial_context}\n\n" if spatial_context else ""
+
         # Example system prompt
         system_prompt = (
-            "Please see the quantitative distance question-answer pair given and use the remaining information "
-            "to formulate a reasoning trace to support the answer. Some information may be partially incorrect, "
-            "so you will need to reason about the scene and its scale to ensure high-quality, consistent, and robust responses. "
-            "Make sure to generate a CoT trace in the first-person voice, as though revealing an internal monologue, "
+            guidance_block
+            + "Please see the quantitative distance question-answer pair given and use the remaining information "
+            "to formulate a reasoning trace to support the answer. "
+            + reliability_note
+            + "Make sure to generate a CoT trace in the first-person voice, as though revealing an internal monologue, "
             "inside of <think> tokens before providing the final answer inside <answer> tokens. Don't refer to the information "
             "as if it were stated, mentioned, previously referenced, or provided, but rather inferred or directly observed as if "
             "you were an embodied AI tasked with making these judgements after some thought about what you see in the scene. "
@@ -157,12 +189,19 @@ class R1Reasoner:
                 examples["input"] = None
                 examples["output"] = None
                 examples["reasoning"] = None
+                examples["spatial_context"] = None
             else:
                 input_string = self._format_input_string(question)
                 examples["input"] = input_string
-                reasoning_str = self.run(question, ans, image_data)
+                spatial_context = self._build_spatial_context(
+                    examples.get(self.captions_column),
+                    examples.get(self.pointclouds_column),
+                    question,
+                )
+                reasoning_str = self.run(question, ans, image_data, spatial_context)
                 examples["output"] = reasoning_str
                 examples["reasoning"] = "on"
+                examples["spatial_context"] = spatial_context
 
             return examples
 
@@ -170,9 +209,13 @@ class R1Reasoner:
             conversation_batch = examples[text]
             image_batch = examples[images]
 
+            captions_col = examples.get(self.captions_column) or []
+            clouds_col = examples.get(self.pointclouds_column) or []
+
             inputs = []
             outputs = []
             reasonings = []
+            spatial_contexts = []
 
             for idx, (conv, img) in enumerate(zip(conversation_batch, image_batch)):
                 if isinstance(img, list) and len(img) > 0:
@@ -184,19 +227,30 @@ class R1Reasoner:
                     inputs.append(None)
                     outputs.append(None)
                     reasonings.append(None)
+                    spatial_contexts.append(None)
                     continue
 
                 # Create the formatted input
                 input_string = self._format_input_string(question)
                 inputs.append(input_string)
 
+                # Teacher-only guidance, stored in its own column; the
+                # student-visible fields above stay guidance-free.
+                spatial_context = self._build_spatial_context(
+                    captions_col[idx] if idx < len(captions_col) else None,
+                    clouds_col[idx] if idx < len(clouds_col) else None,
+                    question,
+                )
+
                 # Get reasoning from the model
-                reasoning_str = self.run(question, ans, img)
+                reasoning_str = self.run(question, ans, img, spatial_context)
                 outputs.append(reasoning_str)
                 reasonings.append("on")
+                spatial_contexts.append(spatial_context)
 
             examples["input"] = inputs
             examples["output"] = outputs
             examples["reasoning"] = reasonings
+            examples["spatial_context"] = spatial_contexts
 
             return examples
