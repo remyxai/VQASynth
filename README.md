@@ -112,6 +112,8 @@ Synthetic spatial reasoning traces suffice to train VLMs capable of grounded, qu
 Report VLM spatial reasoning on [benchmarks](https://github.com/remyxai/VQASynth/blob/main/pipelines/spatialvqa_eval.yaml
 ): SpatialScore, OmniSpatial, SpaCE-10, MindCube
 
+SpaceCast-Bench extends the eval stage to predictive spatial reasoning: observe-transform-infer questions that integrate multi-view observations (main view, bridge views, second main view) across three capability levels (static perception, local prediction, global prediction) and 16 task types, scored as exact letter-set matches with the paper's macro task-type accuracy — adapted from [SpaceCast-Bench](https://arxiv.org/abs/2610.12402) (arXiv 2610.12402). Select it with `--benchmark spacecast`.
+
 ## Notebooks
 We've hosted some notebooks visualizing and experimenting with the techniques included in this repo.
 
