@@ -112,6 +112,8 @@ Synthetic spatial reasoning traces suffice to train VLMs capable of grounded, qu
 Report VLM spatial reasoning on [benchmarks](https://github.com/remyxai/VQASynth/blob/main/pipelines/spatialvqa_eval.yaml
 ): SpatialScore, OmniSpatial, SpaCE-10, MindCube
 
+**Predictive spatial reasoning (`--benchmark spacecast`)** — SpaceCast-Bench scores spatial reasoning about an *unobserved* outcome: models see several observation views of a real scene plus a transformation premise ("if the room were rotated 180 degrees…") and answer about the result. Reports break accuracy down by the paper's L1 static perception / L2 local prediction / L3 global prediction ladder, multi-select questions are scored as exact answer sets, and `include_bridge_views=False` reruns the bridge-view ablation (drop the views connecting two disjoint observations, hold everything else fixed) — adapted from *SpaceCast-Bench* (arXiv:2610.12402).
+
 ## Notebooks
 We've hosted some notebooks visualizing and experimenting with the techniques included in this repo.
 

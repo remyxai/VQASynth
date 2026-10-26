@@ -2,7 +2,7 @@
 Benchmark dataset loaders for spatial reasoning evaluation.
 
 Loads and normalizes datasets from SpatialScore, OmniSpatial, SpaCE-10,
-and MindCube into a common format for evaluation.
+MindCube, and SpaceCast-Bench into a common format for evaluation.
 """
 
 import io
@@ -25,6 +25,7 @@ from vqasynth.evaluation import (
     score_distance_mra,
     score_yes_no,
 )
+from vqasynth.spatial_prediction import load_spacecast, score_spacecast_item
 
 
 def _ensure_zip_extracted(repo_id, filename, repo_type="dataset"):
@@ -339,6 +340,7 @@ BENCHMARK_LOADERS = {
     "omnispatial": load_omnispatial,
     "space10": load_space10,
     "mindcube": load_mindcube,
+    "spacecast": load_spacecast,
 }
 
 
@@ -347,7 +349,8 @@ def load_benchmark(name, **kwargs):
     Load a benchmark dataset by name.
 
     Args:
-        name: Benchmark name (spatialscore, omnispatial, space10, mindcube).
+        name: Benchmark name (spatialscore, omnispatial, space10, mindcube,
+              spacecast).
         **kwargs: Passed to the specific loader.
 
     Returns list of normalized items.
@@ -450,6 +453,7 @@ BENCHMARK_SCORERS = {
     "omnispatial": _score_omnispatial_item,
     "space10": _score_space10_item,
     "mindcube": _score_mindcube_item,
+    "spacecast": score_spacecast_item,
 }
 
 
