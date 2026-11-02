@@ -126,6 +126,7 @@ We've hosted some notebooks visualizing and experimenting with the techniques in
 | Prometheus-vision Judge | Score SpaceLLaVA outputs with a prometheus-vision judge to build a score-matched spatial-VQA dataset |  [`experiments/prometheus_space_judge/`](experiments/prometheus_space_judge/) |
 | Visual Credit Audit | Score how many correct spatial-VQA answers the image actually earns (dependence-credited correctness vs no-image controls) — adapted from *Visual Credit Audit* (arXiv:2607.27069) |  [`experiments/visual_credit_audit/`](experiments/visual_credit_audit/) |
 | 3D Object-Detection QA Synthesis | Synthesize Molmo `<point3d>` training pairs from per-object point clouds (CPU-only) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/remyxai/VQASynth/blob/main/examples/detection_3d_example.ipynb) |
+| Agentic VQA Eval | Score a VLM on the AgentVQA benchmark (1,000 MCQs over Web Agents, Robotics, Egocentric Videos, Games, Spatial Planning) with the existing benchmark runner, broken down by agentic domain — adapted from *AgentVQA: A Unified Benchmark for Agentic Visual Understanding* (arXiv:2610.31494) |  [`experiments/agentic_vqa_eval/`](experiments/agentic_vqa_eval/) |
 
 ## Agent with VQASynth Tools
 
