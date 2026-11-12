@@ -1,4 +1,19 @@
+"""3D scene construction for VQASynth: images (+masks) -> registered point clouds.
+
+Multi-view fusion (VQASynth++ Phase 2a): ``SpatialSceneConstructor`` accepts
+S frames per scene instead of one. VGGT's aggregator/camera_head/depth_head
+run over all S frames in a single pass and predict per-frame extrinsics,
+intrinsics, depth and depth confidence; each frame is unprojected with its
+own pose, which registers it into VGGT's common world frame. Fusing the
+scene is then concatenation in frame order, and an object segmented in
+several frames is merged by unioning its per-frame pixel sets. The
+single-image path is preserved byte-for-byte (a lone PIL image is a 1-frame
+scene), as is the historical return arity of every public method — extended
+outputs are opt-in via keyword flags.
+"""
 import os
+from dataclasses import dataclass, field
+
 import numpy as np
 import torch
 import open3d as o3d
@@ -16,6 +31,155 @@ if device == "cuda":
     dtype = torch.bfloat16 if major_cap >= 8 else torch.float16
 else:
     dtype = torch.float32
+
+def _to_numpy(x):
+    return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
+
+def _coerce_frame_list(pil_images):
+    """
+    Normalize scene input into a flat list of frames.
+
+    Mirrors the frame-list convention of ``vqasynth.correspondence``: a lone
+    PIL image is a single-frame scene (S=1); a sequence is a multi-view clip
+    whose order defines the frame index used for per-frame masks, per-frame
+    extrinsics and frame-major point ordering.
+    """
+    if isinstance(pil_images, Image.Image):
+        return [pil_images]
+    frames = list(pil_images)
+    if len(frames) == 0:
+        raise ValueError("At least one frame is required")
+    return frames
+
+def calibrate_metric_scale(depth_values):
+    """
+    Robust per-object metric scale anchor: the median depth over the object's
+    pixels, aggregated across every frame the object appears in.
+
+    VGGT depth lives in the scene's predicted scale, so an object's median
+    camera distance is the distance anchor carried alongside its fused cloud.
+    This is the minimal Phase-2a stand-in for the planned Phase-1a global
+    metric calibration (known camera height / baseline): swap the body here
+    when that lands — callers keep the same contract.
+    """
+    return float(np.median(np.asarray(depth_values, dtype=np.float64)))
+
+def compute_object_depth_confidence(depth_conf_values):
+    """
+    Aggregate VGGT's per-pixel depth confidence over an object's pixels
+    across all frames it appears in (mean — a relative per-object quality
+    signal). Minimal Phase-2a stand-in for the Phase-1b helper of the same
+    name; swap the body here when that lands.
+    """
+    values = np.asarray(depth_conf_values, dtype=np.float64)
+    if values.size == 0:
+        return 0.0
+    return float(values.mean())
+
+@dataclass
+class SceneFusionMetadata:
+    """
+    Per-frame outputs of one (possibly multi-view) VGGT pass. Every array is
+    frame-major: index s along the leading axis is frame s of the input list.
+    """
+    extrinsics: np.ndarray    # (S, 3, 4) camera-from-world, OpenCV convention
+    intrinsics: np.ndarray    # (S, 3, 3) pixel intrinsics
+    depth: np.ndarray         # (S, H, W) per-frame depth
+    depth_conf: np.ndarray    # (S, H, W) per-frame depth confidence
+    focals: list = field(default_factory=list)  # per-frame focal length (pixels)
+
+    @property
+    def num_frames(self):
+        return int(self.depth.shape[0])
+
+    @property
+    def frame_shape(self):
+        return tuple(int(d) for d in self.depth.shape[1:3])
+
+def _coerce_frame_masks(masks, num_frames, mode="crop"):
+    """
+    Normalize mask input into per-frame boolean mask stacks aligned with the
+    preprocessed frames.
+
+    Accepts either:
+      - per-frame masks: a sequence whose first entry is itself a sequence of
+        (H, W) masks — entry s holds object masks for frame s. Objects absent
+        from a frame are padded with empty masks.
+      - single-frame masks: a flat sequence of (H, W) masks, applied to the
+        primary (first) frame only (the historical contract).
+
+    Returns (frame_masks, num_objects) where frame_masks[s][idx] is a boolean
+    (H, W) array over frame s's preprocessed pixels for object idx.
+
+    Masks are resampled with NEAREST interpolation (binary values must stay
+    binary) in one batched call. Masks are zero-padded up-front (centered,
+    matching ``preprocess_images``'s positions) to the common extents so the
+    image path's cross-shape white-padding never applies to a mask — a
+    padded mask region must read False, not the 1.0 images pad with. (The
+    pad-mode square-to-518 padding keeps its historical image-path value,
+    as in the previous single-frame implementation.)
+    """
+    def _is_mask_stack(entry):
+        if isinstance(entry, (list, tuple)):
+            return len(entry) > 0 and np.asarray(entry[0]).ndim == 2
+        if isinstance(entry, np.ndarray):
+            return entry.ndim == 3
+        return False
+
+    looks_per_frame = (
+        isinstance(masks, (list, tuple))
+        and len(masks) > 0
+        and _is_mask_stack(masks[0])
+    )
+    if looks_per_frame:
+        per_frame_raw = list(masks)[:num_frames]
+        while len(per_frame_raw) < num_frames:
+            per_frame_raw.append([])
+    else:
+        per_frame_raw = [masks] + [[]] * (num_frames - 1)
+
+    num_objects = max((len(m) for m in per_frame_raw), default=0)
+    if num_objects == 0:
+        return [], 0
+
+    # Anchor the empty-mask shape on the first present mask so absent
+    # objects/frames pad correctly even when leading frames are empty.
+    anchor_shape = None
+    for raw in per_frame_raw:
+        for m in raw:
+            if m is not None:
+                anchor_shape = np.asarray(m).shape
+                break
+        if anchor_shape is not None:
+            break
+
+    items = []
+    for raw in per_frame_raw:
+        for idx in range(num_objects):
+            if idx < len(raw) and raw[idx] is not None:
+                arr = np.asarray(raw[idx])
+            else:
+                arr = np.zeros(anchor_shape)  # object absent from this frame
+            items.append(arr)
+
+    # Zero-pad every mask to the common extents BEFORE preprocessing so the
+    # image path's centered white-padding never touches a mask value.
+    max_h = max(arr.shape[0] for arr in items)
+    max_w = max(arr.shape[1] for arr in items)
+    for i, arr in enumerate(items):
+        pad_top = (max_h - arr.shape[0]) // 2
+        pad_bottom = max_h - arr.shape[0] - pad_top
+        pad_left = (max_w - arr.shape[1]) // 2
+        pad_right = max_w - arr.shape[1] - pad_left
+        items[i] = np.pad(arr, ((pad_top, pad_bottom), (pad_left, pad_right)))
+
+    # Single-channel "images": one channel dim keeps Resize/crop slicing on
+    # the right axes inside preprocess_images.
+    stacked = torch.tensor(np.stack(items)).unsqueeze(1) / 255.0  # (S*N,1,H,W)
+    processed = preprocess_images(stacked, mode=mode, interpolation=Image.Resampling.NEAREST)
+    processed = processed.reshape(num_frames, num_objects, *processed.shape[-2:])
+    frame_masks = [frame >= 0.5 for frame in processed]
+    return frame_masks, num_objects
 
 def preprocess_images(image_list, mode="crop", interpolation=Image.Resampling.BICUBIC):
     """
@@ -299,17 +463,28 @@ class SpatialSceneConstructor:
             raise ValueError(f"[ERROR] Cannot interpret intrinsic of shape {shape} to extract focal length!")
 
 
-    def create_point_cloud_from_model(self, pil_image, mode="crop"):
+    def create_point_cloud_from_model(self, pil_images, mode="crop", return_metadata=False):
         """
-        1) Resize & normalize PIL image for VGGT,
-        2) aggregator + camera + depth heads,
-        3) Unproject depth => 3D point cloud,
-        4) Return (pcd, depth_map_np, focal_val).
-        """
+        1) Resize & normalize PIL frame(s) for VGGT,
+        2) aggregator + camera + depth heads over all S frames,
+        3) Unproject each frame's depth with its own predicted extrinsic /
+           intrinsic => per-frame points in VGGT's common world frame, fused
+           (concatenated in frame order) into ONE registered scene cloud,
+        4) Return (pcd, depth_map_np, focal_val) — plus a SceneFusionMetadata
+           with the per-frame extrinsics/intrinsics/depth_conf when
+           ``return_metadata=True``.
 
-        preprocessed_images = preprocess_images([pil_image], mode=mode)  # (B=1,C=3,H,W)
+        ``pil_images`` may be a lone PIL image (S=1 — the historical
+        single-view path: same point cloud, same (H, W) depth map, same
+        scalar focal) or a list of S frames. With S>1 and ``return_metadata``
+        unset, ``depth_map_np`` is the stacked (S, H, W) per-frame depth and
+        ``focal_val`` the primary frame's focal.
+        """
+        frames = _coerce_frame_list(pil_images)
+
+        preprocessed_images = preprocess_images(frames, mode=mode)  # (S,C,H,W)
         images = preprocessed_images.to(device, dtype=dtype)
-        images = images.unsqueeze(1)
+        images = images.unsqueeze(0)  # (B=1,S,C,H,W)
 
         with torch.no_grad():
             with torch.amp.autocast(device_type="cuda", dtype=dtype):
@@ -318,73 +493,118 @@ class SpatialSceneConstructor:
                 extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images.shape[-2:])
                 depth_map, depth_conf = self.model.depth_head(aggregated_tokens_list, images, ps_idx)
 
-        depth_map_2d = depth_map.squeeze(0)
-        extrinsic_1 = extrinsic.squeeze(0)
-        intrinsic_1 = intrinsic.squeeze(0)
+        depth_frames = _to_numpy(depth_map.squeeze(0))        # (S,H,W)
+        extrinsic_frames = _to_numpy(extrinsic.squeeze(0))    # (S,3,4)
+        intrinsic_frames = _to_numpy(intrinsic.squeeze(0))    # (S,3,3)
+        depth_conf_frames = _to_numpy(depth_conf.squeeze(0))  # (S,H,W)
 
-        # Convert depth map to NumPy
-        if isinstance(depth_map_2d, torch.Tensor):
-            depth_map_np = depth_map_2d.cpu().numpy()
-        else:
-            depth_map_np = depth_map_2d
-        depth_map_np = np.squeeze(depth_map_np)
+        # Safely extract focal (the primary frame keeps the historical
+        # single-view return; per-frame focals ride on the metadata).
+        focal_val = self.extract_focal_from_intrinsic(intrinsic_frames[:1])
 
-        # Safely extract focal
-        focal_val = self.extract_focal_from_intrinsic(intrinsic_1)
-
-        point_map = unproject_depth_map_to_point_map(depth_map_2d, extrinsic_1, intrinsic_1)
+        # Per-frame unprojection with each frame's own predicted pose
+        # registers every frame into VGGT's common world frame — fusion is
+        # concatenation in frame order.
+        point_map = unproject_depth_map_to_point_map(
+            depth_frames, extrinsic_frames, intrinsic_frames
+        )
         if isinstance(point_map, torch.Tensor):
             point_map = point_map.cpu().numpy()
+        point_map = np.asarray(point_map)
 
-        if point_map.ndim == 4 and point_map.shape[0] == 1:
-            point_map = point_map[0]
-
-        if point_map.shape[-1] != 3:
+        if point_map.ndim != 4 or point_map.shape[-1] != 3:
             raise ValueError(f"[ERROR] Unexpected shape for unprojected points: {point_map.shape}")
 
-        preprocessed_image = preprocessed_images.squeeze()
-        color_np = preprocessed_image.permute(1, 2, 0).reshape(-1, 3).cpu().numpy()
-
         coords_3d = point_map.reshape(-1, 3)
+        color_np = preprocessed_images.permute(0, 2, 3, 1).reshape(-1, 3).cpu().numpy()
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(coords_3d)
         pcd.colors = o3d.utility.Vector3dVector(color_np)
 
-        return pcd, depth_map_np, focal_val
+        metadata = SceneFusionMetadata(
+            extrinsics=extrinsic_frames,
+            intrinsics=intrinsic_frames,
+            depth=depth_frames,
+            depth_conf=depth_conf_frames,
+            focals=[
+                self.extract_focal_from_intrinsic(intrinsic_frames[s : s + 1])
+                for s in range(len(frames))
+            ],
+        )
 
-    def run(self, image_filename, image, masks, output_dir, mode="crop"):
+        if return_metadata:
+            return pcd, depth_frames, focal_val, metadata
+        return pcd, np.squeeze(depth_frames), focal_val
+
+    def run(self, image_filename, image, masks, output_dir, mode="crop", return_scene_stats=False):
         """
         Create full scene from model, canonicalize, segment with masks,
         return pcd filepaths, canonicalized, plus depth/focal.
+
+        ``image`` may be a lone PIL image or a list of S frames (fused into
+        one registered cloud). ``masks`` may hold per-frame masks (a sequence
+        of S per-frame mask sequences — an object appearing in several frames
+        is merged into ONE cloud spanning them) or the historical flat
+        single-frame mask list, applied to the primary (first) frame. Every
+        saved object cloud carries a metric scale
+        (``calibrate_metric_scale``) and an aggregated depth confidence
+        (``compute_object_depth_confidence``) over its pixels in all frames
+        it appears in.
+
+        With ``return_scene_stats=True`` a fifth element is returned — a dict
+        with ``num_frames``, per-frame ``extrinsics``/``intrinsics``/
+        ``focals`` and per-``objects`` stats aligned with the saved
+        filepaths — so dataset transforms can surface camera poses and
+        object stats as columns.
         """
-        scene_pcd, depth_map_np, focal_val = self.create_point_cloud_from_model(image, mode=mode)
+        frames = _coerce_frame_list(image)
+
+        scene_pcd, depth_map_np, focal_val, metadata = self.create_point_cloud_from_model(
+            frames, mode=mode, return_metadata=True
+        )
+
+        num_frames = metadata.num_frames
+        frame_h, frame_w = metadata.frame_shape
+        points_per_frame = frame_h * frame_w
 
         normed_pcd, canonicalized, transformation = self.canonicalize_point_cloud(
             scene_pcd, canonicalize_threshold=0.3
         )
 
-        points = np.asarray(normed_pcd.points)   # shape (N, 3)
-        colors = np.asarray(normed_pcd.colors)   # shape (N, 3)
-        total_points = points.shape[0]
+        points = np.asarray(normed_pcd.points)   # shape (S*H*W, 3), frame-major
+        colors = np.asarray(normed_pcd.colors)   # shape (S*H*W, 3)
 
         output_pointcloud_dir = os.path.join(output_dir, "pointclouds")
         Path(output_pointcloud_dir).mkdir(parents=True, exist_ok=True)
 
-        all_indices = np.arange(total_points)
         point_cloud_filepaths = []
 
-        masks = torch.tensor(masks) / 255.0
-        masks = preprocess_images(masks.unsqueeze(0), mode=mode).squeeze(0)
-        masks = masks >= 0.5
-        for idx, mask_bool in enumerate(masks):
-            mask_flat = mask_bool.ravel()
+        frame_masks, num_objects = _coerce_frame_masks(masks, num_frames, mode=mode)
 
-            valid_mask_indices = all_indices[mask_flat]
-            if len(valid_mask_indices) == 0:
+        depth_flat = metadata.depth.reshape(-1)
+        conf_flat = metadata.depth_conf.reshape(-1)
+
+        object_stats = []
+        for idx in range(num_objects):
+            # Union this object's pixel sets across every frame it appears
+            # in — the cross-frame merge. All frames already share VGGT's
+            # world frame, so the union is a single registered cloud.
+            per_frame_indices = []
+            frames_seen = []
+            for s, frame_mask in enumerate(frame_masks):
+                mask_flat = frame_mask[idx].ravel()
+                valid_mask_indices = np.flatnonzero(mask_flat) + s * points_per_frame
+                if len(valid_mask_indices) == 0:
+                    continue
+                per_frame_indices.append(valid_mask_indices)
+                frames_seen.append(s)
+
+            if not per_frame_indices:
                 print(f"[WARNING] Mask {idx+1} produced no valid points, skipping.")
                 continue
 
+            valid_mask_indices = np.concatenate(per_frame_indices)
             masked_points = points[valid_mask_indices]
             masked_colors = colors[valid_mask_indices]
             if masked_points.size == 0:
@@ -404,16 +624,54 @@ class SpatialSceneConstructor:
             )
             self.save_pointcloud(masked_pcd, pointcloud_filepath)
             point_cloud_filepaths.append(pointcloud_filepath)
-        return point_cloud_filepaths, canonicalized, depth_map_np, focal_val
+            object_stats.append(
+                {
+                    "metric_scale": calibrate_metric_scale(depth_flat[valid_mask_indices]),
+                    "depth_confidence": compute_object_depth_confidence(
+                        conf_flat[valid_mask_indices]
+                    ),
+                    "frames_seen": frames_seen,
+                    "point_count": int(valid_mask_indices.size),
+                }
+            )
+
+        depth_out = np.squeeze(depth_map_np) if num_frames == 1 else depth_map_np
+
+        scene_stats = {
+            "num_frames": num_frames,
+            "extrinsics": metadata.extrinsics,
+            "intrinsics": metadata.intrinsics,
+            "focals": metadata.focals,
+            "objects": object_stats,
+        }
+
+        result = (point_cloud_filepaths, canonicalized, depth_out, focal_val)
+        return result + (scene_stats,) if return_scene_stats else result
 
 
     def apply_transform(self, example, idx, output_dir, images):
         """
         Called by dataset.map(...) => produce pcd + store depth_map/focallength.
+
+        An image entry may be a single PIL image or a list of PIL frames —
+        one (possibly multi-view) scene per entry, fused into one registered
+        cloud. Per-frame camera poses are surfaced on the
+        ``camera_extrinsics`` / ``camera_intrinsics`` columns (frame-major
+        lists, OpenCV camera-from-world convention) so downstream
+        perspective-taking QA can reason about frame of reference; per-object
+        metric scale + aggregated depth confidence ride on
+        ``object_metric_scale`` / ``object_depth_confidence`` aligned with
+        the saved point clouds.
+
+        Batched vs single is decided by ``idx`` (``datasets.map`` passes a
+        sequence of indices when ``with_indices=True, batched=True``) plus a
+        list-of-lists image column; a scalar ``idx`` with a flat list of PIL
+        frames is one unbatched multi-view scene.
         """
-        is_batched = (
+        is_batched = isinstance(idx, (list, tuple)) or (
             isinstance(example[images], list)
-            and isinstance(example[images][0], (list, Image.Image))
+            and len(example[images]) > 0
+            and isinstance(example[images][0], list)
         )
 
         try:
@@ -422,53 +680,63 @@ class SpatialSceneConstructor:
                 canonicalizations_all = []
                 depthmaps_all = []
                 focals_all = []
+                extrinsics_all = []
+                intrinsics_all = []
+                object_scales_all = []
+                object_confs_all = []
 
-                for i, img_list in enumerate(example[images]):
-                    if isinstance(img_list, list):
-                        image = img_list[0] if isinstance(img_list[0], Image.Image) else img_list
-                    else:
-                        image = img_list
+                for i, row in enumerate(example[images]):
+                    rgb_frames = self._coerce_rgb_frames(row, i)
 
-                    if not isinstance(image, Image.Image):
-                        raise ValueError(f"[ERROR] Expected a PIL image but got {type(image)} at index {i}")
-                    if image.mode != "RGB":
-                        image = image.convert("RGB")
-
-                    pcd_files, is_canonical, depth_map_np, focal_val = self.run(
+                    (pcd_files, is_canonical, depth_map_np, focal_val, scene_stats) = self.run(
                         str(idx[i]),
-                        image,
+                        rgb_frames,
                         example["masks"][i],
                         output_dir,
+                        return_scene_stats=True,
                     )
+                    num_frames = scene_stats["num_frames"]
                     pointclouds_all.append(pcd_files)
                     canonicalizations_all.append(is_canonical)
-                    depthmaps_all.append(depth_map_np)
-                    focals_all.append(focal_val)
+                    depthmaps_all.append(depth_map_np if num_frames == 1 else list(depth_map_np))
+                    focals_all.append(focal_val if num_frames == 1 else scene_stats["focals"])
+                    extrinsics_all.append(scene_stats["extrinsics"].tolist())
+                    intrinsics_all.append(scene_stats["intrinsics"].tolist())
+                    object_scales_all.append([o["metric_scale"] for o in scene_stats["objects"]])
+                    object_confs_all.append([o["depth_confidence"] for o in scene_stats["objects"]])
 
                 example["pointclouds"] = pointclouds_all
                 example["is_canonicalized"] = canonicalizations_all
                 example["depth_map"] = depthmaps_all
                 example["focallength"] = focals_all
+                example["camera_extrinsics"] = extrinsics_all
+                example["camera_intrinsics"] = intrinsics_all
+                example["object_metric_scale"] = object_scales_all
+                example["object_depth_confidence"] = object_confs_all
 
             else:
-                image = example[images]
-                if isinstance(image, list) and len(image) > 0:
-                    image = image[0]
-                if not isinstance(image, Image.Image):
-                    raise ValueError("[ERROR] The image is not a valid PIL image.")
-                if image.mode != "RGB":
-                    image = image.convert("RGB")
+                rgb_frames = self._coerce_rgb_frames(example[images])
 
-                pcd_files, is_canonical, depth_map_np, focal_val = self.run(
+                (pcd_files, is_canonical, depth_map_np, focal_val, scene_stats) = self.run(
                     str(idx),
-                    image,
+                    rgb_frames,
                     example["masks"],
                     output_dir,
+                    return_scene_stats=True,
                 )
+                num_frames = scene_stats["num_frames"]
                 example["pointclouds"] = [pcd_files]
                 example["is_canonicalized"] = [is_canonical]
-                example["depth_map"] = [depth_map_np]
-                example["focallength"] = [focal_val]
+                example["depth_map"] = [depth_map_np if num_frames == 1 else list(depth_map_np)]
+                example["focallength"] = [focal_val if num_frames == 1 else scene_stats["focals"]]
+                example["camera_extrinsics"] = [scene_stats["extrinsics"].tolist()]
+                example["camera_intrinsics"] = [scene_stats["intrinsics"].tolist()]
+                example["object_metric_scale"] = [
+                    [o["metric_scale"] for o in scene_stats["objects"]]
+                ]
+                example["object_depth_confidence"] = [
+                    [o["depth_confidence"] for o in scene_stats["objects"]]
+                ]
 
         except Exception as e:
             if is_batched:
@@ -477,11 +745,40 @@ class SpatialSceneConstructor:
                 example["is_canonicalized"] = [None] * length
                 example["depth_map"] = [None] * length
                 example["focallength"] = [None] * length
+                example["camera_extrinsics"] = [None] * length
+                example["camera_intrinsics"] = [None] * length
+                example["object_metric_scale"] = [None] * length
+                example["object_depth_confidence"] = [None] * length
             else:
                 example["pointclouds"] = [None]
                 example["is_canonicalized"] = [None]
                 example["depth_map"] = [None]
                 example["focallength"] = [None]
+                example["camera_extrinsics"] = [None]
+                example["camera_intrinsics"] = [None]
+                example["object_metric_scale"] = [None]
+                example["object_depth_confidence"] = [None]
 
         return example
+
+    @staticmethod
+    def _coerce_rgb_frames(row, i=None):
+        """
+        Normalize one image entry (a PIL image or a list of PIL frames) into
+        a validated list of RGB PIL frames.
+        """
+        where = f" at index {i}" if i is not None else ""
+        frame_list = list(row) if isinstance(row, (list, tuple)) else [row]
+        if len(frame_list) == 0:
+            raise ValueError(f"[ERROR] Expected at least one PIL image{where}")
+        rgb_frames = []
+        for j, image in enumerate(frame_list):
+            if not isinstance(image, Image.Image):
+                raise ValueError(
+                    f"[ERROR] Expected a PIL image but got {type(image)}{where}[{j}]"
+                )
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            rgb_frames.append(image)
+        return rgb_frames
 
