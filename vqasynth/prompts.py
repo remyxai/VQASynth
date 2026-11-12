@@ -1,162 +1,28 @@
-"""Metric-aware spatial QA generation.
-
-Distance and size predicates consume the per-object point clouds written by
-``vqasynth.scene_fusion``, which are the pinhole unprojection of VGGT's depth
-head. That head is only defined up to scene scale (``expm1`` activation, no
-metric normalization), so raw cloud units are NOT meters — historically hidden
-by a hard-coded ``* 10`` inside ``human_like_distance``.
-
-This module replaces that fudge with per-scene metric calibration: a scale
-factor mapping cloud units to real-world meters, recovered either by
-unprojecting metric depth through the captured intrinsics
-(:func:`unproject_depth_map`) or by anchoring the relative cloud against a
-metric depth source such as DepthPro (:func:`calibrate_metric_scale`; the
-repo's metric convention from ``vqasynth.depth`` is uint16 millimeters /
-PIL ``I;16``). The scale threads through ``PromptGenerator`` so distance and
-size predicates emit meters, and ``human_like_distance`` only formats.
-"""
 import re
 import math
 import random
 import numpy as np
 from itertools import combinations
 from vqasynth.prompt_templates import *
-
-
-def depth_map_to_meters(depth_map):
-    """
-    Coerce a depth-map value to a float array in meters.
-
-    Accepts the encodings this repo writes: float arrays are assumed to
-    already be in meters; uint16 arrays and PIL ``I;16`` images (the
-    ``vqasynth.depth`` DepthPro convention) are millimeter-encoded and get
-    divided by 1000.
-
-    Args:
-        depth_map: array-like (H, W) depth, or a PIL depth image.
-
-    Returns:
-        np.ndarray of shape (H, W), dtype float64, in meters.
-    """
-    depth = np.asarray(depth_map)
-    if depth.dtype == np.uint16:
-        return depth.astype(np.float64) / 1000.0
-    return depth.astype(np.float64)
-
-
-def unproject_depth_map(depth_map, focal_length):
-    """
-    Unproject a depth map through pinhole intrinsics to camera-frame points,
-    in the depth map's own units (meters in, meters out).
-
-    Uses the OpenCV convention (x right, y down, z forward) with the principal
-    point at the image center — the convention of the intrinsics VGGT predicts
-    and ``vqasynth.scene_fusion`` unprojects with. Pixels with non-finite or
-    non-positive depth are dropped.
-
-    Args:
-        depth_map: array-like (H, W) depth in any single unit.
-        focal_length: focal length in pixels, w.r.t. the depth map's grid.
-
-    Returns:
-        np.ndarray of shape (N, 3) points.
-    """
-    depth = np.asarray(depth_map, dtype=np.float64)
-    if depth.ndim != 2:
-        raise ValueError(f"expected a 2D depth map, got shape {depth.shape}")
-    focal_length = float(focal_length)
-    if not math.isfinite(focal_length) or focal_length <= 0:
-        raise ValueError(
-            f"focal_length must be a positive pixel value, got {focal_length}"
-        )
-
-    h, w = depth.shape
-    us, vs = np.meshgrid(np.arange(w), np.arange(h))
-    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
-
-    valid = np.isfinite(depth) & (depth > 0)
-    z = depth[valid]
-    x = (us[valid] - cx) * z / focal_length
-    y = (vs[valid] - cy) * z / focal_length
-    return np.stack([x, y, z], axis=1)
-
-
-def calibrate_metric_scale(relative_depth, metric_depth):
-    """
-    Per-scene scale factor that maps a relative (up-to-scale) depth map onto a
-    metric one.
-
-    VGGT's depth head is scale-ambiguous, so its clouds need an external
-    metric anchor; the repo's is DepthPro (``vqasynth.depth``). The scale is
-    the median per-pixel ratio metric/relative — robust to the outliers and
-    local errors both maps carry, and exact when the two maps differ by a
-    single scalar (the standard relative-to-metric depth alignment).
-
-    Args:
-        relative_depth: (H, W) up-to-scale depth, e.g. VGGT's depth map.
-        metric_depth: (H, W) metric depth in meters, e.g. DepthPro's, in any
-            encoding :func:`depth_map_to_meters` accepts.
-
-    Returns:
-        float: multiply relative-unit distances by this to get meters.
-    """
-    relative = depth_map_to_meters(relative_depth)
-    metric = depth_map_to_meters(metric_depth)
-    if relative.shape != metric.shape:
-        raise ValueError(
-            "depth maps must share a grid to align, got "
-            f"{relative.shape} vs {metric.shape}"
-        )
-    valid = (
-        np.isfinite(relative) & (relative > 0)
-        & np.isfinite(metric) & (metric > 0)
-    )
-    if not valid.any():
-        raise ValueError("no valid overlapping pixels to calibrate metric scale")
-    return float(np.median(metric[valid] / relative[valid]))
-
-
-def _validate_metric_scale(metric_scale):
-    scale = float(metric_scale)
-    if not math.isfinite(scale) or scale <= 0:
-        raise ValueError(
-            f"metric_scale must be finite and positive, got {metric_scale}"
-        )
-    return scale
+from vqasynth.scene_fusion import restore_pointclouds
 
 
 class PromptGenerator:
-    def __init__(self, metric_scale=1.0):
-        """
-        Args:
-            metric_scale (float): meters per point-cloud unit for the scenes
-                this generator processes. 1.0 means the clouds are already
-                metric (e.g. unprojected from DepthPro metric depth with
-                ``unproject_depth_map``); otherwise recover it per scene with
-                ``calibrate_metric_scale``. A per-example ``metric_scale``
-                dataset column takes precedence (see ``apply_transform``).
-        """
-        self.default_metric_scale = _validate_metric_scale(metric_scale)
-        self.metric_scale = self.default_metric_scale
 
-    def _metric(self, distance_in_cloud_units):
-        """Convert a raw point-cloud distance to meters via the active scale."""
-        return float(distance_in_cloud_units) * self.metric_scale
-
-    def human_like_distance(self, distance_meters):
+    def human_like_distance(self, distance_meters, scaling_factor=10):
         """
-        Converts a distance in meters to a more human-readable format (e.g., centimeters, feet).
-
-        The input must already be calibrated to real-world meters (see
-        ``_metric`` / ``calibrate_metric_scale``); no unit fudge is applied
-        here.
+        Converts a distance in meters to a more human-readable format (e.g., centimeters, feet),
+        with an adaptive scaling factor.
 
         Args:
             distance_meters (float): The distance in meters.
+            scaling_factor (float): A base scaling factor (default is 20).
 
         Returns:
             str: A string representation of the human-readable distance with units.
         """
+        distance_meters *= scaling_factor
+
         if distance_meters < 1:
             choices = [
                 (
@@ -699,9 +565,7 @@ class PromptGenerator:
         A_center = A[1].get_axis_aligned_bounding_box().get_center()
         B_center = B[1].get_axis_aligned_bounding_box().get_center()
         vertical_distance = abs(A_center[1] - B_center[1])
-        human_readable_dist = self.human_like_distance(
-            self._metric(vertical_distance)
-        )
+        human_readable_dist = self.human_like_distance(vertical_distance)
 
         return self.generate_spatial_reasoning_data(
             A, B, human_readable_dist, template_questions, template_answers
@@ -717,9 +581,7 @@ class PromptGenerator:
             (A_center[0] - B_center[0]) ** 2 + (A_center[2] - B_center[2]) ** 2
         )
 
-        human_readable_dist = self.human_like_distance(
-            self._metric(horizontal_distance)
-        )
+        human_readable_dist = self.human_like_distance(horizontal_distance)
         return self.generate_spatial_reasoning_data(
             A, B, human_readable_dist, template_questions, template_answers
         )
@@ -732,7 +594,7 @@ class PromptGenerator:
 
         width = A[1].get_axis_aligned_bounding_box().get_extent()[0]
 
-        human_readable_width = self.human_like_distance(self._metric(width))
+        human_readable_width = self.human_like_distance(width)
         question_template = random.choice(template_questions)
         answer_template = random.choice(template_answers)
 
@@ -749,20 +611,322 @@ class PromptGenerator:
         template_questions = height_questions
         template_answers = height_answers
 
-        height = A[1].get_axis_aligned_bounding_box().get_extent()[1]
+        width = A[1].get_axis_aligned_bounding_box().get_extent()[0]
 
-        human_readable_height = self.human_like_distance(self._metric(height))
+        human_readable_width = self.human_like_distance(width)
         question_template = random.choice(template_questions)
         answer_template = random.choice(template_answers)
 
         question = question_template.replace("[A]", A_desc)
         answer = answer_template.replace("[A]", A_desc).replace(
-            "[X]", human_readable_height
+            "[X]", human_readable_width
         )
 
         return question + " Answer: " + answer
 
-    def evaluate_predicates_on_pairs(self, pairs, is_canonicalized):
+    # Perspective-taking / cross-view prompts (multi-view scenes only)
+    #
+    # These families consume the per-frame camera poses surfaced alongside the
+    # fused multi-view point cloud. Expected input: an ``extrinsics`` entry of
+    # shape (S, 3, 4) holding camera-from-world poses [R | t] in the OpenCV
+    # convention (x right, y down, z forward) — the same convention VGGT's
+    # ``pose_encoding_to_extri_intri`` emits — with each pose expressed in the
+    # fused cloud's (world) frame, so p_camera = R @ p_world + t. They are
+    # gated on >= 2 poses; single-frame scenes never see them.
+
+    def parse_extrinsics(self, extrinsics, min_frames=2):
+        """
+        Normalize per-frame camera extrinsics into an (S, 3, 4) numpy array of
+        camera-from-world poses, or None when the input does not describe at
+        least ``min_frames`` usable poses.
+
+        Accepts nested lists, numpy arrays, or torch tensors of shape
+        (S, 3, 4) / (S, 4, 4), or a single (3, 4) / (4, 4) pose. Anything
+        else (including None, non-finite values, or rotation-only shapes)
+        yields None so callers can fall back to single-frame behavior.
+        """
+        if extrinsics is None:
+            return None
+        try:
+            if hasattr(extrinsics, "detach"):  # torch tensor, maybe on GPU
+                extrinsics = extrinsics.detach().cpu().numpy()
+            poses = np.asarray(extrinsics, dtype=np.float64)
+        except Exception:
+            return None
+
+        if poses.ndim == 2:  # a single (3, 4) or (4, 4) pose
+            poses = poses[None, ...]
+        if poses.ndim != 3 or poses.shape[0] < min_frames:
+            return None
+        if poses.shape[1:] == (4, 4):
+            poses = poses[:, :3, :]
+        if poses.shape[1:] != (3, 4):
+            return None
+        if not np.all(np.isfinite(poses)):
+            return None
+        return poses
+
+    @staticmethod
+    def transform_points_to_camera(points_world, extrinsic):
+        """
+        Map world-frame points into a camera's frame using its camera-from-world
+        pose: p_camera = R @ p_world + t.
+
+        Args:
+            points_world ((N, 3) or (3,) array-like): points in the fused
+                cloud's (world) frame.
+            extrinsic ((3, 4) or (4, 4) array-like): camera-from-world pose.
+
+        Returns:
+            np.ndarray of the same leading shape in camera coordinates.
+        """
+        pose = np.asarray(extrinsic, dtype=np.float64)[:3, :]
+        pts = np.asarray(points_world, dtype=np.float64)
+        single = pts.ndim == 1
+        if single:
+            pts = pts[None, :]
+        pts_cam = pts @ pose[:, :3].T + pose[:, 3]
+        return pts_cam[0] if single else pts_cam
+
+    @staticmethod
+    def _viewpoint_label(frame_index):
+        """Human-facing 1-indexed name for a frame, e.g. ``"camera 2"``."""
+        return f"camera {frame_index + 1}"
+
+    def _perspective_relation(self, A, B, frame, extrinsics):
+        """
+        Express both object centers in ``frame``'s camera coordinates.
+
+        Returns:
+            (A_pos, B_pos) camera-frame center arrays, or None when the
+            extrinsics/frame do not describe a usable pose.
+        """
+        poses = self.parse_extrinsics(extrinsics, min_frames=1)
+        if poses is None or not 0 <= frame < len(poses):
+            return None
+        A_pos = self.transform_points_to_camera(A[1].get_center(), poses[frame])
+        B_pos = self.transform_points_to_camera(B[1].get_center(), poses[frame])
+        return A_pos, B_pos
+
+    def perspective_left_predicate(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        is_left = A_pos[0] < B_pos[0]  # camera-frame x: right in OpenCV poses
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_left_predicate_questions)
+        response_template = random.choice(
+            perspective_left_true_responses if is_left else perspective_left_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+
+        return question + " Answer: " + answer
+
+    def perspective_right_predicate(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        is_right = A_pos[0] > B_pos[0]
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_right_predicate_questions)
+        response_template = random.choice(
+            perspective_right_true_responses if is_right else perspective_right_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+
+        return question + " Answer: " + answer
+
+    def perspective_front_predicate(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        is_in_front = A_pos[2] < B_pos[2]  # camera-frame depth: smaller z is closer
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_front_predicate_questions)
+        response_template = random.choice(
+            perspective_front_true_responses if is_in_front else perspective_front_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+
+        return question + " Answer: " + answer
+
+    def perspective_behind_predicate(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        is_behind = A_pos[2] > B_pos[2]
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_behind_predicate_questions)
+        response_template = random.choice(
+            perspective_behind_true_responses if is_behind else perspective_behind_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+
+        return question + " Answer: " + answer
+
+    def perspective_left_choice(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        more_left = A_desc if A_pos[0] < B_pos[0] else B_desc
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_left_choice_questions)
+        answer_template = random.choice(perspective_left_choice_responses)
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = answer_template.replace("[V]", viewpoint).replace("[X]", more_left)
+
+        return question + " Answer: " + answer
+
+    def cross_view_order_predicate(self, A, B, frame_v, frame_w, extrinsics):
+        """
+        Ask whether the left-right order of the pair is the same in two
+        reference frames.
+
+        Args:
+            frame_v: index of the egocentric viewpoint's pose in ``extrinsics``.
+            frame_w: index of a second viewpoint's pose, or None to compare
+                against the allocentric world (fused-cloud) layout.
+        """
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation_v = self._perspective_relation(A, B, frame_v, extrinsics)
+        if relation_v is None:
+            raise ValueError("cross-view predicates need a usable per-frame extrinsic")
+        A_v, B_v = relation_v
+        v_left_of = A_v[0] < B_v[0]
+
+        if frame_w is None:
+            A_w, B_w = A[1].get_center(), B[1].get_center()
+            w_label = "scene's overall layout"
+        else:
+            relation_w = self._perspective_relation(A, B, frame_w, extrinsics)
+            if relation_w is None:
+                raise ValueError("cross-view predicates need a usable per-frame extrinsic")
+            A_w, B_w = relation_w
+            w_label = f"{self._viewpoint_label(frame_w)} view"
+
+        w_left_of = A_w[0] < B_w[0]
+        orders_agree = v_left_of == w_left_of
+
+        v_label = f"{self._viewpoint_label(frame_v)} view"
+        question_template = random.choice(cross_view_order_questions)
+        response_template = random.choice(
+            cross_view_order_true_responses
+            if orders_agree
+            else cross_view_order_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", v_label)
+            .replace("[W]", w_label)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", v_label)
+            .replace("[W]", w_label)
+        )
+
+        return question + " Answer: " + answer
+
+    def build_viewpoint_variants(self, extrinsics):
+        """
+        Bind the perspective-taking / cross-view families to concrete
+        viewpoints for this scene: one egocentric frame plus a second
+        reference frame (another camera when the scene has one, otherwise the
+        allocentric world layout).
+
+        Returns:
+            List of (A, B) -> str callables ready to drop into
+            ``evaluate_predicates_on_pairs``, or [] when ``extrinsics`` does
+            not describe at least two camera poses (single-frame back-compat).
+        """
+        poses = self.parse_extrinsics(extrinsics, min_frames=2)
+        if poses is None:
+            return []
+
+        frame = random.randrange(len(poses))
+        if len(poses) > 2:
+            frame_w = random.choice([i for i in range(len(poses)) if i != frame])
+        else:
+            frame_w = None  # egocentric vs allocentric (world layout)
+
+        return [
+            lambda A, B: self.perspective_left_predicate(A, B, frame, poses),
+            lambda A, B: self.perspective_right_predicate(A, B, frame, poses),
+            lambda A, B: self.perspective_front_predicate(A, B, frame, poses),
+            lambda A, B: self.perspective_behind_predicate(A, B, frame, poses),
+            lambda A, B: self.perspective_left_choice(A, B, frame, poses),
+            lambda A, B: self.cross_view_order_predicate(A, B, frame, frame_w, poses),
+        ]
+
+    def evaluate_predicates_on_pairs(self, pairs, is_canonicalized, extrinsics=None):
         """
         Evaluate predicates on object pairs, ensuring a balance between distance-related predicates
         and other types of predicates. If invalid distance results are found, they are replaced with
@@ -771,6 +935,10 @@ class PromptGenerator:
         Args:
             pairs: List of object pairs to evaluate.
             is_canonicalized: Boolean indicating if canonicalized predicates should be included.
+            extrinsics: Optional per-frame camera poses (S, 3, 4), camera-from-world,
+                aligned with the fused cloud's frame. When at least two poses are
+                present the perspective-taking / cross-view families join the
+                candidate pool; otherwise they are skipped (single-frame back-compat).
 
         Returns:
             List of results for each object pair.
@@ -806,6 +974,11 @@ class PromptGenerator:
         if is_canonicalized:
             all_prompt_variants += add_canonicalized
 
+        # Perspective-taking / cross-view families only join the pool when the
+        # fused scene carries >= 2 registered camera poses; single-frame scenes
+        # (no extrinsics, or a single pose) skip them entirely.
+        all_prompt_variants += self.build_viewpoint_variants(extrinsics)
+
         # Distance-related predicates
         distance_related_predicates = [
             self.vertical_distance_data,
@@ -829,7 +1002,7 @@ class PromptGenerator:
                 pair_results.append(prompt_func(A, B))
 
             distance = np.asarray(A[1].compute_point_cloud_distance(B[1])).mean()
-            distance_str = self.human_like_distance(self._metric(distance))
+            distance_str = self.human_like_distance(distance)
 
             for _ in range(5):
                 reasoning_data = self.generate_spatial_reasoning_data(
@@ -864,34 +1037,7 @@ class PromptGenerator:
 
         return valid_results
 
-    def _resolve_metric_scale(self, example):
-        """
-        Per-example metric scale: the ``metric_scale`` column when present
-        (emitted as a per-row list by scene-fusion-style stages), else this
-        generator's default. Lets a calibration stage anchor each scene
-        without any change to the prompt stage.
-        """
-        value = example.get("metric_scale")
-        if isinstance(value, (list, tuple)):
-            if len(value) != 1:
-                raise ValueError(
-                    f"expected one metric_scale per example, got {len(value)}"
-                )
-            value = value[0]
-        if value is None:
-            return self.default_metric_scale
-        return _validate_metric_scale(value)
-
-    def run(self, captions, pointclouds, is_canonicalized, metric_scale=None):
-        # restore_pointclouds (i.e. vqasynth.scene_fusion) pulls in the
-        # VGGT/CUDA stack; importing it here keeps this module usable — and
-        # unit-testable — without it.
-        from vqasynth.scene_fusion import restore_pointclouds
-
-        if metric_scale is not None:
-            self.metric_scale = _validate_metric_scale(metric_scale)
-        else:
-            self.metric_scale = self.default_metric_scale
+    def run(self, captions, pointclouds, is_canonicalized, extrinsics=None):
         pointclouds = restore_pointclouds(pointclouds)
         try:
             objects = list(zip(captions, pointclouds))
@@ -904,7 +1050,9 @@ class PromptGenerator:
             random.shuffle(all_pairs)
             selected_pairs = all_pairs[:5]
             object_pairs = [(objects[i], objects[j]) for i, j in selected_pairs]
-            prompts = self.evaluate_predicates_on_pairs(object_pairs, is_canonicalized)
+            prompts = self.evaluate_predicates_on_pairs(
+                object_pairs, is_canonicalized, extrinsics=extrinsics
+            )
         except:
             prompts = []
         return prompts
@@ -971,18 +1119,17 @@ class PromptGenerator:
                  "content": [ { "index": None, "text": <prompt>, "type": "text" } ]
 
         If any error occurs for this sample, returns None (and the sample will be dropped).
-
-        Distance/size values are metric: the per-example ``metric_scale``
-        column takes precedence (see ``_resolve_metric_scale``), else the
-        generator's default.
         """
         try:
-            # Process a single sample.
+            # Process a single sample. "extrinsics" is the optional per-frame
+            # camera-pose column carried by multi-view (fused) scenes; absent
+            # on single-frame scenes, which simply skip the viewpoint families.
+            extrinsics = example.get("extrinsics") if isinstance(example, dict) else None
             prompts = self.run(
                 example["captions"],
                 example["pointclouds"],
                 example["is_canonicalized"],
-                metric_scale=self._resolve_metric_scale(example),
+                extrinsics=extrinsics,
             )
             random.shuffle(prompts)
             truncated = prompts[:5]
