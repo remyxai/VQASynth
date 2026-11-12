@@ -175,6 +175,47 @@ def restore_pointclouds(pointcloud_paths):
 
     return restored_pointclouds
 
+
+def compute_object_depth_confidence(depth_conf, mask):
+    """
+    Aggregate a per-pixel VGGT depth-confidence map over one object's mask.
+
+    VGGT's depth head emits a sigmoid confidence per pixel alongside its depth
+    prediction; ``create_point_cloud_from_model`` used to compute that map and
+    throw it away. This helper turns it into the per-object scalar that
+    ``SpatialSceneConstructor.run`` attaches to each sliced point cloud, so
+    downstream stages can weigh per-object geometry by how trustworthy its
+    depth estimate is.
+
+    A plain masked mean is used: VGGT confidence is already a calibrated
+    per-pixel probability, and every surviving mask pixel contributed a point
+    to the object cloud, so no sparsity re-weighting is applied.
+
+    Args:
+        depth_conf: (H, W) array-like of per-pixel confidences (torch tensor
+            or numpy array), on the same grid as the model's depth map.
+        mask: (H, W) array-like marking the object's pixels, on the same grid
+            (``run`` passes the preprocessed mask it sliced the object cloud
+            with).
+
+    Returns:
+        float: mean depth confidence over the object's mask pixels (in [0, 1]
+        for a sigmoid conf map).
+
+    Raises:
+        ValueError: if the mask is empty or shaped differently from depth_conf.
+    """
+    conf = np.asarray(depth_conf, dtype=np.float64)
+    sel = np.asarray(mask).astype(bool)
+    if conf.shape != sel.shape:
+        raise ValueError(
+            f"[ERROR] depth_conf shape {conf.shape} does not match mask shape {sel.shape}"
+        )
+    if not sel.any():
+        raise ValueError("[ERROR] Cannot compute depth confidence for an empty mask")
+    return float(conf[sel].mean())
+
+
 class SpatialSceneConstructor:
     def __init__(self, compile_aggregator: bool = False, avggt_step1: bool = False):
         """
@@ -299,12 +340,18 @@ class SpatialSceneConstructor:
             raise ValueError(f"[ERROR] Cannot interpret intrinsic of shape {shape} to extract focal length!")
 
 
-    def create_point_cloud_from_model(self, pil_image, mode="crop"):
+    def create_point_cloud_from_model(self, pil_image, mode="crop", *, return_depth_conf=False):
         """
         1) Resize & normalize PIL image for VGGT,
         2) aggregator + camera + depth heads,
         3) Unproject depth => 3D point cloud,
-        4) Return (pcd, depth_map_np, focal_val).
+        4) Return (pcd, depth_map_np, focal_val); with return_depth_conf=True,
+           additionally return the depth head's per-pixel confidence map
+           depth_conf_np (H, W) instead of discarding it.
+
+        The depth head emits a per-pixel confidence alongside its prediction;
+        ``run`` aggregates it into per-object confidence. It is opt-in so the
+        legacy 3-tuple return other callers unpack is unchanged.
         """
 
         preprocessed_images = preprocess_images([pil_image], mode=mode)  # (B=1,C=3,H,W)
@@ -329,6 +376,16 @@ class SpatialSceneConstructor:
             depth_map_np = depth_map_2d
         depth_map_np = np.squeeze(depth_map_np)
 
+        # Retain the per-pixel depth confidence on the same (H, W) grid as
+        # depth_map_np instead of discarding it — run() aggregates it into a
+        # per-object confidence for each mask-sliced point cloud.
+        depth_conf_2d = depth_conf.squeeze(0)
+        if isinstance(depth_conf_2d, torch.Tensor):
+            depth_conf_np = depth_conf_2d.cpu().numpy()
+        else:
+            depth_conf_np = depth_conf_2d
+        depth_conf_np = np.squeeze(depth_conf_np)
+
         # Safely extract focal
         focal_val = self.extract_focal_from_intrinsic(intrinsic_1)
 
@@ -351,14 +408,21 @@ class SpatialSceneConstructor:
         pcd.points = o3d.utility.Vector3dVector(coords_3d)
         pcd.colors = o3d.utility.Vector3dVector(color_np)
 
+        if return_depth_conf:
+            return pcd, depth_map_np, focal_val, depth_conf_np
         return pcd, depth_map_np, focal_val
 
-    def run(self, image_filename, image, masks, output_dir, mode="crop"):
+    def run(self, image_filename, image, masks, output_dir, mode="crop", *, return_depth_conf=False):
         """
         Create full scene from model, canonicalize, segment with masks,
-        return pcd filepaths, canonicalized, plus depth/focal.
+        return pcd filepaths, canonicalized, plus depth/focal. With
+        return_depth_conf=True, also return object_depth_confidences — one
+        scalar per saved point cloud (mean VGGT depth confidence over that
+        object's mask), aligned index-for-index with point_cloud_filepaths.
         """
-        scene_pcd, depth_map_np, focal_val = self.create_point_cloud_from_model(image, mode=mode)
+        scene_pcd, depth_map_np, focal_val, depth_conf_np = self.create_point_cloud_from_model(
+            image, mode=mode, return_depth_conf=True
+        )
 
         normed_pcd, canonicalized, transformation = self.canonicalize_point_cloud(
             scene_pcd, canonicalize_threshold=0.3
@@ -373,6 +437,7 @@ class SpatialSceneConstructor:
 
         all_indices = np.arange(total_points)
         point_cloud_filepaths = []
+        object_depth_confidences = []
 
         masks = torch.tensor(masks) / 255.0
         masks = preprocess_images(masks.unsqueeze(0), mode=mode).squeeze(0)
@@ -404,12 +469,28 @@ class SpatialSceneConstructor:
             )
             self.save_pointcloud(masked_pcd, pointcloud_filepath)
             point_cloud_filepaths.append(pointcloud_filepath)
+            # Aligned 1:1 with point_cloud_filepaths: how much to trust this
+            # object's depth estimate, from the same mask region that sliced
+            # the cloud out of the scene.
+            object_depth_confidences.append(
+                compute_object_depth_confidence(depth_conf_np, mask_bool)
+            )
+        if return_depth_conf:
+            return (
+                point_cloud_filepaths,
+                canonicalized,
+                depth_map_np,
+                focal_val,
+                object_depth_confidences,
+            )
         return point_cloud_filepaths, canonicalized, depth_map_np, focal_val
 
 
     def apply_transform(self, example, idx, output_dir, images):
         """
-        Called by dataset.map(...) => produce pcd + store depth_map/focallength.
+        Called by dataset.map(...) => produce pcd + store depth_map/focallength
+        + depth_confidence (per-object mean VGGT depth confidence, mirroring
+        the per-object pointclouds list).
         """
         is_batched = (
             isinstance(example[images], list)
@@ -419,6 +500,7 @@ class SpatialSceneConstructor:
         try:
             if is_batched:
                 pointclouds_all = []
+                depth_confidences_all = []
                 canonicalizations_all = []
                 depthmaps_all = []
                 focals_all = []
@@ -434,18 +516,21 @@ class SpatialSceneConstructor:
                     if image.mode != "RGB":
                         image = image.convert("RGB")
 
-                    pcd_files, is_canonical, depth_map_np, focal_val = self.run(
+                    pcd_files, is_canonical, depth_map_np, focal_val, object_confs = self.run(
                         str(idx[i]),
                         image,
                         example["masks"][i],
                         output_dir,
+                        return_depth_conf=True,
                     )
                     pointclouds_all.append(pcd_files)
+                    depth_confidences_all.append(object_confs)
                     canonicalizations_all.append(is_canonical)
                     depthmaps_all.append(depth_map_np)
                     focals_all.append(focal_val)
 
                 example["pointclouds"] = pointclouds_all
+                example["depth_confidence"] = depth_confidences_all
                 example["is_canonicalized"] = canonicalizations_all
                 example["depth_map"] = depthmaps_all
                 example["focallength"] = focals_all
@@ -459,13 +544,15 @@ class SpatialSceneConstructor:
                 if image.mode != "RGB":
                     image = image.convert("RGB")
 
-                pcd_files, is_canonical, depth_map_np, focal_val = self.run(
+                pcd_files, is_canonical, depth_map_np, focal_val, object_confs = self.run(
                     str(idx),
                     image,
                     example["masks"],
                     output_dir,
+                    return_depth_conf=True,
                 )
                 example["pointclouds"] = [pcd_files]
+                example["depth_confidence"] = [object_confs]
                 example["is_canonicalized"] = [is_canonical]
                 example["depth_map"] = [depth_map_np]
                 example["focallength"] = [focal_val]
@@ -474,11 +561,13 @@ class SpatialSceneConstructor:
             if is_batched:
                 length = len(example[images])
                 example["pointclouds"] = [None] * length
+                example["depth_confidence"] = [None] * length
                 example["is_canonicalized"] = [None] * length
                 example["depth_map"] = [None] * length
                 example["focallength"] = [None] * length
             else:
                 example["pointclouds"] = [None]
+                example["depth_confidence"] = [None]
                 example["is_canonicalized"] = [None]
                 example["depth_map"] = [None]
                 example["focallength"] = [None]
