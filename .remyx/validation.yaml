@@ -1,0 +1,109 @@
+question:
+  kind: capability
+  ask: "Does VQASynth++ Phase 1-2 deliver real-world-calibrated, viewpoint-aware spatial data (calibrated distance/size, perspective flips, grounded correspondence) with the single-image contracts preserved?"
+benchmarks:
+  - name: vqasynth-pp-spatial-quality
+    suite: "notebook:eval/eval_vqasynth_spatial_quality.ipynb"
+    scorer: metric_answer_within_bar_rate
+    baseline: none
+    policy:
+      guardrail_veto: true
+    metrics:
+      - name: metric_answer_within_bar_rate
+        direction: max
+        threshold: 1.0
+        role: target
+        bar: goal
+        reads_as: "Share of emitted distance/size answers matching known ground-truth meters within the PR bar (rel_tol=0.05 or half-unit rounding)"
+        # Threshold derivation: the calibrated path is exact pinhole unprojection on a
+        # synthetic scene (focal 100px, depth 5m -> 0.05 m/px), so answers move only by
+        # the humanizer's unit rounding, which the bar's half-unit branch absorbs
+        # (worst case 0.4m->whole feet: |0.3048-0.4|=0.095 <= max(0.02, 0.1524)); only
+        # genuine miscalibration (e.g. an x10 leak) misses, so 1.0 over 60 seeded draws.
+      - name: localize_roundtrip_rate
+        direction: max
+        threshold: 1.0
+        role: guardrail
+        bar: floor
+        reads_as: "Share of emitted <point> tags (grounded and un-grounded) that parse through the localize stage's exact regex"
+      - name: perspective_flip_accuracy
+        direction: max
+        threshold: 1.0
+        role: diagnostic
+        reads_as: "Share of egocentric left/right answers that flip correctly across the 180-degree-yaw second camera (fixture bar 2/2)"
+      - name: metric_answer_rel_error
+        direction: min
+        threshold: 0.05
+        role: diagnostic
+        reads_as: "Mean relative miss of calibrated answers vs ground truth; typical residual is unit rounding only"
+      - name: retired_x10_rel_error
+        direction: max
+        threshold: 0.5
+        role: diagnostic
+        reads_as: "Relative error of the retired x10 path on the same scene (paper bar >0.5, expected ~9x) - the intra-run contrast"
+      - name: grounded_label_coverage
+        direction: max
+        threshold: 0.66
+        role: diagnostic
+        reads_as: "Share of fixture correspondence matches grounded to object labels instead of the anonymous 'feature'"
+      - name: inlier_ratio_mean
+        direction: max
+        threshold: 0.65
+        role: diagnostic
+        reads_as: "Mean surfaced inlier_ratio over fixture results (0.8 and 0.5 -> 0.65; 0/0 guarded)"
+      - name: unusable_extrinsics_accept_rate
+        direction: min
+        threshold: 0.0
+        role: diagnostic
+        reads_as: "Share of unusable extrinsics (None, <2 frames, NaN, rotation-only) that parse_extrinsics wrongly accepts -> perspective leak into S=1 data"
+compute:
+  tier: cpu
+held_constant:
+  - "Synthetic pinhole scene held exactly as tests/test_metric_calibration.py: focal 100 px, depth 5 m, 161x121 grid, two 9x9-px patches (GT size 0.4 m, vertical 0.4 m, horizontal 0.8 m, pairwise mean-NN in [0.632, 0.658] m)"
+  - "random.seed(0) for template/unit draws, mirroring the repo's own test"
+  - "vggt stub installed before importing vqasynth exactly as tests/test_prompts.py does, only when the real package is absent"
+  - "OpenCV convention (x right, y down, z forward) and the localize <point> regex held as the round-trip contract"
+  - "No GPU, no model downloads, no judge calls: repo CPU-test philosophy per tests/test_metric_calibration.py and tests/test_correspondence.py"
+avoid:
+  - "pytest pass counts as the quality instrument (repo rule: pytest proves code-works only)"
+  - "Guessing signatures of vqasynth.scene_fusion internals or calibrate_metric_scale/depth_map_to_meters - not exercised because their definitions are not visible in the provided source"
+  - "Real VGGT/DepthPro model calls (vggt is not in requirements.txt and is Docker-only; stubbed per the repo's own tests)"
+  - "Reimplementing the retired x10 path other than via gen.human_like_distance(10*raw), the idiom the repo's own retired-path test uses"
+  - "Wall-clock timing on shared CPU"
+provenance:
+  user_guidance: "@remyx-ai validate - requester asked only to run validation; no dataset, loader, model, or metric override named, so scope and metrics follow the PR diff and the repo's own CPU fixtures unchanged"
+  metric_answer_within_bar_rate: "claim_analysis:paper_metrics (rel_tol=0.05 or half-unit rounding bar)"
+  metric_answer_rel_error: "claim_analysis:paper_metrics"
+  retired_x10_rel_error: "claim_analysis:paper_metrics + arithmetic (x10 ~9x off, must exceed 0.5)"
+  perspective_flip_accuracy: "claim_analysis:arithmetic (yaw-180 flips left/right exactly; fixture 2/2)"
+  grounded_label_coverage: "claim_analysis:paper_metrics (2 of 3 fixture matches grounded)"
+  inlier_ratio_mean: "claim_analysis:paper_metrics (0.8, 0.5 -> 0.65; 0/0 -> 0.0)"
+  unusable_extrinsics_accept_rate: "claim_analysis:mechanism (parse_extrinsics returns None for <2 frames, NaN, rotation-only)"
+  localize_roundtrip_rate: "repo_test:tests/test_correspondence.py LOCALIZE_POINT_RE contract"
+  held_constant: "repo_test:tests/test_metric_calibration.py scene geometry"
+  suite: "synthesized"
+  compute: "inferred"
+report:
+  headline: "Metric calibration and perspective logic hold at their published bars on known geometry while the retired x10 path misses by ~9x; the real VGGT/DepthPro GPU path remains unmeasured"
+  findings:
+    - "{metric_answer_within_bar_rate:%} of emitted distance/size answers land within the PR's rel_tol=0.05-or-half-unit bar against known ground truth (mean relative miss {metric_answer_rel_error}), while the retired x10 path misses by {retired_x10_rel_error} relative"
+    - "{perspective_flip_accuracy:%} of egocentric left/right answers flip correctly across the 180-degree-yaw second camera, and {unusable_extrinsics_accept_rate:%} of unusable extrinsics leak into perspective QA"
+    - "{grounded_label_coverage:%} of fixture correspondence matches ground to object labels instead of 'feature', with surfaced inlier_ratio averaging {inlier_ratio_mean}"
+    - "{localize_roundtrip_rate:%} of emitted <point> tags still parse through the localize regex, keeping the single-image pipeline contract intact"
+  establishes:
+    - "Calibrated distance/size QA is metrically correct on known-geometry scenes, resting on {metric_answer_within_bar_rate} and the {retired_x10_rel_error} contrast"
+    - "Perspective-taking answers flip with viewpoint as claimed, resting on {perspective_flip_accuracy} and the {unusable_extrinsics_accept_rate} gate"
+    - "Correspondence QA is object-grounded with an inlier-ratio column, resting on {grounded_label_coverage} and {inlier_ratio_mean}"
+  does_not_establish:
+    - "Quality of real VGGT depth/extrinsics or the DepthPro metric anchor (calibrate_metric_scale) on real imagery - no GPU model ran"
+    - "Byte-for-byte S=1 scene_fusion parity vs main - no baseline arm and no VGGT-format S=1 outputs were diffed"
+    - "Any downstream VLM training gain from the new QA families"
+  not_measured:
+    - "Multi-view fusion registration error on real clips (S>=2 with predicted extrinsics)"
+    - "Per-object depth confidence (compute_object_depth_confidence) - its signature is not visible in the provided source"
+    - "Judge-scored data quality via experiments/prometheus_space_judge (R2: no canonical rows; runner config schema and emitted fields not visible in context)"
+  caveat: "The PR's own evidence is 40 CPU pytest passes; this eval upgrades the same synthetic-geometry mechanisms to measured values but still cannot touch the GPU-gated VGGT/DepthPro path the PR itself flags as unvalidated."
+  next: "Run the prometheus_space_judge harness on a >=2-frame clip sample on GPU with a new experiments/ config directory to measure real-VGGT fusion, anchor calibration, and judge-scored spatial QA quality."
+loop:
+  max_iterations: 8
+  fix_code: true
