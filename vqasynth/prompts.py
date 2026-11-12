@@ -624,7 +624,309 @@ class PromptGenerator:
 
         return question + " Answer: " + answer
 
-    def evaluate_predicates_on_pairs(self, pairs, is_canonicalized):
+    # Perspective-taking / cross-view prompts (multi-view scenes only)
+    #
+    # These families consume the per-frame camera poses surfaced alongside the
+    # fused multi-view point cloud. Expected input: an ``extrinsics`` entry of
+    # shape (S, 3, 4) holding camera-from-world poses [R | t] in the OpenCV
+    # convention (x right, y down, z forward) — the same convention VGGT's
+    # ``pose_encoding_to_extri_intri`` emits — with each pose expressed in the
+    # fused cloud's (world) frame, so p_camera = R @ p_world + t. They are
+    # gated on >= 2 poses; single-frame scenes never see them.
+
+    def parse_extrinsics(self, extrinsics, min_frames=2):
+        """
+        Normalize per-frame camera extrinsics into an (S, 3, 4) numpy array of
+        camera-from-world poses, or None when the input does not describe at
+        least ``min_frames`` usable poses.
+
+        Accepts nested lists, numpy arrays, or torch tensors of shape
+        (S, 3, 4) / (S, 4, 4), or a single (3, 4) / (4, 4) pose. Anything
+        else (including None, non-finite values, or rotation-only shapes)
+        yields None so callers can fall back to single-frame behavior.
+        """
+        if extrinsics is None:
+            return None
+        try:
+            if hasattr(extrinsics, "detach"):  # torch tensor, maybe on GPU
+                extrinsics = extrinsics.detach().cpu().numpy()
+            poses = np.asarray(extrinsics, dtype=np.float64)
+        except Exception:
+            return None
+
+        if poses.ndim == 2:  # a single (3, 4) or (4, 4) pose
+            poses = poses[None, ...]
+        if poses.ndim != 3 or poses.shape[0] < min_frames:
+            return None
+        if poses.shape[1:] == (4, 4):
+            poses = poses[:, :3, :]
+        if poses.shape[1:] != (3, 4):
+            return None
+        if not np.all(np.isfinite(poses)):
+            return None
+        return poses
+
+    @staticmethod
+    def transform_points_to_camera(points_world, extrinsic):
+        """
+        Map world-frame points into a camera's frame using its camera-from-world
+        pose: p_camera = R @ p_world + t.
+
+        Args:
+            points_world ((N, 3) or (3,) array-like): points in the fused
+                cloud's (world) frame.
+            extrinsic ((3, 4) or (4, 4) array-like): camera-from-world pose.
+
+        Returns:
+            np.ndarray of the same leading shape in camera coordinates.
+        """
+        pose = np.asarray(extrinsic, dtype=np.float64)[:3, :]
+        pts = np.asarray(points_world, dtype=np.float64)
+        single = pts.ndim == 1
+        if single:
+            pts = pts[None, :]
+        pts_cam = pts @ pose[:, :3].T + pose[:, 3]
+        return pts_cam[0] if single else pts_cam
+
+    @staticmethod
+    def _viewpoint_label(frame_index):
+        """Human-facing 1-indexed name for a frame, e.g. ``"camera 2"``."""
+        return f"camera {frame_index + 1}"
+
+    def _perspective_relation(self, A, B, frame, extrinsics):
+        """
+        Express both object centers in ``frame``'s camera coordinates.
+
+        Returns:
+            (A_pos, B_pos) camera-frame center arrays, or None when the
+            extrinsics/frame do not describe a usable pose.
+        """
+        poses = self.parse_extrinsics(extrinsics, min_frames=1)
+        if poses is None or not 0 <= frame < len(poses):
+            return None
+        A_pos = self.transform_points_to_camera(A[1].get_center(), poses[frame])
+        B_pos = self.transform_points_to_camera(B[1].get_center(), poses[frame])
+        return A_pos, B_pos
+
+    def perspective_left_predicate(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        is_left = A_pos[0] < B_pos[0]  # camera-frame x: right in OpenCV poses
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_left_predicate_questions)
+        response_template = random.choice(
+            perspective_left_true_responses if is_left else perspective_left_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+
+        return question + " Answer: " + answer
+
+    def perspective_right_predicate(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        is_right = A_pos[0] > B_pos[0]
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_right_predicate_questions)
+        response_template = random.choice(
+            perspective_right_true_responses if is_right else perspective_right_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+
+        return question + " Answer: " + answer
+
+    def perspective_front_predicate(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        is_in_front = A_pos[2] < B_pos[2]  # camera-frame depth: smaller z is closer
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_front_predicate_questions)
+        response_template = random.choice(
+            perspective_front_true_responses if is_in_front else perspective_front_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+
+        return question + " Answer: " + answer
+
+    def perspective_behind_predicate(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        is_behind = A_pos[2] > B_pos[2]
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_behind_predicate_questions)
+        response_template = random.choice(
+            perspective_behind_true_responses if is_behind else perspective_behind_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+
+        return question + " Answer: " + answer
+
+    def perspective_left_choice(self, A, B, frame, extrinsics):
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation = self._perspective_relation(A, B, frame, extrinsics)
+        if relation is None:
+            raise ValueError("perspective predicates need a usable per-frame extrinsic")
+        A_pos, B_pos = relation
+
+        more_left = A_desc if A_pos[0] < B_pos[0] else B_desc
+
+        viewpoint = self._viewpoint_label(frame)
+        question_template = random.choice(perspective_left_choice_questions)
+        answer_template = random.choice(perspective_left_choice_responses)
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", viewpoint)
+        )
+        answer = answer_template.replace("[V]", viewpoint).replace("[X]", more_left)
+
+        return question + " Answer: " + answer
+
+    def cross_view_order_predicate(self, A, B, frame_v, frame_w, extrinsics):
+        """
+        Ask whether the left-right order of the pair is the same in two
+        reference frames.
+
+        Args:
+            frame_v: index of the egocentric viewpoint's pose in ``extrinsics``.
+            frame_w: index of a second viewpoint's pose, or None to compare
+                against the allocentric world (fused-cloud) layout.
+        """
+        A_desc, B_desc = A[0].lower(), B[0].lower()
+        relation_v = self._perspective_relation(A, B, frame_v, extrinsics)
+        if relation_v is None:
+            raise ValueError("cross-view predicates need a usable per-frame extrinsic")
+        A_v, B_v = relation_v
+        v_left_of = A_v[0] < B_v[0]
+
+        if frame_w is None:
+            A_w, B_w = A[1].get_center(), B[1].get_center()
+            w_label = "scene's overall layout"
+        else:
+            relation_w = self._perspective_relation(A, B, frame_w, extrinsics)
+            if relation_w is None:
+                raise ValueError("cross-view predicates need a usable per-frame extrinsic")
+            A_w, B_w = relation_w
+            w_label = f"{self._viewpoint_label(frame_w)} view"
+
+        w_left_of = A_w[0] < B_w[0]
+        orders_agree = v_left_of == w_left_of
+
+        v_label = f"{self._viewpoint_label(frame_v)} view"
+        question_template = random.choice(cross_view_order_questions)
+        response_template = random.choice(
+            cross_view_order_true_responses
+            if orders_agree
+            else cross_view_order_false_responses
+        )
+
+        question = (
+            question_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", v_label)
+            .replace("[W]", w_label)
+        )
+        answer = (
+            response_template.replace("[A]", A_desc)
+            .replace("[B]", B_desc)
+            .replace("[V]", v_label)
+            .replace("[W]", w_label)
+        )
+
+        return question + " Answer: " + answer
+
+    def build_viewpoint_variants(self, extrinsics):
+        """
+        Bind the perspective-taking / cross-view families to concrete
+        viewpoints for this scene: one egocentric frame plus a second
+        reference frame (another camera when the scene has one, otherwise the
+        allocentric world layout).
+
+        Returns:
+            List of (A, B) -> str callables ready to drop into
+            ``evaluate_predicates_on_pairs``, or [] when ``extrinsics`` does
+            not describe at least two camera poses (single-frame back-compat).
+        """
+        poses = self.parse_extrinsics(extrinsics, min_frames=2)
+        if poses is None:
+            return []
+
+        frame = random.randrange(len(poses))
+        if len(poses) > 2:
+            frame_w = random.choice([i for i in range(len(poses)) if i != frame])
+        else:
+            frame_w = None  # egocentric vs allocentric (world layout)
+
+        return [
+            lambda A, B: self.perspective_left_predicate(A, B, frame, poses),
+            lambda A, B: self.perspective_right_predicate(A, B, frame, poses),
+            lambda A, B: self.perspective_front_predicate(A, B, frame, poses),
+            lambda A, B: self.perspective_behind_predicate(A, B, frame, poses),
+            lambda A, B: self.perspective_left_choice(A, B, frame, poses),
+            lambda A, B: self.cross_view_order_predicate(A, B, frame, frame_w, poses),
+        ]
+
+    def evaluate_predicates_on_pairs(self, pairs, is_canonicalized, extrinsics=None):
         """
         Evaluate predicates on object pairs, ensuring a balance between distance-related predicates
         and other types of predicates. If invalid distance results are found, they are replaced with
@@ -633,6 +935,10 @@ class PromptGenerator:
         Args:
             pairs: List of object pairs to evaluate.
             is_canonicalized: Boolean indicating if canonicalized predicates should be included.
+            extrinsics: Optional per-frame camera poses (S, 3, 4), camera-from-world,
+                aligned with the fused cloud's frame. When at least two poses are
+                present the perspective-taking / cross-view families join the
+                candidate pool; otherwise they are skipped (single-frame back-compat).
 
         Returns:
             List of results for each object pair.
@@ -667,6 +973,11 @@ class PromptGenerator:
 
         if is_canonicalized:
             all_prompt_variants += add_canonicalized
+
+        # Perspective-taking / cross-view families only join the pool when the
+        # fused scene carries >= 2 registered camera poses; single-frame scenes
+        # (no extrinsics, or a single pose) skip them entirely.
+        all_prompt_variants += self.build_viewpoint_variants(extrinsics)
 
         # Distance-related predicates
         distance_related_predicates = [
@@ -726,7 +1037,7 @@ class PromptGenerator:
 
         return valid_results
 
-    def run(self, captions, pointclouds, is_canonicalized):
+    def run(self, captions, pointclouds, is_canonicalized, extrinsics=None):
         pointclouds = restore_pointclouds(pointclouds)
         try:
             objects = list(zip(captions, pointclouds))
@@ -739,7 +1050,9 @@ class PromptGenerator:
             random.shuffle(all_pairs)
             selected_pairs = all_pairs[:5]
             object_pairs = [(objects[i], objects[j]) for i, j in selected_pairs]
-            prompts = self.evaluate_predicates_on_pairs(object_pairs, is_canonicalized)
+            prompts = self.evaluate_predicates_on_pairs(
+                object_pairs, is_canonicalized, extrinsics=extrinsics
+            )
         except:
             prompts = []
         return prompts
@@ -808,8 +1121,16 @@ class PromptGenerator:
         If any error occurs for this sample, returns None (and the sample will be dropped).
         """
         try:
-            # Process a single sample.
-            prompts = self.run(example["captions"], example["pointclouds"], example["is_canonicalized"])
+            # Process a single sample. "extrinsics" is the optional per-frame
+            # camera-pose column carried by multi-view (fused) scenes; absent
+            # on single-frame scenes, which simply skip the viewpoint families.
+            extrinsics = example.get("extrinsics") if isinstance(example, dict) else None
+            prompts = self.run(
+                example["captions"],
+                example["pointclouds"],
+                example["is_canonicalized"],
+                extrinsics=extrinsics,
+            )
             random.shuffle(prompts)
             truncated = prompts[:5]
             messages = self.create_messages_from_prompts(truncated)
