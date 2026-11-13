@@ -108,3 +108,48 @@ def test_dense_reward_gating():
     # bad format -> everything gated to zero
     broken = sr.dense_reward("<answer>(A) left</answer>", GT_SCENE, "(A) left")
     assert broken["total"] == 0.0 and broken["format"] == 0.0
+
+
+def test_grounded_state_to_scene_builds_gt():
+    gs = {
+        "objects": [
+            {"label": "red cube", "center_m": [0, 0, 2], "bbox": [10, 10, 50, 50]},
+            {"label": "green sphere", "bbox": [100, 100, 140, 140]},
+            {"label": "no_box_obj"},  # dropped: no bbox
+        ],
+        "pairs": [{"a": "red cube", "b": "green sphere", "distance_m": 1.4}],
+    }
+    scene = sr.grounded_state_to_scene(gs)
+    assert len(scene["objects"]) == 2  # no_box_obj dropped
+    assert scene["objects"][0]["id"] == 0 and scene["objects"][0]["label"] == "red cube"
+    assert len(scene["relations"]) == 1
+    assert scene["relations"][0]["subject"] == 0 and scene["relations"][0]["object"] == 1
+
+
+def test_grounded_state_to_scene_drives_reward():
+    import json as _json
+
+    gt = sr.grounded_state_to_scene({
+        "objects": [
+            {"label": "red cube", "bbox": [10, 10, 50, 50]},
+            {"label": "green sphere", "bbox": [100, 100, 140, 140]},
+        ],
+        "pairs": [{"a": "red cube", "b": "green sphere"}],
+    })
+    pred = (
+        "<observe>x</observe><scene>"
+        + _json.dumps({
+            "objects": [
+                {"id": 0, "label": "red cube", "bbox": [10, 10, 50, 50]},
+                {"id": 1, "label": "green sphere", "bbox": [100, 100, 140, 140]},
+            ],
+            "relations": [{"subject": 0, "predicate": "related", "object": 1}],
+        })
+        + "</scene><think>y</think><answer>(A)</answer>"
+    )
+    assert sr.dense_reward(pred, gt, "(A)")["total"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_grounded_state_to_scene_malformed():
+    assert sr.grounded_state_to_scene("{bad json") is None
+    assert sr.grounded_state_to_scene(42) is None

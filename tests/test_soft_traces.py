@@ -167,3 +167,15 @@ def test_apply_transform_missing_column_is_backcompat():
     assert out["reasoning"] == "on"
     text = _prompt_text(r)
     assert "Things I can make out in the scene" not in text  # base path
+
+
+def test_perspective_question_adds_addendum():
+    r = _make_reasoner()
+    r.run("From where camera 2 is standing, is the chair left of the mug?", "left", IMG, grounded_state=GROUNDED)
+    assert "re-anchor to that viewpoint" in _prompt_text(r)
+
+
+def test_non_perspective_question_no_addendum():
+    r = _make_reasoner()
+    r.run("How far is the chair?", "2.1 m", IMG, grounded_state=GROUNDED)
+    assert "re-anchor to that viewpoint" not in _prompt_text(r)

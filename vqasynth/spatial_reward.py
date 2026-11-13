@@ -214,3 +214,44 @@ def dense_reward(text, gt_scene, gt_answer, weights=None):
         "accuracy": float(r_acc),
         "spatial": float(r_spatial),
     }
+
+
+def grounded_state_to_scene(grounded_state):
+    """Build a GT scene graph ``{"objects", "relations"}`` from a prompt-stage
+    ``grounded_state`` record (dict or JSON string) so :func:`dense_reward` has a
+    ground truth at RL time.
+
+    Only objects carrying a 2D ``bbox`` become GT objects (the spatial component
+    needs boxes); each grounded pair becomes a relation mapping its ``a``/``b``
+    labels to the emitted object ids (a coarse ``"related"`` predicate — enough to
+    drive the count reward; richer spatial predicates can replace it later).
+    Returns None for a malformed record.
+    """
+    gs = grounded_state
+    if isinstance(gs, str):
+        try:
+            gs = json.loads(gs)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(gs, dict):
+        return None
+
+    objects, label_to_id = [], {}
+    for o in gs.get("objects", []) or []:
+        box = o.get("bbox") if isinstance(o, dict) else None
+        if not (isinstance(box, (list, tuple)) and len(box) == 4):
+            continue
+        oid = len(objects)
+        label = o.get("label", "object")
+        objects.append({"id": oid, "label": label, "bbox": [float(c) for c in box]})
+        label_to_id.setdefault(label, oid)
+
+    relations = []
+    for p in gs.get("pairs", []) or []:
+        if not isinstance(p, dict):
+            continue
+        a, b = label_to_id.get(p.get("a")), label_to_id.get(p.get("b"))
+        if a is not None and b is not None:
+            relations.append({"subject": a, "predicate": "related", "object": b})
+
+    return {"objects": objects, "relations": relations}

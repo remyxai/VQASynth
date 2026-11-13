@@ -113,3 +113,15 @@ def test_record_renders_through_soft_trace_reasoner():
     assert "low confidence, a rough estimate" in block   # mug depth_conf 0.3
     assert "2 views" in block
     assert "solid" in block                              # inlier_ratio 0.82 >= 0.7
+
+
+def test_bboxes_attached_to_objects():
+    rec = _build(bboxes=[[10, 10, 50, 50], [100, 100, 140, 140], [200, 10, 240, 60]])
+    objs = {o["label"]: o for o in rec["objects"]}
+    assert objs["chair"]["bbox"] == [10.0, 10.0, 50.0, 50.0]
+    assert "bbox" in objs["mug"] and "bbox" in objs["lamp"]
+
+
+def test_bboxes_optional():
+    rec = _build()  # no bboxes -> objects carry none
+    assert all("bbox" not in o for o in rec["objects"])

@@ -104,3 +104,9 @@ def test_explicit_image_size_override():
     r = _reasoner()
     r.run("q", "a", IMG, grounded_state=None, image_size=(1024, 768))
     assert "Image size: 1024 x 768" in _text(r)
+
+
+def test_perspective_addendum_in_bbox_reasoner():
+    r = _reasoner()
+    r.run("From the viewpoint of camera 1, where is the chair?", "(A) left", IMG, grounded_state=GROUNDED)
+    assert "re-anchor to that viewpoint" in _text(r)

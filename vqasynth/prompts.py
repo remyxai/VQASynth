@@ -1291,6 +1291,7 @@ class PromptGenerator:
         extrinsics=None,
         depth_conf=None,
         inlier_ratio=None,
+        bboxes=None,
         max_pairs=5,
     ):
         """Assemble the compact grounded-scene-state record consumed by
@@ -1330,6 +1331,12 @@ class PromptGenerator:
                 dc = self._scene_scalar(dc) if dc is not None else None
                 if dc is not None:
                     obj["depth_conf"] = dc
+                bb = bboxes[idx] if isinstance(bboxes, (list, tuple)) and idx < len(bboxes) else None
+                if isinstance(bb, (list, tuple)) and len(bb) == 4:
+                    try:
+                        obj["bbox"] = [round(float(c), 2) for c in bb]  # 2D GT box (x1,y1,x2,y2) from localize
+                    except (TypeError, ValueError):
+                        pass
                 objects.append(obj)
 
             pair_indices = [(i, j) for i in range(n) for j in range(i + 1, n)]
@@ -1400,6 +1407,7 @@ class PromptGenerator:
                 extrinsics=extrinsics,
                 depth_conf=example.get("depth_conf") if isinstance(example, dict) else None,
                 inlier_ratio=example.get("inlier_ratio") if isinstance(example, dict) else None,
+                bboxes=example.get("bboxes") if isinstance(example, dict) else None,
             )
             return {
                 "prompts": prompts,

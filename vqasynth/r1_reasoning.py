@@ -245,6 +245,25 @@ class SoftTraceReasoner(R1Reasoner):
         "directly observed. Feel free to reference objects colloquially.\n"
     )
 
+    # SenseNova-style perspective-taking: questions posed from a viewpoint other
+    # than the camera's own need the frame of reference re-anchored before
+    # left/right/front/behind are judged (relations flip under rotation).
+    _PERSPECTIVE_MARKERS = (
+        "from where", "from the perspective", "from the viewpoint", "if you were standing",
+        "if you were at", "if you stood", "from camera", "from the camera", "facing",
+        "egocentric", "allocentric", "from behind", "standing at", "looking from",
+    )
+    PERSPECTIVE_ADDENDUM = (
+        "This question asks you to reason from a specific viewpoint or frame of reference, not necessarily your "
+        "own. Before judging left/right/front/behind, explicitly re-anchor to that viewpoint and transform the "
+        "scene into it — spatial relations can flip when the observer's orientation changes.\n"
+    )
+
+    @classmethod
+    def _is_perspective_question(cls, question):
+        q = (question or "").lower()
+        return any(marker in q for marker in cls._PERSPECTIVE_MARKERS)
+
     def __init__(
         self,
         api_key: str,
@@ -346,6 +365,7 @@ class SoftTraceReasoner(R1Reasoner):
         qa_pair = f"Question: {question} Answer: {answer}"
         user_text = (
             self.SOFT_SYSTEM_PROMPT
+            + (self.PERSPECTIVE_ADDENDUM if self._is_perspective_question(question) else "")
             + "\nWhat I observe about the scene (with how sure I am):\n"
             + grounded_block
             + "\n\n"
@@ -485,7 +505,8 @@ class GroundedBBoxTraceReasoner(SoftTraceReasoner):
             else ""
         )
         qa_pair = f"Question: {question} Answer: {answer}"
-        user_text = self.SPATIAL_SYSTEM_PROMPT + size_line + hint + "\n" + qa_pair
+        persp = self.PERSPECTIVE_ADDENDUM if self._is_perspective_question(question) else ""
+        user_text = self.SPATIAL_SYSTEM_PROMPT + persp + size_line + hint + "\n" + qa_pair
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
