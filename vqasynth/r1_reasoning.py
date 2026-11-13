@@ -417,3 +417,85 @@ class SoftTraceReasoner(R1Reasoner):
         examples["output"] = outputs
         examples["reasoning"] = reasonings
         return examples
+
+
+class GroundedBBoxTraceReasoner(SoftTraceReasoner):
+    """Phase-3 teacher producing SpatialThinker-style scene-graph-grounded,
+    bbox-verifiable traces (Batra et al., "SpatialThinker", arXiv:2511.07403,
+    CC-BY-4.0).
+
+    Emits the four-tag structure the dense reward scores:
+      - ``<observe>`` what is visible in the image;
+      - ``<scene>`` a JSON subgraph — ``objects`` with ``id``/``label``/``bbox``
+        (``[x1, y1, x2, y2]`` absolute pixels) and ``relations`` triplets;
+      - ``<think>`` first-person reasoning that INHERITS SoftTraceReasoner's
+        grounded hints and propagates calibrated confidence (hedging low-
+        confidence measurements rather than committing);
+      - ``<answer>`` the final answer.
+
+    The grounded state (object metric positions + surfaced depth_conf /
+    inlier_ratio) is passed as HINTS; the teacher still predicts the pixel boxes
+    from the image, and those predictions are verifiable against the localize-
+    stage ground truth via :func:`vqasynth.spatial_reward.dense_reward`
+    (Stage-2 verifiable-reward RL). Drop-in for the r1_reasoning stage; inherits
+    apply_transform (threads the grounded_state column), image size is inferred
+    from the PIL image when not supplied.
+    """
+
+    SPATIAL_SYSTEM_PROMPT = (
+        "You are an embodied AI reasoning about a scene you are directly observing. Respond in FOUR parts, each "
+        "in its own tags. (1) <observe> </observe>: briefly note what you actually see. (2) <scene> </scene>: emit "
+        "a JSON scene subgraph of ONLY the objects relevant to the question, exactly as "
+        '{"objects": [{"id": 0, "label": "...", "bbox": [x1, y1, x2, y2]}, ...], '
+        '"relations": [{"subject": 0, "predicate": "...", "object": 1}, ...]} — bounding boxes in ABSOLUTE PIXEL '
+        "coordinates within the image bounds, ids referenced by the relations. (3) <think> </think>: reason as a "
+        "first-person internal monologue; PROPAGATE YOUR CONFIDENCE — lean on measurements you are sure of and "
+        "hedge or cross-check low-confidence ones rather than committing to them as if certain. (4) <answer> "
+        "</answer>: the final answer. Do not refer to information as given or provided; reason as if directly "
+        "observed.\n"
+    )
+
+    @staticmethod
+    def _infer_image_size(image):
+        """Return (width, height) for a PIL image, else None."""
+        try:
+            if isinstance(image, Image.Image):
+                return image.size
+        except Exception:
+            pass
+        return None
+
+    def run(self, question: str, answer: str, image, grounded_state=None, image_size=None):
+        """Generate a scene-graph-grounded, bbox-verifiable, confidence-carrying
+        trace in the four-tag format."""
+        base64_image = self.encode_image(image)
+        if image_size is None:
+            image_size = self._infer_image_size(image)
+        size_line = (
+            f"Image size: {int(image_size[0])} x {int(image_size[1])}\n"
+            if image_size and len(image_size) == 2
+            else ""
+        )
+        grounded_block = self._format_grounded_block(grounded_state)
+        hint = (
+            "\nWhat I observe about the scene (hints, with how sure I am — still predict the boxes yourself):\n"
+            + grounded_block
+            + "\n"
+            if grounded_block
+            else ""
+        )
+        qa_pair = f"Question: {question} Answer: {answer}"
+        user_text = self.SPATIAL_SYSTEM_PROMPT + size_line + hint + "\n" + qa_pair
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}},
+                    ],
+                }
+            ],
+        )
+        return response.choices[0].message.content
