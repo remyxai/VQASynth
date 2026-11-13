@@ -1,9 +1,15 @@
 question:
-  kind: compare
-  ask: "Keep the CPU-observable bars but add a real-GPU arm running the actual VGGT + DepthPro paths unstubbed, plus a legacy-S=1 vs PR two-arm comparison on identical real clips with S=1 message-hash parity - does VQASynth++ Phase 1-2 deliver real-world-calibrated, viewpoint-aware spatial data with the single-image path preserved?"
+  kind: capability
+  ask: "One self-contained PR-head run on a real GPU - keep the CPU-observable bars and run the actual VGGT + DepthPro paths unstubbed, with every contrast intra-notebook (retired x10 vs calibrated, legacy-S=1 vs fused, synthetic-CPU vs real-GPU, S=1 CRC-32 parity fingerprint on identical frames) - does VQASynth++ Phase 1-2 deliver real-world-calibrated, viewpoint-aware spatial data with the single-image path preserved?"
 benchmarks:
   - name: vqasynth-pp-spatial-quality
-    suite: "eval/eval_vqasynth_spatial_quality.py"
+    suite: "notebook:eval/eval_vqasynth_spatial_quality.ipynb"  # user_guidance: the runner executes the SAME measurement the repo's eval
+    # notebook (eval/eval_vqasynth_spatial_quality.ipynb) documents - synthetic
+    # CPU fixture block, unstubbed real-GPU block, S=1 parity block - in-process
+    # against the real vqasynth modules, and emits ALL 16 custom metrics into
+    # the scorer's result channel as its single final stdout JSON line. The
+    # scorer (and every diagnostic) binds to those EMITTED keys so they appear
+    # in the measurements table - never to pytest collection.
     packages: []  # Python wheels ONLY - libegl1 and every other lib*/.so OS library is an
     # apt package pip can never resolve (user_guidance), so none appears here; the
     # open3d headless runtime set (libgl1 libegl1 libgomp1 libglib2.0-0) is installed
@@ -12,7 +18,8 @@ benchmarks:
     # environment (PR-head dependency set) and its absence is handled by the
     # script's declared ImportError fallback.
     scorer: metric_answer_within_bar_rate
-    baseline: main
+    baseline: none  # user_guidance: every contrast is self-contained in the one
+    # (PR-head) notebook arm; a second (main) arm is neither needed nor correct.
     policy:
       guardrail_veto: true
     metrics:
@@ -27,16 +34,18 @@ benchmarks:
         # the humanizer's unit rounding, which the bar's half-unit branch absorbs
         # (worst case 0.4m->whole feet: |0.3048-0.4|=0.095 <= max(0.02, 0.1524)); only
         # genuine miscalibration (e.g. an x10 leak) misses, so 1.0 over seeded draws.
-        # On main this same instrument measures main's LIVE x10 path (~0.0), so the
-        # two-arm delta is the calibration claim itself.
+        # The retired-path contrast is carried INTRA-RUN: the same notebook executes
+        # the retired x10 formula on the same scene (retired_x10_rel_error, ~9x), so
+        # no main arm is needed for the calibration claim.
       - name: localize_roundtrip_rate
         direction: max
         threshold: 1.0
         role: guardrail
         bar: floor
         reads_as: "Share of emitted <point> tags (grounded and un-grounded) that parse through the localize stage's exact regex"
-        # Baseline-achievable: every tag on main comes from the same pre-existing
-        # point_to_molmo_tag / build_qa_pair emit path the regex was built against.
+        # Floor justification: every emitted tag comes from the same pre-existing
+        # point_to_molmo_tag / build_qa_pair emit path the regex was built against,
+        # so 1.0 is a provable floor (any miss is a broken emit path).
       - name: perspective_flip_accuracy
         direction: max
         threshold: 1.0
@@ -51,7 +60,7 @@ benchmarks:
         direction: max
         threshold: 0.5
         role: diagnostic
-        reads_as: "Relative error of the retired x10 path on the same scene (paper bar >0.5, expected ~9x) - the intra-run contrast"
+        reads_as: "Relative error of the retired x10 path executed side-by-side on the same scene (paper bar >0.5, expected ~9x) - the intra-run contrast"
       - name: grounded_label_coverage
         direction: max
         threshold: 0.66
@@ -72,7 +81,7 @@ benchmarks:
         threshold: 0.05
         role: diagnostic
         bar: goal
-        reads_as: "Max cross-frame spread of a landmark's fused world coordinate divided by its metric distance on the real clip (real VGGT S>=2)"
+        reads_as: "Max cross-frame spread of the masked object's registered world-centroid divided by its metric distance on the real clip (real VGGT S>=2)"
         # Threshold derivation (claim_analysis): registration error propagates ~1:1 into
         # fused distances, so the bar is the PR's own rel_tol=0.05; absolute spread in
         # meters is also printed, ungated.
@@ -81,14 +90,14 @@ benchmarks:
         threshold: 1.0
         role: diagnostic
         bar: goal
-        reads_as: "Share of objects masked in >=2 real frames that yield exactly one merged fused cloud"
+        reads_as: "Share of objects masked in >=2 real frames that yield exactly one merged fused cloud (world-space DBSCAN over the union of registered per-frame clouds)"
         # Deterministic union of registered per-frame clouds: any miss is a bug, so 1.0.
       - name: real_depth_conf_variation_rate
         direction: max
         threshold: 1.0
         role: diagnostic
         bar: goal
-        reads_as: "Share of real-clip objects with finite retained VGGT depth_conf whose per-scene values are non-constant"
+        reads_as: "Share of real-clip objects with finite retained VGGT depth_conf whose per-frame masked means are non-constant"
         # The claim asserts depth_conf is retained AND varies per object; both are
         # deterministic properties of the fused output, so 1.0 (std also computed).
       - name: real_scale_sanity_rate
@@ -96,7 +105,7 @@ benchmarks:
         threshold: 1.0
         role: diagnostic
         bar: goal
-        reads_as: "Share of real scenes whose calibrate_metric_scale factor lies within one decade [0.1, 10] (excludes the retired x10 class)"
+        reads_as: "Share of real scenes whose calibrate-style scale factor lies within one decade [0.1, 10] (excludes the retired x10 class)"
         # s = median(depthPro_m / vggt_rel) in [0.1, 10] admits VGGT's up-to-scale
         # ambiguity while excluding exactly the retired failure class (factor 10, ~9x).
       - name: real_distance_plausibility_rate
@@ -112,12 +121,13 @@ benchmarks:
         threshold: 0
         role: diagnostic
         bar: sanity
-        reads_as: "Integer CRC-32 over JSON-serialized S=1 messages on identical real frames - parity holds iff both arms print the same integer"
-        # Threshold derivation: zlib.crc32 of the payload is an unsigned 32-bit
-        # integer, so >= 0 asserts a well-formed fingerprint was emitted (it fails on
-        # a missing/None/malformed value). The substantive assertion is CROSS-ARM
-        # EQUALITY of the two runs' printed integers (equality of raw hash values
-        # cannot be encoded as a single-arm bound), read off the two arms' reports.
+        reads_as: "CRC-32 fingerprint of S=1 messages; legacy and fused-forced-S=1 match iff printed integer >= 0 (divergence prints -1)"
+        # Threshold derivation (user_guidance: parity is INTRA-RUN now): zlib.crc32 of
+        # the payload is an unsigned 32-bit integer; the notebook computes BOTH the
+        # legacy-branch S=1 fingerprint and the fused-pipeline-forced-S=1 fingerprint
+        # on the SAME real frames inside the one run, prints the shared integer when
+        # they match and -1 when they diverge - so the >= 0 sanity bar encodes
+        # byte-for-byte S=1 parity as a single-arm bound and fails loudly on drift.
       - name: s1_message_count
         direction: max
         threshold: 1
@@ -129,13 +139,15 @@ benchmarks:
         threshold: 1
         role: diagnostic
         bar: goal
-        reads_as: "Perspective + grounded-correspondence + S>=2-fusion outputs emitted by the fused run on the real frames (absent -> 0 on main)"
+        reads_as: "Perspective + grounded-correspondence messages actually emitted by the fused S>=2 run on the real frames (the PR's new families)"
 compute:
   tier: gpu
-  # timeout derivation, ONE arm: apt-get install of open3d's OS runtime libs ~3 min
-  # (user_guidance env fix); checkpoint downloads (facebook/VGGT-1B ~5GB,
-  # apple/depth-pro-hf ~2GB) ~15 min; VGGT forward on <=3 frames ~2 min; DepthPro
-  # <=3 frames ~2 min; CPU synthetic suite <2 min; repair buffer -> 5400 s.
+  # timeout derivation, ONE arm (baseline: none): apt-get install of open3d's OS
+  # runtime libs ~3 min (user_guidance env fix); checkpoint downloads
+  # (facebook/VGGT-1B ~5GB, apple/depth-pro-hf ~2GB) ~15 min; VGGT forward on
+  # <=3 frames ~2 min; DepthPro <=3 frames ~2 min; CPU synthetic suite <2 min
+  # (includes the intra-run retired-x10 and legacy-S=1 side runs on the same
+  # frames); repair buffer -> 5400 s.
   timeout_s: 5400
 variants:
   feature:
@@ -147,61 +159,63 @@ held_constant:
   - "vggt stub never installed: the real-GPU stage imports vggt unstubbed per user_guidance; no PyPI distribution named vggt exists, so the import is satisfied by the repo's own environment (the PR head's dependency set) and a missing import is handled by the script's declared ImportError fallback (zeroed real-arm metrics), never by a stub or a fabricated number"
   - "open3d runtime OS libs come from apt, never pip: the script's prologue runs apt-get update && apt-get install -y --no-install-recommends libgl1 libegl1 libgomp1 libglib2.0-0 (shell=True, check=True) BEFORE the first open3d/vqasynth import, retrying once with libusb-1.0-0 added if open3d still fails to import; the pip packages: field stays Python-wheels-only"
   - "OpenCV convention (x right, y down, z forward) and the localize <point> regex held as the round-trip contract"
-  - "Real clip: >=2 same-scene frames - repo assets/ glob (sorted, first N) else the pinned public fallback (huggingface/documentation-images, revision main, first sorted image, deterministic overlapping crops); the SAME frames feed legacy S=1 and fused S>=2 runs on BOTH arms"
-  - "Pinned checkpoints through their own official loaders: facebook/VGGT-1B (vggt.from_pretrained) and apple/depth-pro-hf (transformers AutoModelForDepthEstimation), fetched with HF_TOKEN"
-  - "S=1 parity fingerprint: zlib.crc32 over the JSON-serialized S=1 messages (sort_keys=True), printed as the integer s1_message_hash_crc32 on each arm; parity holds iff the two arms print the same integer"
-  - "Exactly ONE JSON metrics line, printed by the script's FINAL statement unconditionally on BOTH arms (baseline and PR head) and in REMYX_SMOKE mode; all earlier prints are [remyx]-prefixed debug lines, never JSON, so the metrics line is always the last line of stdout"
+  - "Real clip: >=2 same-scene frames - repo assets/ glob (sorted, first N) else the pinned public fallback (huggingface/documentation-images, revision main, first sorted image, deterministic overlapping crops); the SAME frames feed every intra-run contrast inside the one notebook (retired x10 vs calibrated, legacy-S=1 branch vs fused S>=2 run, and the fused run forced back to S=1 for the CRC-32 parity fingerprint); checkpoints pinned facebook/VGGT-1B and apple/depth-pro-hf via the repo's own loader"
 avoid:
-  - "pytest pass counts as the quality instrument (repo rule: pytest proves code-works only)"
-  - "Reimplementing the retired x10 path other than via gen.human_like_distance(10*raw), the idiom the repo's own retired-path test uses"
-  - "Guessing signatures: create_point_cloud_from_model, calibrate_metric_scale and compute_object_depth_confidence are not visible in the provided source, so the real-GPU stage binds them by introspecting the live PR-head signatures and calls them for real - never an inline reimplementation or a stubbed stand-in"
-  - "Installing OS libraries through pip (libegl1 et al. are apt packages, not wheels) or otherwise changing the dependency channel mid-run"
-  - "Wall-clock latency as an instrument on shared compute; the GPU arm reports deterministic geometry-derived quantities"
+  - "no pytest collection anywhere in the measurement path: all 16 metrics are computed in-process against the real vqasynth modules and emitted as the suite's single final stdout JSON line (user_guidance)"
+  - "no vggt stub in the real-GPU stage: only the declared ImportError fallback for the PR's own dependency symbols may zero the real-arm block; any data-loading, shape or checkpoint failure crashes with its traceback and a non-zero exit"
+  - "no unpinned revisions: checkpoints fetched by repo loader tag (facebook/VGGT-1B, apple/depth-pro-hf); the public fallback clip pinned to huggingface/documentation-images @ main, first sorted image"
+  - "no synthetic stand-in for the real clip when repo assets exist - the assets glob runs first"
+  - "no hardcoded or fabricated real-arm values: every real-clip metric is computed from the unstubbed VGGT+DepthPro outputs on the loaded frames (user_guidance)"
+  - "no wall-clock or memory timing claimed: the metered GPU serves the mechanism (unstubbed VGGT+DepthPro), not throughput numbers"
 report:
-  headline: "Calibrated answers hit the metric bar on the PR and miss it on main, the real-GPU VGGT+DepthPro path runs unstubbed with sane scale and plausibility, and the S=1 fingerprint matches across arms"
+  headline: "Mechanism holds in one self-contained run: calibrated answers pass the metric bar the retired x10 path fails, the S=1 fingerprint is preserved, and unstubbed VGGT+DepthPro fusion is registered and metric-sane on the real clip"
   findings:
-    - "{metric_answer_within_bar_rate:%} of emitted distance/size answers land inside the PR's rel_tol=0.05-or-half-unit bar on the pinhole fixture (main's live x10 path is expected near 0)"
-    - "{localize_roundtrip_rate:%} of emitted <point> tags parse through localize's exact regex on both arms (guardrail)"
-    - "egocentric left/right answers flip correctly across the 180-degree-yaw camera in {perspective_flip_accuracy:%} of fixture prompts, while unusable extrinsics are wrongly accepted at {unusable_extrinsics_accept_rate:%}"
-    - "calibrated answers miss ground truth by {metric_answer_rel_error} mean relative error while the retired x10 path sits at {retired_x10_rel_error} (~9x) - the intra-run contrast"
-    - "correspondence grounding: {grounded_label_coverage:%} of fixture matches carry object labels (bar 2/3) at mean inlier ratio {inlier_ratio_mean}"
-    - "real VGGT S>=2 unstubbed: landmark registration spread ratio {real_registration_spread_ratio}, merged-cloud rate {real_object_merge_rate:%}, depth_conf variation {real_depth_conf_variation_rate:%}"
-    - "real DepthPro anchor: scale sanity {real_scale_sanity_rate:%}, distance plausibility {real_distance_plausibility_rate:%}"
-    - "S=1 parity: crc32 {s1_message_hash_crc32} over {s1_message_count} messages per arm - parity holds iff the two arms print the same integer"
-    - "{fused_new_family_message_count} perspective/grounded/fusion messages emitted by the fused run on the real frames (absent -> 0 on main)"
+    - "{metric_answer_within_bar_rate:%} of emitted distance/size answers land inside the PR's rel_tol=0.05-or-half-unit bar on the pinhole fixture"
+    - "calibrated answers miss ground truth by {metric_answer_rel_error} on average (unit rounding only) while the retired x10 path executed on the same scene misses by {retired_x10_rel_error} (~9x)"
+    - "{localize_roundtrip_rate:%} of emitted <point> tags, grounded and un-grounded, parse through the localize stage's exact regex"
+    - "{perspective_flip_accuracy:%} of egocentric left/right answers flip correctly across the 180-degree-yaw second camera"
+    - "{grounded_label_coverage:%} of fixture matches ground to object labels instead of 'feature', with mean surfaced inlier_ratio {inlier_ratio_mean}"
+    - "{unusable_extrinsics_accept_rate} of unusable extrinsics (None, <2 frames, NaN, rotation-only) are wrongly accepted by parse_extrinsics"
+    - "real clip (unstubbed VGGT+DepthPro): landmark registration spread ratio {real_registration_spread_ratio}, objects masked in >=2 frames merged into one cloud {real_object_merge_rate:%}, per-object depth_conf non-constant {real_depth_conf_variation_rate:%}, scale factor within one decade {real_scale_sanity_rate:%}, calibrated distances within 50% of the DepthPro anchor {real_distance_plausibility_rate:%}"
+    - "S=1 parity: {s1_message_count} messages, fingerprint {s1_message_hash_crc32} - the legacy branch and the fused run forced to S=1 print the shared integer when identical, -1 on divergence"
+    - "{fused_new_family_message_count} perspective + grounded-correspondence messages emitted by the fused run on the real frames"
   establishes:
-    - "Real-world calibration of emitted distance/size answers, via {metric_answer_within_bar_rate} on the exact fixture of tests/test_metric_calibration.py, contrasted intra-run by {retired_x10_rel_error}"
-    - "The real unstubbed VGGT+DepthPro multi-view path executes and is self-consistent, via {real_registration_spread_ratio}, {real_object_merge_rate}, {real_scale_sanity_rate} and {real_distance_plausibility_rate}"
-    - "Single-image-path preservation on identical real clips, via cross-arm equality of {s1_message_hash_crc32}"
+    - "distance/size QA is metric-calibrated on known geometry: {metric_answer_within_bar_rate:%} of answers within the bar while the retired x10 path fails it by {retired_x10_rel_error} on the same scene"
+    - "the single-image S=1 message path is preserved byte-for-byte ({s1_message_hash_crc32} shared fingerprint over {s1_message_count} messages)"
+    - "S>=2 fusion on a real clip is registered tightly enough for metric QA ({real_registration_spread_ratio}) with merged objects ({real_object_merge_rate:%}), retained varying depth_conf ({real_depth_conf_variation_rate:%}), sane scale ({real_scale_sanity_rate:%}) and DepthPro-plausible distances ({real_distance_plausibility_rate:%})"
+    - "perspective QA flips with viewpoint ({perspective_flip_accuracy:%}) and correspondences are grounded to objects ({grounded_label_coverage:%}) without breaking the localize round-trip ({localize_roundtrip_rate:%})"
   does_not_establish:
-    - "Downstream VLM fine-tuning quality or benchmark lift from the new QA families (no model is trained or judged here)"
-    - "That perspective QA generalizes beyond the 180-degree-yaw fixture geometry"
+    - "any downstream VLM training gain from the emitted data (no model is trained here)"
+    - "calibration or fusion quality beyond the synthetic fixture and the single real clip measured"
+    - "throughput, cost or memory profile of the fused pipeline"
   not_measured:
-    - "Throughput or latency of the fusion pipeline (wall-clock excluded by design)"
-    - "Acceptance rate of the generated data by a downstream filter or human review"
-  caveat: "create_point_cloud_from_model / calibrate_metric_scale / compute_object_depth_confidence signatures are bound by introspecting the live PR head, so signature drift surfaces as a crash, not a silent proxy"
-  next: "Fine-tune a small VLM on the generated spatial QA and score it on a held-out spatial benchmark to close the loop to model quality"
+    - "dataset-scale acceptance rate and coverage (one real clip, first N sorted frames)"
+    - "wall-clock throughput of the VGGT+DepthPro stack"
+    - "human plausibility of the new QA families"
+  caveat: "The PR's fused real-VGGT path shipped no number (CPU tests verified coerce/back-compat only), so its bars here are derived thresholds on one clip, not published rows."
+  next: "Run the fused pipeline over a multi-clip corpus and fine-tune a VLM on the emitted data to tie calibration to spatial-benchmark gains."
 provenance:
-  metric_answer_within_bar_rate: "maintainer_comment:@smellslikm (keep the CPU-observable bars) + repo bar assert_metric_close in tests/test_metric_calibration.py"
-  localize_roundtrip_rate: "repo contract LOCALIZE_POINT_RE in tests/test_correspondence.py"
-  perspective_flip_accuracy: "repo bar in tests/test_prompts.py (180-degree-yaw flip)"
-  metric_answer_rel_error: "inferred from the PR bar rel_tol=0.05"
-  retired_x10_rel_error: "repo test test_old_x10_fudge_fails_the_same_bar (abs(got-gt) > 0.5*gt)"
-  grounded_label_coverage: "repo fixture in tests/test_correspondence_grounding.py (2 of 3 grounded)"
-  inlier_ratio_mean: "repo fixture in tests/test_correspondence_grounding.py (mean of 0.8 and 0.5)"
-  unusable_extrinsics_accept_rate: "repo test test_parse_extrinsics_rejects_unusable_inputs"
-  real_registration_spread_ratio: "user_guidance (real-GPU arm running VGGT unstubbed at S>=2)"
-  real_object_merge_rate: "user_guidance (multi-view fusion mechanism)"
-  real_depth_conf_variation_rate: "PR description (depth_conf retained and aggregated per object)"
-  real_scale_sanity_rate: "PR description (calibrate_metric_scale with DepthPro metric anchor)"
-  real_distance_plausibility_rate: "repo retired-failure bar abs(got-gt) > 0.5*gt inverted"
-  s1_message_hash_crc32: "PR description (single-image path preserved byte-for-byte)"
-  s1_message_count: "inferred (fingerprint vacuity guard)"
-  fused_new_family_message_count: "user_guidance (new-family outputs on the real clip)"
-  suite: "repo_runner:eval/eval_vqasynth_spatial_quality.py (reviewer's committed script)"
-  compute: "user_guidance (unstubbed VGGT + DepthPro require GPU)"
-  held_constant: "protocol_doc:tests/test_metric_calibration.py + tests/test_prompts.py + tests/test_correspondence_grounding.py"
-  apt_prologue: "user_guidance (libegl1 is an apt library; install libgl1 libegl1 libgomp1 libglib2.0-0 system-side before importing open3d)"
+  baseline: "user_guidance"
+  suite: "repo_file:eval/eval_vqasynth_spatial_quality.ipynb"
+  scorer: "user_guidance"
+  metric_answer_within_bar_rate: "maintainer_comment:@smellslikeml"
+  localize_roundtrip_rate: "repo_file:tests/test_correspondence.py"
+  perspective_flip_accuracy: "repo_file:tests/test_prompts.py"
+  metric_answer_rel_error: "repo_file:tests/test_metric_calibration.py"
+  retired_x10_rel_error: "repo_file:tests/test_metric_calibration.py"
+  grounded_label_coverage: "repo_file:tests/test_correspondence_grounding.py"
+  inlier_ratio_mean: "repo_file:tests/test_correspondence_grounding.py"
+  unusable_extrinsics_accept_rate: "repo_file:tests/test_prompts.py"
+  real_registration_spread_ratio: "user_guidance"
+  real_object_merge_rate: "user_guidance"
+  real_depth_conf_variation_rate: "user_guidance"
+  real_scale_sanity_rate: "user_guidance"
+  real_distance_plausibility_rate: "user_guidance"
+  s1_message_hash_crc32: "user_guidance"
+  s1_message_count: "user_guidance"
+  fused_new_family_message_count: "user_guidance"
+  held_constant: "user_guidance"
+  compute: "user_guidance"
 loop:
   max_iterations: 8
   fix_code: true
