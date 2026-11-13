@@ -20,7 +20,7 @@
 FROM pytorch/pytorch:2.14.0-cuda12.6-cudnn9-runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git curl ca-certificates && \
+        git curl ca-certificates libgl1 libegl1 libgomp1 libglib2.0-0 libusb-1.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu126"
