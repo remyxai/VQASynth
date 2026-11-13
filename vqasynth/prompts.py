@@ -1,28 +1,162 @@
+"""Metric-aware spatial QA generation.
+
+Distance and size predicates consume the per-object point clouds written by
+``vqasynth.scene_fusion``, which are the pinhole unprojection of VGGT's depth
+head. That head is only defined up to scene scale (``expm1`` activation, no
+metric normalization), so raw cloud units are NOT meters — historically hidden
+by a hard-coded ``* 10`` inside ``human_like_distance``.
+
+This module replaces that fudge with per-scene metric calibration: a scale
+factor mapping cloud units to real-world meters, recovered either by
+unprojecting metric depth through the captured intrinsics
+(:func:`unproject_depth_map`) or by anchoring the relative cloud against a
+metric depth source such as DepthPro (:func:`calibrate_metric_scale`; the
+repo's metric convention from ``vqasynth.depth`` is uint16 millimeters /
+PIL ``I;16``). The scale threads through ``PromptGenerator`` so distance and
+size predicates emit meters, and ``human_like_distance`` only formats.
+"""
 import re
 import math
 import random
 import numpy as np
 from itertools import combinations
 from vqasynth.prompt_templates import *
-from vqasynth.scene_fusion import restore_pointclouds
+
+
+def depth_map_to_meters(depth_map):
+    """
+    Coerce a depth-map value to a float array in meters.
+
+    Accepts the encodings this repo writes: float arrays are assumed to
+    already be in meters; uint16 arrays and PIL ``I;16`` images (the
+    ``vqasynth.depth`` DepthPro convention) are millimeter-encoded and get
+    divided by 1000.
+
+    Args:
+        depth_map: array-like (H, W) depth, or a PIL depth image.
+
+    Returns:
+        np.ndarray of shape (H, W), dtype float64, in meters.
+    """
+    depth = np.asarray(depth_map)
+    if depth.dtype == np.uint16:
+        return depth.astype(np.float64) / 1000.0
+    return depth.astype(np.float64)
+
+
+def unproject_depth_map(depth_map, focal_length):
+    """
+    Unproject a depth map through pinhole intrinsics to camera-frame points,
+    in the depth map's own units (meters in, meters out).
+
+    Uses the OpenCV convention (x right, y down, z forward) with the principal
+    point at the image center — the convention of the intrinsics VGGT predicts
+    and ``vqasynth.scene_fusion`` unprojects with. Pixels with non-finite or
+    non-positive depth are dropped.
+
+    Args:
+        depth_map: array-like (H, W) depth in any single unit.
+        focal_length: focal length in pixels, w.r.t. the depth map's grid.
+
+    Returns:
+        np.ndarray of shape (N, 3) points.
+    """
+    depth = np.asarray(depth_map, dtype=np.float64)
+    if depth.ndim != 2:
+        raise ValueError(f"expected a 2D depth map, got shape {depth.shape}")
+    focal_length = float(focal_length)
+    if not math.isfinite(focal_length) or focal_length <= 0:
+        raise ValueError(
+            f"focal_length must be a positive pixel value, got {focal_length}"
+        )
+
+    h, w = depth.shape
+    us, vs = np.meshgrid(np.arange(w), np.arange(h))
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    valid = np.isfinite(depth) & (depth > 0)
+    z = depth[valid]
+    x = (us[valid] - cx) * z / focal_length
+    y = (vs[valid] - cy) * z / focal_length
+    return np.stack([x, y, z], axis=1)
+
+
+def calibrate_metric_scale(relative_depth, metric_depth):
+    """
+    Per-scene scale factor that maps a relative (up-to-scale) depth map onto a
+    metric one.
+
+    VGGT's depth head is scale-ambiguous, so its clouds need an external
+    metric anchor; the repo's is DepthPro (``vqasynth.depth``). The scale is
+    the median per-pixel ratio metric/relative — robust to the outliers and
+    local errors both maps carry, and exact when the two maps differ by a
+    single scalar (the standard relative-to-metric depth alignment).
+
+    Args:
+        relative_depth: (H, W) up-to-scale depth, e.g. VGGT's depth map.
+        metric_depth: (H, W) metric depth in meters, e.g. DepthPro's, in any
+            encoding :func:`depth_map_to_meters` accepts.
+
+    Returns:
+        float: multiply relative-unit distances by this to get meters.
+    """
+    relative = depth_map_to_meters(relative_depth)
+    metric = depth_map_to_meters(metric_depth)
+    if relative.shape != metric.shape:
+        raise ValueError(
+            "depth maps must share a grid to align, got "
+            f"{relative.shape} vs {metric.shape}"
+        )
+    valid = (
+        np.isfinite(relative) & (relative > 0)
+        & np.isfinite(metric) & (metric > 0)
+    )
+    if not valid.any():
+        raise ValueError("no valid overlapping pixels to calibrate metric scale")
+    return float(np.median(metric[valid] / relative[valid]))
+
+
+def _validate_metric_scale(metric_scale):
+    scale = float(metric_scale)
+    if not math.isfinite(scale) or scale <= 0:
+        raise ValueError(
+            f"metric_scale must be finite and positive, got {metric_scale}"
+        )
+    return scale
 
 
 class PromptGenerator:
-
-    def human_like_distance(self, distance_meters, scaling_factor=10):
+    def __init__(self, metric_scale=1.0):
         """
-        Converts a distance in meters to a more human-readable format (e.g., centimeters, feet),
-        with an adaptive scaling factor.
+        Args:
+            metric_scale (float): meters per point-cloud unit for the scenes
+                this generator processes. 1.0 means the clouds are already
+                metric (e.g. unprojected from DepthPro metric depth with
+                ``unproject_depth_map``); otherwise recover it per scene with
+                ``calibrate_metric_scale``. A per-example ``metric_scale``
+                dataset column takes precedence (see ``apply_transform``).
+        """
+        self.default_metric_scale = _validate_metric_scale(metric_scale)
+        self.metric_scale = self.default_metric_scale
+
+    def _metric(self, distance_in_cloud_units):
+        """Convert a raw point-cloud distance to meters via the active scale."""
+        return float(distance_in_cloud_units) * self.metric_scale
+
+    def human_like_distance(self, distance_meters):
+        """
+        Converts a distance in meters to a more human-readable format (e.g., centimeters, feet).
+
+        The input must already be calibrated to real-world meters (see
+        ``_metric`` / ``calibrate_metric_scale``); no unit fudge is applied
+        here.
 
         Args:
             distance_meters (float): The distance in meters.
-            scaling_factor (float): A base scaling factor (default is 20).
 
         Returns:
             str: A string representation of the human-readable distance with units.
         """
-        distance_meters *= scaling_factor
-
         if distance_meters < 1:
             choices = [
                 (
@@ -565,7 +699,9 @@ class PromptGenerator:
         A_center = A[1].get_axis_aligned_bounding_box().get_center()
         B_center = B[1].get_axis_aligned_bounding_box().get_center()
         vertical_distance = abs(A_center[1] - B_center[1])
-        human_readable_dist = self.human_like_distance(vertical_distance)
+        human_readable_dist = self.human_like_distance(
+            self._metric(vertical_distance)
+        )
 
         return self.generate_spatial_reasoning_data(
             A, B, human_readable_dist, template_questions, template_answers
@@ -581,7 +717,9 @@ class PromptGenerator:
             (A_center[0] - B_center[0]) ** 2 + (A_center[2] - B_center[2]) ** 2
         )
 
-        human_readable_dist = self.human_like_distance(horizontal_distance)
+        human_readable_dist = self.human_like_distance(
+            self._metric(horizontal_distance)
+        )
         return self.generate_spatial_reasoning_data(
             A, B, human_readable_dist, template_questions, template_answers
         )
@@ -594,7 +732,7 @@ class PromptGenerator:
 
         width = A[1].get_axis_aligned_bounding_box().get_extent()[0]
 
-        human_readable_width = self.human_like_distance(width)
+        human_readable_width = self.human_like_distance(self._metric(width))
         question_template = random.choice(template_questions)
         answer_template = random.choice(template_answers)
 
@@ -611,15 +749,15 @@ class PromptGenerator:
         template_questions = height_questions
         template_answers = height_answers
 
-        width = A[1].get_axis_aligned_bounding_box().get_extent()[0]
+        height = A[1].get_axis_aligned_bounding_box().get_extent()[1]
 
-        human_readable_width = self.human_like_distance(width)
+        human_readable_height = self.human_like_distance(self._metric(height))
         question_template = random.choice(template_questions)
         answer_template = random.choice(template_answers)
 
         question = question_template.replace("[A]", A_desc)
         answer = answer_template.replace("[A]", A_desc).replace(
-            "[X]", human_readable_width
+            "[X]", human_readable_height
         )
 
         return question + " Answer: " + answer
@@ -1002,7 +1140,7 @@ class PromptGenerator:
                 pair_results.append(prompt_func(A, B))
 
             distance = np.asarray(A[1].compute_point_cloud_distance(B[1])).mean()
-            distance_str = self.human_like_distance(distance)
+            distance_str = self.human_like_distance(self._metric(distance))
 
             for _ in range(5):
                 reasoning_data = self.generate_spatial_reasoning_data(
@@ -1037,7 +1175,34 @@ class PromptGenerator:
 
         return valid_results
 
-    def run(self, captions, pointclouds, is_canonicalized, extrinsics=None):
+    def _resolve_metric_scale(self, example):
+        """
+        Per-example metric scale: the ``metric_scale`` column when present
+        (emitted as a per-row list by scene-fusion-style stages), else this
+        generator's default. Lets a calibration stage anchor each scene
+        without any change to the prompt stage.
+        """
+        value = example.get("metric_scale")
+        if isinstance(value, (list, tuple)):
+            if len(value) != 1:
+                raise ValueError(
+                    f"expected one metric_scale per example, got {len(value)}"
+                )
+            value = value[0]
+        if value is None:
+            return self.default_metric_scale
+        return _validate_metric_scale(value)
+
+    def run(self, captions, pointclouds, is_canonicalized, extrinsics=None, metric_scale=None):
+        # restore_pointclouds (i.e. vqasynth.scene_fusion) pulls in the
+        # VGGT/CUDA stack; importing it here keeps this module usable — and
+        # unit-testable — without it.
+        from vqasynth.scene_fusion import restore_pointclouds
+
+        if metric_scale is not None:
+            self.metric_scale = _validate_metric_scale(metric_scale)
+        else:
+            self.metric_scale = self.default_metric_scale
         pointclouds = restore_pointclouds(pointclouds)
         try:
             objects = list(zip(captions, pointclouds))
@@ -1119,6 +1284,10 @@ class PromptGenerator:
                  "content": [ { "index": None, "text": <prompt>, "type": "text" } ]
 
         If any error occurs for this sample, returns None (and the sample will be dropped).
+
+        Distance/size values are metric: the per-example ``metric_scale``
+        column takes precedence (see ``_resolve_metric_scale``), else the
+        generator's default.
         """
         try:
             # Process a single sample. "extrinsics" is the optional per-frame
@@ -1130,6 +1299,7 @@ class PromptGenerator:
                 example["pointclouds"],
                 example["is_canonicalized"],
                 extrinsics=extrinsics,
+                metric_scale=self._resolve_metric_scale(example),
             )
             random.shuffle(prompts)
             truncated = prompts[:5]
