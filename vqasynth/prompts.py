@@ -16,6 +16,7 @@ PIL ``I;16``). The scale threads through ``PromptGenerator`` so distance and
 size predicates emit meters, and ``human_like_distance`` only formats.
 """
 import re
+import json
 import math
 import random
 import numpy as np
@@ -1259,6 +1260,95 @@ class PromptGenerator:
 
         return messages
 
+    @staticmethod
+    def _scene_scalar(value):
+        """Reduce a surfaced confidence column to one scene-level scalar.
+
+        Accepts a scalar (returned as-is), a list/tuple (mean of its finite
+        entries), or None/garbage (None). Used for scene/frame-level signals like
+        the cross-view ``inlier_ratio`` that apply to the registration as a whole
+        rather than to a single object.
+        """
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)):
+            vals = []
+            for v in value:
+                try:
+                    vals.append(float(v))
+                except (TypeError, ValueError):
+                    continue
+            return round(float(np.mean(vals)), 3) if vals else None
+        try:
+            return round(float(value), 3)
+        except (TypeError, ValueError):
+            return None
+
+    def build_grounded_state(
+        self,
+        captions,
+        pointclouds,
+        extrinsics=None,
+        depth_conf=None,
+        inlier_ratio=None,
+        max_pairs=5,
+    ):
+        """Assemble the compact grounded-scene-state record consumed by
+        :class:`~vqasynth.r1_reasoning.SoftTraceReasoner`.
+
+        Per object: label + intrinsics-calibrated metric center (Phase 1a) +
+        surfaced per-object depth confidence (Phase 1b). Per sampled pair: the
+        calibrated center-to-center distance in meters, carrying the scene's
+        cross-view match reliability (Phase 2c ``inlier_ratio``). Plus the frame
+        count (Phase 2a multi-view). Returned as a JSON string so it is a robust
+        free-form column across the dataset.
+
+        Best-effort by design: any failure yields ``"{}"`` so the teacher falls
+        back to ungrounded tracing (back-compat with single-view / sparse scenes).
+        """
+        # scene_fusion pulls in the VGGT/CUDA stack; import lazily (as run()
+        # does) so this module stays importable/testable without it.
+        try:
+            from vqasynth.scene_fusion import restore_pointclouds
+
+            clouds = restore_pointclouds(pointclouds)
+        except Exception:
+            return "{}"
+        try:
+            n = min(len(captions), len(clouds))
+            scene_ir = self._scene_scalar(inlier_ratio)
+
+            objects, centers = [], []
+            for idx in range(n):
+                try:
+                    center = [round(float(c), 3) for c in clouds[idx].get_center()]
+                except Exception:
+                    center = None
+                centers.append(center)
+                obj = {"label": captions[idx], "center_m": center}
+                dc = depth_conf[idx] if isinstance(depth_conf, (list, tuple)) and idx < len(depth_conf) else None
+                dc = self._scene_scalar(dc) if dc is not None else None
+                if dc is not None:
+                    obj["depth_conf"] = dc
+                objects.append(obj)
+
+            pair_indices = [(i, j) for i in range(n) for j in range(i + 1, n)]
+            random.shuffle(pair_indices)
+            pairs = []
+            for i, j in pair_indices[:max_pairs]:
+                if centers[i] is None or centers[j] is None:
+                    continue
+                dist_m = float(np.linalg.norm(np.asarray(centers[i]) - np.asarray(centers[j])))
+                pair = {"a": captions[i], "b": captions[j], "distance_m": round(dist_m, 3)}
+                if scene_ir is not None:
+                    pair["inlier_ratio"] = scene_ir
+                pairs.append(pair)
+
+            frames = len(extrinsics) if isinstance(extrinsics, (list, tuple)) and extrinsics else 1
+            return json.dumps({"frames": frames, "objects": objects, "pairs": pairs})
+        except Exception:
+            return "{}"
+
     def apply_transform(self, example):
         """
         Process a single example to produce:
@@ -1304,10 +1394,18 @@ class PromptGenerator:
             random.shuffle(prompts)
             truncated = prompts[:5]
             messages = self.create_messages_from_prompts(truncated)
+            grounded_state = self.build_grounded_state(
+                example["captions"],
+                example["pointclouds"],
+                extrinsics=extrinsics,
+                depth_conf=example.get("depth_conf") if isinstance(example, dict) else None,
+                inlier_ratio=example.get("inlier_ratio") if isinstance(example, dict) else None,
+            )
             return {
                 "prompts": prompts,
                 "truncated_prompts": truncated,
-                "messages": messages
+                "messages": messages,
+                "grounded_state": grounded_state,
             }
         except Exception as e:
             print(f"Error processing sample, skipping: {e}")

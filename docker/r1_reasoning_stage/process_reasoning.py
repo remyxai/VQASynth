@@ -2,7 +2,7 @@ import os
 import argparse
 from vqasynth.datasets import Dataloader
 from vqasynth.utils import filter_null
-from vqasynth.r1_reasoning import R1Reasoner
+from vqasynth.r1_reasoning import SoftTraceReasoner
 
 def save_and_push_datasets(dataset, output_dir, target_repo_name, images, dataloader):
     """
@@ -33,7 +33,11 @@ def main(
 ):
     dataloader = Dataloader(output_dir)
 
-    reasoner = R1Reasoner(
+    # Phase 3: SoftTraceReasoner conditions each trace on the grounded_state
+    # column the prompt stage now carries (object metric positions + surfaced
+    # depth_conf / inlier_ratio), propagating calibrated confidence. It degrades
+    # to R1Reasoner behavior for any row lacking a grounded_state record.
+    reasoner = SoftTraceReasoner(
         api_key=api_key,
         model=model,
         image_column=images_column,
