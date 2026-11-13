@@ -41,7 +41,12 @@ def save_and_push_datasets(dataset, output_dir, target_repo_name, images, datalo
     dataloader.save_to_disk(dataset)
     dataloader.push_to_hub(dataset, f"{target_repo_name}_full")
 
-    final_dataset = dataset.select_columns([images, "messages"])
+    keep_columns = [images, "messages"]
+    if "grounded_state" in dataset.column_names:
+        # Phase 3: carry the grounded-scene-state record forward to the
+        # r1_reasoning stage so SoftTraceReasoner can condition traces on it.
+        keep_columns.append("grounded_state")
+    final_dataset = dataset.select_columns(keep_columns)
     dataloader.push_to_hub(final_dataset, target_repo_name)
 
 def main(output_dir, source_repo_id, target_repo_name, images):
