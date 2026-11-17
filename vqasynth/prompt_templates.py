@@ -450,3 +450,114 @@ height_answers = [
     "the [A] is [X] in height.",
     "It is [X].",
 ]
+
+
+# Perspective-taking (egocentric from a named viewpoint)
+# [A]/[B] are the objects as elsewhere; [V] names the viewpoint the relation
+# is judged from (e.g. "camera 2"). Only emitted for multi-view scenes.
+perspective_left_predicate_questions = [
+    "From the [V] viewpoint, is the [A] to the left of the [B]?",
+    "Seen from the [V] viewpoint, does the [A] appear on the left side of the [B]?",
+    "If you were standing at the [V] viewpoint, would the [A] be to the left of the [B]?",
+]
+
+perspective_left_true_responses = [
+    "Yes, from the [V] viewpoint the [A] is to the left of the [B].",
+    "Indeed, seen from the [V] viewpoint, the [A] is positioned on the left side of the [B].",
+    "Correct, from the [V] viewpoint you'll find the [A] to the left of the [B].",
+]
+
+perspective_left_false_responses = [
+    "No, from the [V] viewpoint the [A] is not to the left of the [B].",
+    "In fact, from the [V] viewpoint the [A] is either to the right of or directly aligned with the [B].",
+    "Incorrect, seen from the [V] viewpoint the [A] is not on the left side of the [B].",
+]
+
+perspective_right_predicate_questions = [
+    "From the [V] viewpoint, is the [A] to the right of the [B]?",
+    "Seen from the [V] viewpoint, does the [A] appear on the right side of the [B]?",
+    "If you were standing at the [V] viewpoint, would the [A] be to the right of the [B]?",
+]
+
+perspective_right_true_responses = [
+    "Yes, from the [V] viewpoint the [A] is to the right of the [B].",
+    "Indeed, seen from the [V] viewpoint, the [A] is positioned on the right side of the [B].",
+    "Correct, from the [V] viewpoint you'll find the [A] to the right of the [B].",
+]
+
+perspective_right_false_responses = [
+    "No, from the [V] viewpoint the [A] is not to the right of the [B].",
+    "In fact, from the [V] viewpoint the [A] is either to the left of or directly aligned with the [B].",
+    "Incorrect, seen from the [V] viewpoint the [A] is not on the right side of the [B].",
+]
+
+perspective_front_predicate_questions = [
+    "From the [V] viewpoint, is the [A] in front of the [B]?",
+    "Seen from the [V] viewpoint, is the [A] closer to you than the [B]?",
+    "If you were standing at the [V] viewpoint, would the [A] be in front of the [B]?",
+]
+
+perspective_front_true_responses = [
+    "Yes, from the [V] viewpoint the [A] is in front of the [B].",
+    "Indeed, seen from the [V] viewpoint, the [A] is closer to you than the [B].",
+    "Correct, from the [V] viewpoint the [A] stands in front of the [B].",
+]
+
+perspective_front_false_responses = [
+    "No, from the [V] viewpoint the [A] is not in front of the [B].",
+    "In fact, from the [V] viewpoint the [A] is at the same depth as or further away than the [B].",
+    "Incorrect, seen from the [V] viewpoint the [A] is not closer to you than the [B].",
+]
+
+perspective_behind_predicate_questions = [
+    "From the [V] viewpoint, is the [A] behind the [B]?",
+    "Seen from the [V] viewpoint, is the [A] further away from you than the [B]?",
+    "If you were standing at the [V] viewpoint, would the [A] be behind the [B]?",
+]
+
+perspective_behind_true_responses = [
+    "Yes, from the [V] viewpoint the [A] is behind the [B].",
+    "Indeed, seen from the [V] viewpoint, the [A] is further away from you than the [B].",
+    "Correct, from the [V] viewpoint the [A] lies behind the [B].",
+]
+
+perspective_behind_false_responses = [
+    "No, from the [V] viewpoint the [A] is not behind the [B].",
+    "In fact, from the [V] viewpoint the [A] is at the same depth as or closer than the [B].",
+    "Incorrect, seen from the [V] viewpoint the [A] is not further away than the [B].",
+]
+
+perspective_left_choice_questions = [
+    "From the [V] viewpoint, which is more to the left, the [A] or the [B]?",
+    "Standing at the [V] viewpoint, which appears more on the left side, the [A] or the [B]?",
+    "Between the [A] and the [B], which one looks more to the left from the [V] viewpoint?",
+]
+
+perspective_left_choice_responses = [
+    "From the [V] viewpoint, [X] is more to the left.",
+    "Seen from the [V] viewpoint, [X] appears more on the left side.",
+    "Positioned more to the left from the [V] viewpoint is [X].",
+]
+
+
+# Cross-view / frame-of-reference
+# [V] and [W] name the two reference frames being compared (e.g. "the camera 2
+# view" and "the scene's overall layout" for the egocentric-vs-allocentric
+# comparison). Only emitted for multi-view scenes.
+cross_view_order_questions = [
+    "Does the left-right order of the [A] and the [B] stay the same from the [V] as in the [W]?",
+    "Seen from the [V], do the [A] and the [B] keep the same left-right order as in the [W]?",
+    "Compare the [V] with the [W]: is the [A] on the same side of the [B] in both?",
+]
+
+cross_view_order_true_responses = [
+    "Yes, the [A] stays on the same side of the [B] from the [V] as in the [W].",
+    "Indeed, the left-right order of the [A] and the [B] is the same in the [V] and the [W].",
+    "Correct, the [V] and the [W] agree on the left-right order of the [A] and the [B].",
+]
+
+cross_view_order_false_responses = [
+    "No, the order flips: the [A] switches sides relative to the [B] between the [V] and the [W].",
+    "In fact, the [A] and the [B] swap their left-right order between the [W] and the [V].",
+    "Incorrect, the [V] and the [W] disagree on which of the [A] or the [B] is on the left.",
+]

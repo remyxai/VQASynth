@@ -26,16 +26,22 @@ installed.
 Scope (per the brief — one method shipped, others referenced, not implemented):
   - IN: OpenCV correspondence stage + Molmo <point> QA converter + docker
     stage wrapper + runnable example + structural tests.
-  - OUT: semantic captioning of correspondences (raw SIFT matches carry no
-    object label; the converter accepts a per-match ``caption`` so a downstream
-    Molmo/Florence localizer can supply one — default is "feature"); wiring
-    into the default ``pipelines/spatialvqa.yaml`` chain (it's a standalone
-    multi-view stage with different inputs); the StreamVGGT/PlanarRecon neural
-    backends (cited above).
+  - IN (Phase 2c — semantic grounding): when the localize stage has already
+    run on the example, its per-view object masks/captions ground each match
+    to the object whose mask contains the matched pixel (see
+    ``ground_correspondences``), so QA reads "the chair" instead of "the
+    feature". Matches inside no object keep the back-compat "feature"
+    caption, and the RANSAC inlier ratio is surfaced as the per-example
+    ``inlier_ratio`` view-similarity column (see ``aggregate_correspondences``).
+  - OUT: a nearest-object fallback for points that fall outside every mask
+    (the brief's back-compat rule keeps those at "feature"); wiring into the
+    default ``pipelines/spatialvqa.yaml`` chain (it's a standalone multi-view
+    stage with different inputs); the StreamVGGT/PlanarRecon neural backends
+    (cited above).
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 # Molmo's pointing coordinate space is normalized to [0, 100]; this is what
@@ -157,6 +163,20 @@ class CorrespondenceResult:
                                                 # views are of different scenes).
     backend: str = "sift-bf"
 
+    @property
+    def inlier_ratio(self) -> float:
+        """RANSAC keep rate ``inlier_count / raw_match_count`` in [0, 1].
+
+        View-similarity signal: a low keep rate means most ratio-test matches
+        were geometrically inconsistent (the two views share little scene
+        content). 0.0 when nothing survived the ratio test (division guarded).
+        ``aggregate_correspondences`` surfaces this as the per-example
+        ``inlier_ratio`` column.
+        """
+        if self.raw_match_count <= 0:
+            return 0.0
+        return self.inlier_count / self.raw_match_count
+
     def __repr__(self) -> str:
         # Default dataclass repr would dump every match tuple — fine here, but
         # keep it compact for logs / trace events (cf. DepthResult in
@@ -168,6 +188,98 @@ class CorrespondenceResult:
             f"view_a={self.view_a_size}, view_b={self.view_b_size}, "
             f"has_homography={self.homography is not None})"
         )
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Semantic grounding (localize-stage objects -> match captions)
+# ────────────────────────────────────────────────────────────────────────
+
+def _mask_contains(mask: Any, x: int, y: int) -> bool:
+    """True if integer pixel (x, y) is set in a 2D mask.
+
+    Accepts the numpy (H, W) uint8 masks the localize stage emits or any
+    nested sequence with the same ``[y][x]`` indexing — keeps grounding
+    testable without numpy installed. Out-of-bounds / non-indexable masks
+    simply contain nothing.
+    """
+    if x < 0 or y < 0:
+        return False
+    try:
+        return bool(mask[y][x])
+    except (IndexError, TypeError):
+        return False
+
+
+def ground_point_to_object(
+    point: tuple[float, float],
+    masks: Any,
+    captions: Any,
+) -> str | None:
+    """Return the label of the first mask containing ``point``, else ``None``.
+
+    ``masks`` / ``captions`` are one view's outputs from the localize stage
+    (``Localizer.apply_transform``): a list of (H, W) masks and the aligned
+    list of object labels. Pixel coordinates are rounded to the nearest
+    integer before lookup. Overlapping masks resolve to the first containing
+    one (localize emits masks in caption order).
+    """
+    if not masks or not captions:
+        return None
+    x, y = point
+    xi, yi = int(round(float(x))), int(round(float(y)))
+    for mask, caption in zip(masks, captions):
+        if caption and _mask_contains(mask, xi, yi):
+            return caption
+    return None
+
+
+def ground_correspondences(
+    result: CorrespondenceResult,
+    masks_a: Any = None,
+    captions_a: Any = None,
+    masks_b: Any = None,
+    captions_b: Any = None,
+    default_caption: str = "feature",
+) -> CorrespondenceResult:
+    """Return a copy of ``result`` whose matches carry object labels.
+
+    Each match's source pixel (``pt_a``) is looked up in view A's localize
+    masks; if no object contains it, the destination pixel (``pt_b``) is
+    tried against view B's masks (the same object seen from the other view).
+    Matches inside no object keep ``default_caption`` ("feature") —
+    back-compat with the un-grounded converter. Matches that already carry
+    an explicit non-default caption (e.g. supplied by a downstream
+    localizer) are left untouched. The input result is not mutated.
+    """
+    grounded = []
+    for m in result.matches:
+        caption = m.caption
+        if not caption or caption == default_caption:
+            caption = (
+                ground_point_to_object(m.pt_a, masks_a, captions_a)
+                or ground_point_to_object(m.pt_b, masks_b, captions_b)
+                or default_caption
+            )
+        grounded.append(replace(m, caption=caption))
+    return replace(result, matches=grounded)
+
+
+def _per_view_objects(masks: Any, captions: Any, n_views: int) -> tuple[list, list]:
+    """Align the localize stage's example columns with the clip's views.
+
+    ``Localizer.apply_transform`` (batched / multi-view form) writes
+    ``example["masks"]`` / ``example["captions"]`` with one entry per view,
+    each holding that view's mask list / label list. Anything else — columns
+    absent, or a single-view flat shape that doesn't line up with the views —
+    disables grounding (per-view ``None``) so matches keep the "feature"
+    caption rather than being grounded against the wrong view's objects.
+    """
+    unavailable = ([None] * n_views, [None] * n_views)
+    if masks is None or captions is None or n_views < 2:
+        return unavailable
+    if len(masks) == n_views and len(captions) == n_views:
+        return list(masks), list(captions)
+    return unavailable
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -278,6 +390,27 @@ def correspondences_to_messages(
             "content": [{"index": None, "text": answer, "type": "text"}],
         })
     return messages
+
+
+def aggregate_correspondences(
+    results: list[CorrespondenceResult],
+    max_turns: int | None = None,
+    **kwargs: Any,
+) -> dict:
+    """Fold per-pair results into one dataset-row payload.
+
+    Returns ``{"messages": [...], "inlier_ratio": float}`` — the keys
+    :meth:`CorrespondenceExtractor.apply_transform` writes onto the example:
+    ``messages`` is the multi-turn conversation assembled across all
+    adjacent view pairs, ``inlier_ratio`` the mean RANSAC keep rate across
+    those pairs (0.0 when there are none). Kept pure so the emitted row
+    shape — including the view-similarity scalar — is testable without cv2.
+    """
+    messages: list[dict] = []
+    for result in results:
+        messages.extend(correspondences_to_messages(result, max_turns=max_turns, **kwargs))
+    ratio = sum(r.inlier_ratio for r in results) / len(results) if results else 0.0
+    return {"messages": messages, "inlier_ratio": ratio}
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -477,7 +610,13 @@ class CorrespondenceExtractor:
         )
 
     # -- HF datasets integration ----------------------------------------
-    def apply_transform(self, example: dict, images: str) -> dict:
+    def apply_transform(
+        self,
+        example: dict,
+        images: str,
+        masks: str = "masks",
+        captions: str = "captions",
+    ) -> dict:
         """``datasets.map`` transform: pair adjacent views, emit QA messages.
 
         Treats ``example[images]`` as a list of PIL images — the natural shape
@@ -485,17 +624,34 @@ class CorrespondenceExtractor:
         pairs ``(v_i, v_{i+1})`` are matched; their correspondences are folded
         into a single multi-turn conversation on ``example["messages"]``.
 
+        When the localize stage has already run on the same example, its
+        per-view outputs (``example[masks]`` / ``example[captions]``, one
+        entry per view) ground each match to the object whose mask contains
+        the matched pixel — see :func:`ground_correspondences`. The mean
+        RANSAC keep rate across pairs is surfaced as the
+        ``example["inlier_ratio"]`` view-similarity column.
+
         A single image (no list) is a no-op that yields no correspondences —
         correspondences require at least two views by definition.
         """
         views = self._coerce_views(example.get(images))
-        all_messages: list[dict] = []
+        masks_per_view, captions_per_view = _per_view_objects(
+            example.get(masks), example.get(captions), len(views)
+        )
+        results = []
         for i in range(len(views) - 1):
             result = self.extract(views[i], views[i + 1])
-            all_messages.extend(
-                correspondences_to_messages(result, max_turns=8)
+            result = ground_correspondences(
+                result,
+                masks_a=masks_per_view[i],
+                captions_a=captions_per_view[i],
+                masks_b=masks_per_view[i + 1],
+                captions_b=captions_per_view[i + 1],
             )
-        example["messages"] = all_messages
+            results.append(result)
+        row = aggregate_correspondences(results, max_turns=8)
+        example["messages"] = row["messages"]
+        example["inlier_ratio"] = row["inlier_ratio"]
         return example
 
     @staticmethod
@@ -535,4 +691,7 @@ __all__ = [
     "build_qa_message",
     "correspondences_to_point_qa",
     "correspondences_to_messages",
+    "aggregate_correspondences",
+    "ground_point_to_object",
+    "ground_correspondences",
 ]
