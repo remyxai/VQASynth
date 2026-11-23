@@ -3,6 +3,7 @@ import math
 import random
 import numpy as np
 from itertools import combinations
+from vqasynth.camera_relations import camera_relation_prompts
 from vqasynth.prompt_templates import *
 from vqasynth.scene_fusion import restore_pointclouds
 
@@ -726,7 +727,7 @@ class PromptGenerator:
 
         return valid_results
 
-    def run(self, captions, pointclouds, is_canonicalized):
+    def run(self, captions, pointclouds, is_canonicalized, orientations=None):
         pointclouds = restore_pointclouds(pointclouds)
         try:
             objects = list(zip(captions, pointclouds))
@@ -740,6 +741,10 @@ class PromptGenerator:
             selected_pairs = all_pairs[:5]
             object_pairs = [(objects[i], objects[j]) for i, j in selected_pairs]
             prompts = self.evaluate_predicates_on_pairs(object_pairs, is_canonicalized)
+            # Camera-object relation QA (viewpoint / shot / orientation) —
+            # appended after the numeric-distance filter, which would
+            # otherwise drop these categorical answers. See camera_relations.
+            prompts += camera_relation_prompts(captions, pointclouds, orientations)
         except:
             prompts = []
         return prompts
@@ -808,8 +813,15 @@ class PromptGenerator:
         If any error occurs for this sample, returns None (and the sample will be dropped).
         """
         try:
-            # Process a single sample.
-            prompts = self.run(example["captions"], example["pointclouds"], example["is_canonicalized"])
+            # Process a single sample. The orientation column (from the
+            # vqasynth.orientation stage) is optional — camera viewpoint /
+            # shot QA needs only the point clouds.
+            prompts = self.run(
+                example["captions"],
+                example["pointclouds"],
+                example["is_canonicalized"],
+                orientations=example.get("orientation"),
+            )
             random.shuffle(prompts)
             truncated = prompts[:5]
             messages = self.create_messages_from_prompts(truncated)
